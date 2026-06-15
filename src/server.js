@@ -564,6 +564,29 @@ function translateResponsesRequestToChatCompletions(body) {
           tool_call_id: item.call_id || "",
           content: item.output || "",
         });
+      } else if (item.type === "reasoning") {
+        // Convert reasoning input item to system message for upstream context
+        const reasoningParts = [];
+        if (Array.isArray(item.content)) {
+          for (const part of item.content) {
+            if (part.type === "reasoning_text" && part.text) {
+              reasoningParts.push(part.text);
+            }
+          }
+        }
+        if (Array.isArray(item.summary)) {
+          for (const part of item.summary) {
+            if (part.type === "summary_text" && part.text) {
+              reasoningParts.push(part.text);
+            }
+          }
+        }
+        if (reasoningParts.length > 0) {
+          messages.push({
+            role: "system",
+            content: `[Previous reasoning] ${reasoningParts.join("\n")}`,
+          });
+        }
       } else if (item.role === "user" || item.role === "assistant" || item.role === "system" || item.role === "developer") {
         // Message-style input items
         const role = item.role === "developer" ? "system" : item.role;
@@ -636,6 +659,7 @@ function buildInitialResponse(requestBody) {
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
     status: "in_progress",
+    incomplete_details: null,
     model: MODEL_NAME_OVERRIDE || requestBody?.model || "unknown",
     instructions: requestBody?.instructions || null,
     output: [],
@@ -643,6 +667,10 @@ function buildInitialResponse(requestBody) {
     tool_choice: requestBody?.tool_choice || "auto",
     tools: requestBody?.tools || [],
     metadata: requestBody?.metadata || {},
+    max_output_tokens: requestBody?.max_output_tokens || null,
+    temperature: requestBody?.temperature ?? null,
+    top_p: requestBody?.top_p ?? null,
+    previous_response_id: requestBody?.previous_response_id || null,
   };
 }
 
@@ -668,6 +696,8 @@ function createChatToResponsesTransform(requestBody) {
   let textContent = "";
   let reasoningContent = "";
   let currentReasoningId = "";
+  let upstreamUsage = null;
+  let finishReason = null;
   let started = false;
   let currentOutputItemType = null; // "message", "reasoning", or "function_call"
 
@@ -754,6 +784,7 @@ function createChatToResponsesTransform(requestBody) {
           role: "assistant",
           content: [{ type: "output_text", text: textContent, annotations: [] }],
           status: "completed",
+          phase: "final_answer",
         });
 
         finalEvents.push({
@@ -802,8 +833,25 @@ function createChatToResponsesTransform(requestBody) {
     }
 
     // response.completed
-    responseObj.status = "completed";
+    if (finishReason === "length") {
+      responseObj.status = "incomplete";
+      responseObj.incomplete_details = { reason: "max_output_tokens" };
+    } else if (finishReason === "content_filter") {
+      responseObj.status = "incomplete";
+      responseObj.incomplete_details = { reason: "content_filter" };
+    } else {
+      responseObj.status = "completed";
+    }
     responseObj.completed_at = Math.floor(Date.now() / 1000);
+    if (upstreamUsage) {
+      responseObj.usage = {
+        input_tokens: upstreamUsage.prompt_tokens || 0,
+        output_tokens: upstreamUsage.completion_tokens || 0,
+        total_tokens: upstreamUsage.total_tokens || 0,
+        input_tokens_details: { cached_tokens: upstreamUsage.prompt_tokens_details?.cached_tokens || 0 },
+        output_tokens_details: { reasoning_tokens: upstreamUsage.reasoning_tokens || upstreamUsage.completion_tokens_details?.reasoning_tokens || 0 },
+      };
+    }
 
     finalEvents.push({
       event: "response.completed",
@@ -857,7 +905,15 @@ function createChatToResponsesTransform(requestBody) {
 
     const choice = parsed.choices[0];
     const delta = choice.delta || {};
-    const finishReason = choice.finish_reason;
+    const chunkFinishReason = choice.finish_reason;
+    if (chunkFinishReason) {
+      finishReason = chunkFinishReason;
+    }
+
+    // Capture usage from the final chunk (choices may be empty)
+    if (parsed.usage) {
+      upstreamUsage = parsed.usage;
+    }
 
     if (process.env.DEBUG_SSE === "1") {
       const hasContent = delta.content != null && delta.content !== "";
@@ -936,7 +992,7 @@ function createChatToResponsesTransform(requestBody) {
               currentFunctionCallArguments = "";
             }
 
-            currentFunctionCallId = tc.id || randomUUID();
+            currentFunctionCallId = tc.id || `call_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
             currentFunctionCallName = tc.function.name;
             currentFunctionCallArguments = "";
             currentOutputItemType = "function_call";
@@ -1192,6 +1248,7 @@ function createChatToResponsesTransform(requestBody) {
               role: "assistant",
               content: [],
               status: "in_progress",
+              phase: "final_answer",
             },
             sequence_number: nextSeq(),
           },
@@ -1229,7 +1286,7 @@ function createChatToResponsesTransform(requestBody) {
     // we'll close them on [DONE] to ensure we have the complete content.
     // We do, however, want to emit any pending close events if the stream
     // ends abruptly (no [DONE]) — that's handled by the flush logic.
-    void finishReason;
+    // finishReason captured above, used in emitCompletedResponse
 
     if (process.env.DEBUG_SSE === "1" && events.length > 0) {
       for (const e of events) {
@@ -1333,6 +1390,7 @@ function createChatToResponsesTransform(requestBody) {
             role: "assistant",
             content: [{ type: "output_text", text: textContent, annotations: [] }],
             status: "completed",
+            phase: "final_answer",
           });
 
           events.push({
