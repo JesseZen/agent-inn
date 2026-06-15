@@ -784,3 +784,132 @@ test("chat_completions mode: image_generation tools are still filtered", async (
   assert.equal(forwardedBody.tools.length, 1);
   assert.equal(forwardedBody.tools[0].function.name, "keep_me");
 });
+
+test("chat_completions mode: reasoning input item converted to system message", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-proxy-test-"));
+  const upstream = await startChatCompletionsMockUpstream({ textChunks: ["Done"] });
+  const configPath = await createTempConfig(tempDir);
+  const proxyPort = 21020;
+  const proxy = await startProxy({
+    baseUrl: upstream.url,
+    configPath,
+    port: proxyPort,
+    extraEnv: { API_FORMAT: "chat_completions" },
+  });
+
+  t.after(async () => {
+    await proxy.stop();
+    await upstream.close();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/responses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      stream: true,
+      input: [
+        { role: "user", content: "What is 2+2?" },
+        { type: "reasoning", id: "rs_abc", content: [{ type: "reasoning_text", text: "I need to add 2 and 2" }], summary: [] },
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "4" }] },
+        { role: "user", content: "And 3+3?" },
+      ],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const forwardedBody = JSON.parse(upstream.requests[0].bodyText);
+  // Should have: user, system (reasoning), assistant, user
+  const roles = forwardedBody.messages.map((m) => m.role);
+  assert.deepEqual(roles, ["user", "system", "assistant", "user"]);
+  // Reasoning should be a system message with prefix
+  const reasoningMsg = forwardedBody.messages[1];
+  assert.equal(reasoningMsg.role, "system");
+  assert.ok(reasoningMsg.content.startsWith("[Previous reasoning]"));
+  assert.ok(reasoningMsg.content.includes("I need to add 2 and 2"));
+});
+
+test("chat_completions mode: message output includes phase field", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-proxy-test-"));
+  const upstream = await startChatCompletionsMockUpstream({ textChunks: ["Hello"] });
+  const configPath = await createTempConfig(tempDir);
+  const proxyPort = 21021;
+  const proxy = await startProxy({
+    baseUrl: upstream.url,
+    configPath,
+    port: proxyPort,
+    extraEnv: { API_FORMAT: "chat_completions" },
+  });
+
+  t.after(async () => {
+    await proxy.stop();
+    await upstream.close();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/responses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      input: "Say hello",
+      stream: true,
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const events = parseSSE(await response.text());
+
+  // Check output_item.added has phase
+  const itemAdded = events.find((e) => e.event === "response.output_item.added");
+  assert.equal(itemAdded.data.item.phase, "final_answer");
+
+  // Check response.completed output has phase
+  const completed = events.find((e) => e.event === "response.completed");
+  assert.equal(completed.data.response.output[0].phase, "final_answer");
+});
+
+test("chat_completions mode: buildInitialResponse includes extra fields", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-proxy-test-"));
+  const upstream = await startChatCompletionsMockUpstream({ textChunks: ["Hi"] });
+  const configPath = await createTempConfig(tempDir);
+  const proxyPort = 21022;
+  const proxy = await startProxy({
+    baseUrl: upstream.url,
+    configPath,
+    port: proxyPort,
+    extraEnv: { API_FORMAT: "chat_completions" },
+  });
+
+  t.after(async () => {
+    await proxy.stop();
+    await upstream.close();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/responses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      input: "hi",
+      stream: true,
+      max_output_tokens: 1024,
+      temperature: 0.7,
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const events = parseSSE(await response.text());
+  const created = events.find((e) => e.event === "response.created");
+
+  // Check initial response has the extra fields
+  assert.equal(created.data.response.max_output_tokens, 1024);
+  assert.equal(created.data.response.temperature, 0.7);
+  assert.equal(created.data.response.incomplete_details, null);
+  assert.equal(created.data.response.previous_response_id, null);
+});
