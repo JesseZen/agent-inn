@@ -1,301 +1,190 @@
 # codex-app-proxy
 
-给 Codex App 用的本地代理：
+**English** | [中文](translations/zh-CN/README.md)
 
-`Codex App -> http://127.0.0.1:8787 -> 你的中转站 API`
+A local proxy manager for Codex App. A single binary launches Manager + Workers + TUI.
 
-它主要做几件事：
+## Architecture
 
-- 把请求转发到 `BASE_URL`
-- 过滤 JSON 请求里 `tools` 中的 `image_generation`
-- 如果 `tool_choice` 明确指定了 `image_generation`，改成 `auto`
-- 支持 Chat Completions API 到 Responses API 的自动转译（`API_FORMAT=chat_completions`）
-- 支持用 `ACTIVE_PROVIDER` 切换 `.env.<provider>` 配置
-- 启动时把 `~/.codex/config.toml` 里当前 `model_provider` 的 `base_url` 改成本地代理地址
-- 退出时把 `base_url` 改回去
-- 可以打包成一个本地 macOS app，方便直接启动
+```
+Codex App / CLI
+      │
+      ▼
+┌──────────┐
+│  Worker   │  ← Listens on a local port, forwards requests to upstream
+│  (proxy)  │  ← Filters image_generation, Chat Completions translation, etc.
+└──────────┘
+      │
+      ▼
+┌──────────┐
+│ Upstream  │  ← Upstream API service (OpenAI, OpenRouter, Groq, etc.)
+└──────────┘
 
-## 启动
+┌──────────┐
+│ Manager   │  ← Manages Worker lifecycle, exposes HTTP API + SSE event stream
+│           │  ← TUI communicates with Manager via API
+└──────────┘
+      │
+      ▼
+┌──────────┐
+│   TUI     │  ← OpenTUI (SolidJS) terminal interface
+│ (OpenTUI/TS)  │  ← Conversational interaction, type / to trigger commands
+└──────────┘
+```
 
-需要 Node 20+。Node 18/22/25 也可以。
+### Core Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Manager** | Central manager — starts/stops Workers, provides HTTP API, TUI connects to it |
+| **Worker** | A local proxy process listening on a port, forwarding requests to a specified Upstream |
+| **Upstream** | Upstream API service config (base_url, api_key, api_format) |
+| **Module** | Worker feature modules: `config_patch` (auto-modify Codex config), `image_filter` (filter image generation), `api_translate` (Chat Completions translation) |
+
+Each Worker is bound to one Upstream. You can run multiple Workers pointing to different Upstreams on different ports simultaneously.
+
+## Build & Run
+
+### Prerequisites
+
+- Go 1.26+
+- Bun 1.2+ (for TUI)
+
+### Build
 
 ```bash
-cp .env.example .env
-npm start
+go build -o codex-proxy .
 ```
 
-程序启动时会自动读取当前目录下的 `.env`，不需要手动 `export`。
-
-## 多服务商切换
-
-比较省事的方式是这样分：
-
-- `.env` 放公共配置和当前选中的 `ACTIVE_PROVIDER`
-- `.env.<provider>` 放每个服务商自己的 `BASE_URL` / `API_KEY`
-
-示例：
-
-`.env`
+### Configuration
 
 ```bash
-PORT=8787
-CODEX_CONFIG_PATH=~/.codex/config.toml
-ACTIVE_PROVIDER=openrouter
+cp config.example.yaml config.yaml
+# Edit config.yaml to set workers and providers
+# API keys are referenced via environment variables: api_key_ref: ${OPENAI_API_KEY}
 ```
-
-`.env.openrouter`
 
 ```bash
-BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-xxx
+# Export your API keys
+export OPENAI_API_KEY=sk-xxx
+export OPENROUTER_API_KEY=sk-or-xxx
 ```
 
-`.env.openai`
+### Run
 
 ```bash
-BASE_URL=https://api.openai.com/v1
-API_KEY=sk-xxx
+./codex-proxy --config config.yaml
 ```
 
-启动时会先看 `.env` 里的 `ACTIVE_PROVIDER`，再加载对应的 `.env.<provider>`。
+This single command starts the Manager → starts all Workers → starts the TUI.
 
-如果只是切换 provider，改这一项就够了：
+### Development Mode (Frontend/Backend Separated)
 
 ```bash
-ACTIVE_PROVIDER=openai
+# Terminal 1: Backend only
+./codex-proxy --config config.yaml --manager-port 8080 &
+
+# Terminal 2: TUI with hot reload
+cd tui && bun install
+CODEX_PROXY_URL=http://localhost:8080 bun run dev
 ```
 
-加载优先级如下：
+## TUI Operations
 
-1. shell 里显式传入的环境变量
-2. `.env.<ACTIVE_PROVIDER>`
-3. `.env`
+After launching, you'll see an empty screen with an input bar at the bottom. Type `/` to open the command selector with fuzzy search.
 
-所以命令行里临时传的值优先级最高。
+### Command List
 
-## 运行时热切换 Provider
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `/help` | | Show all commands |
+| `/status` | | View Workers, Upstreams, and config status |
+| `/config` | `/settings` | Modify config (select category → object → field → change value) |
+| `/new` | | Create a new Worker |
+| `/switch` | | Switch a Worker's Upstream |
+| `/restart` | | Restart a Worker |
+| `/stop` | | Stop a Worker |
+| `/logs` | | View Worker logs |
+| `/stream` | | Toggle SSE event stream panel |
+| `/clear` | | Clear screen |
+| `/exit` | `/quit` `:q` `:wq` | Exit |
 
-不用重启代理就能切换上游 provider。代理启动后，发一个 HTTP 请求即可：
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+C` | Clear input; press twice to exit |
+| `Shift+Enter` | New line in input |
+| `↑` `↓` | List navigation |
+| `Enter` | Confirm selection |
+| `Esc` | Cancel/Go back |
+
+## Configuration File Format
+
+```yaml
+# Log directory
+defaults:
+  log_dir: ~/.codex-proxy/logs
+
+# Worker definitions
+workers:
+  codex-app:              # Worker name
+    port: 6767            # Local listen port
+    provider: joycode     # Bound Upstream
+    modules:
+      config_patch:       # Auto-modify ~/.codex/config.toml
+        enabled: true
+        config_path: ~/.codex/config.toml
+      image_filter:       # Filter image_generation tool
+        enabled: true
+      api_translate:      # Chat Completions ↔ Responses API translation
+        enabled: true
+
+# Upstream definitions
+providers:
+  joycode:
+    base_url: https://api.joycode.dev/v1
+    api_key_ref: ${JOYCODE_API_KEY}   # Reference environment variable
+    api_format: chat_completions       # Requires Chat Completions translation
+
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_ref: ${OPENROUTER_API_KEY}
+    api_format: chat_completions
+
+  openai:
+    base_url: https://openapi.com/v1
+    api_key_ref: ${OPENAI_API_KEY}     # No api_format = native Responses API passthrough
+```
+
+Leaving `api_format` empty or unset = native passthrough, no translation.
+
+## Testing
 
 ```bash
-# 查看当前 provider 状态
-curl http://127.0.0.1:8787/_proxy/status
+# Go backend
+go test ./...
 
-# 切换到 openai（自动读 .env.openai 里的 BASE_URL / API_KEY / API_FORMAT）
-curl -X POST http://127.0.0.1:8787/_proxy/switch \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"openai"}'
+# TUI
+cd tui && bun test
 
-# 切换到 openrouter
-curl -X POST http://127.0.0.1:8787/_proxy/switch \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"openrouter"}'
+# Type checking
+cd tui && bun run typecheck
 ```
 
-切换后下一个请求立即走新 provider，正在进行的请求不受影响。
-
-`/_proxy/switch` 的行为：
-
-1. 读 `.env.<provider>` 里的 `BASE_URL`、`API_KEY`、`API_FORMAT`、`MODEL_NAME`
-2. 验证 `BASE_URL` 存在，否则返回 400
-3. 更新内存中的配置，不发重启
-4. 返回切换前后的配置对比
-
-管理端点列表：
-
-| 路径 | 方法 | 说明 |
-|------|------|------|
-| `/_proxy/status` | GET | 返回当前 provider 配置（`baseUrl`、`apiFormat`、`activeProvider` 等） |
-| `/_proxy/switch` | POST | 热切换 provider，body: `{"provider":"<name>"}` |
-
-## 命令行快捷启动
-
-除了手改 `.env`，也可以直接按 provider 启动：
+## Other Subcommands
 
 ```bash
-npm run start:openai
-npm run start:openrouter
-npm run start:groq
+./codex-proxy version           # Show version
+./codex-proxy worker ...        # Worker process (auto-started by Manager, no need to run manually)
 ```
 
-如果你想临时用任意名字，也可以：
+## License
 
-```bash
-npm run start:provider -- openai
-npm run start:provider -- myrelay
-```
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
-第二个例子会去读：
+## Attribution
 
-```bash
-.env.myrelay
-```
+This project is a customized fork of [opencode](https://github.com/anomalyco/opencode) by [anomalyco](https://github.com/anomalyco), used under the [MIT License](https://github.com/anomalyco/opencode/blob/main/LICENSE).
 
-也可以完全不用 `.env`，直接传：
-
-```bash
-PORT=8787 \
-BASE_URL=https://your-relay.example.com \
-npm start
-```
-
-如果你的中转站要求固定 key，再额外设置：
-
-```bash
-API_KEY=sk-xxx
-```
-
-代理会用 `Bearer <API_KEY>` 覆盖客户端传来的 `Authorization`。
-
-如果同时设置了 `ACTIVE_PROVIDER` 和 `.env.<provider>`，`API_KEY` / `BASE_URL` 会优先取 provider 文件里的值。只有你在 shell 里再次显式传入，才会覆盖它们。
-
-## Chat Completions 适配
-
-如果你的上游只支持 OpenAI Chat Completions API（`/v1/chat/completions`），不支持 Responses API（`/v1/responses`），Codex App 会报错：
-
-```
-stream disconnected before completion: stream closed before response.completed
-```
-
-在 `.env.<provider>` 里加一行就行：
-
-```bash
-API_FORMAT=chat_completions
-```
-
-代理会自动做这些转译：
-
-- 请求路径：`/v1/responses` → `/v1/chat/completions`
-- 请求体：`input` → `messages`，`instructions` → `system` 消息，`tools` 格式转换
-- 响应 SSE：Chat Completions 的 `data:` + `[DONE]` → Responses API 的 `event: response.xxx` + `response.completed`
-- Tool call：Chat Completions 的 `delta.tool_calls` → Responses API 的 `function_call` 事件
-
-适用场景举例：
-
-| Provider | 需要 `API_FORMAT=chat_completions`？ |
-|----------|-------------------------------------|
-| OpenAI | ❌ 原生支持 Responses API |
-| OpenRouter | ❌ 原生支持 |
-| Groq | ✅ 只支持 Chat Completions |
-| JoyCode | ✅ 只支持 Chat Completions |
-| 其他 Chat-only 中转 | ✅ |
-
-原生支持 Responses API 的 provider 不需要设这个，代理会直接透明转发。
-
-## Codex 配置
-
-代理会自动修改 `~/.codex/config.toml` 里当前 `model_provider` 对应 section 的 `base_url`。
-
-如果你的上游地址本身带前缀，比如 `/v1`，那就把 `BASE_URL` 也写成带前缀的完整地址：
-
-```bash
-BASE_URL=https://your-relay.example.com/v1
-```
-
-代理会保留原始请求路径和 query string，再拼到这个 base URL 后面。
-
-默认配置文件路径是 `~/.codex/config.toml`。如果你想指定别的路径，可以设置：
-
-```bash
-CODEX_CONFIG_PATH=/path/to/config.toml
-```
-
-现在这套做法会改两项配置：
-
-- 启动时把 `base_url` 注入成 `http://127.0.0.1:PORT`
-- 如果设置了 `API_KEY`，也会把 `experimental_bearer_token` 改成同一个值
-
-正常退出时，这两项都会恢复。
-
-如果进程被强制杀掉，比如 `kill -9`，退出钩子来不及执行，`base_url` 和 `experimental_bearer_token` 都可能残留在 `config.toml` 里。这不是远端泄露，但算本机残留风险。
-
-## macOS App
-
-可以把代理编译成一个本地 app：
-
-```bash
-npm run build:app
-```
-
-生成位置：
-
-```text
-~/Applications/Codex App Proxy.app
-```
-
-之后可以直接用 Spotlight 搜 `Codex App Proxy` 启动。
-
-当前这个 app 的行为很直接：
-
-- 打开 app，会弹出一个 Terminal 窗口
-- Terminal 会 `cd` 到项目目录，然后执行 `/opt/homebrew/bin/node src/server.js`
-- 关掉这个 Terminal 窗口，就等于停止代理
-
-日志文件在：
-
-```text
-~/Library/Logs/codex-app-proxy.log
-```
-
-## 测试
-
-仓库里带了最小回归测试，直接跑：
-
-```bash
-npm test
-```
-
-覆盖点包括：
-
-- `image_generation` 会从 JSON body 的 `tools` 里被过滤掉
-- `tool_choice` 指向 `image_generation` 时会被改成 `auto`
-- `PATCH` / `PUT` 这类带 body 的非 `POST` 请求不会丢 body
-- 压缩过的 JSON body 因为没法安全过滤，会返回 `415`
-- 上游流式响应可以正常回传
-- Chat Completions 模式下请求体和路径会正确转译
-- Chat Completions SSE 流会转译成 Responses API 格式，包含 `response.completed`
-- Tool call 会正确转译（请求和响应双向）
-- 非 `/v1/responses` 路径不受 Chat Completions 模式影响
-- `image_generation` 过滤在 Chat Completions 模式下依然生效
-- `/_proxy/status` 返回当前 provider 配置
-- `/_proxy/switch` 热切换 provider，请求立即走新上游
-- `/_proxy/switch` 对无效 provider 名、缺少 BASE_URL 返回 400
-
-## mock 压测
-
-压测不会打真实上游 API。流程是：
-
-- 本地起一个 mock upstream
-- 本地起当前 proxy
-- 先测直连 mock upstream
-- 再测通过 proxy 转发到同一个 mock upstream
-
-直接跑：
-
-```bash
-npm run bench
-```
-
-默认输出：
-
-- `direct-upstream` 和 `via-proxy` 两组结果
-- 每组的总耗时、RPS、`p50/p95/p99/max` 延迟
-- proxy 相对直连的额外开销
-
-常用调参方式：
-
-```bash
-BENCH_REQUESTS=1000 \
-BENCH_CONCURRENCY=100 \
-BENCH_BODY_BYTES=65536 \
-npm run bench
-```
-
-可用环境变量：
-
-- `BENCH_REQUESTS`：总请求数，默认 `400`
-- `BENCH_CONCURRENCY`：并发数，默认 `40`
-- `BENCH_BODY_BYTES`：请求 JSON 里 `input` 的填充大小，默认 `32768`
-- `BENCH_UPSTREAM_DELAY_MS`：mock upstream 每次响应前额外 sleep 多久，默认 `0`
-- `BENCH_RESPONSE_BYTES`：mock upstream 返回体大小，默认 `256`
-- `BENCH_PROXY_PORT`：proxy 压测时监听端口，默认 `21100`
+The original opencode source code has been modified to serve as a local proxy manager for Codex App.

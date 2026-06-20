@@ -1,16 +1,21 @@
-# Environment files
-.env
-.env.*
-!.env.example
-!.env.openai.example
-!.env.openrouter.example
-!.env.groq.example
+# Go binary
+codex-proxy
+*.exe
+
+# Environment files with secrets
+.env*
+!.env*.example
+
+# Claude session & reference
+.claude/
+.ref/
+
+# Internal dev docs (kept local only)
+docs/
 
 # Dependencies
 node_modules/
 
-# OS files
+# OS / editor
 .DS_Store
-
-# Editor
 *.swp

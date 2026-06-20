@@ -1,0 +1,8 @@
+{
+  "name": "@codex-proxy/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./audio/*": "./src/assets/audio/*"
+  }
+}

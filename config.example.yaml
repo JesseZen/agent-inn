@@ -1,0 +1,52 @@
+defaults:
+    log_dir: ~/.codex-proxy/logs
+workers:
+    cli-groq:
+        port: 11200
+        provider: groq
+        log_level: simple
+        modules:
+            api_translate:
+                enabled: true
+            image_filter:
+                enabled: false
+    cli-openrouter:
+        port: 11199
+        provider: openrouter
+        log_level: simple
+        modules:
+            api_translate:
+                enabled: true
+            image_filter:
+                enabled: true
+    codex-app:
+        port: 6767
+        provider: joycode
+        log_level: simple
+        modules:
+            api_translate:
+                enabled: true
+            config_patch:
+                enabled: true
+                config_path: ~/.codex/config.toml
+            image_filter:
+                enabled: true
+providers:
+    custom:
+        base_url: ""
+        api_key_ref: ""
+    groq:
+        base_url: https://api.groq.com/openai/v1
+        api_key_ref: ${GROQ_API_KEY}
+        api_format: chat_completions
+    joycode:
+        base_url: https://api.joycode.dev/v1
+        api_key_ref: ${JOYCODE_API_KEY}
+        api_format: chat_completions
+    openai:
+        base_url: https://api.openai.com/v1
+        api_key_ref: ${OPENAI_API_KEY}
+    openrouter:
+        base_url: https://openrouter.ai/api/v1
+        api_key_ref: ${OPENROUTER_API_KEY}
+        api_format: chat_completions

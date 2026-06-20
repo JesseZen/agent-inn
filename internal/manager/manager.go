@@ -1,0 +1,962 @@
+package manager
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/codex-app-proxy/internal/logging"
+	"github.com/jesse/codex-app-proxy/internal/module"
+	"github.com/jesse/codex-app-proxy/internal/provider"
+)
+
+type Config struct {
+	Config        config.Config
+	ConfigPath    string
+	ConfigStatus  config.Status
+	Executable    string
+	Starter       Starter
+	HealthChecker HealthChecker
+	WorkerClient  WorkerClient
+}
+
+type Manager struct {
+	mu                 sync.RWMutex
+	config             config.Config
+	configPath         string
+	configStatus       config.Status
+	executable         string
+	starter            Starter
+	healthChecker      HealthChecker
+	workerClient       WorkerClient
+	clock              func() time.Time
+	healthWait         time.Duration
+	healthPoll         time.Duration
+	store              *config.Store
+	stopConfigWriter   func()
+	events             *eventBus
+	processes          map[string]ManagedProcess
+	statuses           map[string]string
+	retries            map[string]int
+	healthySince       map[string]time.Time
+	generations        map[string]int
+	logs               map[string]*logging.WorkerLogSink
+	configPatchStates  map[string]string
+	configPatchDetails map[string]map[string]string
+}
+
+type WorkerSummary struct {
+	Name               string                         `json:"name"`
+	Port               int                            `json:"port"`
+	Role               string                         `json:"role"`
+	Provider           provider.RedactedProvider      `json:"provider"`
+	Status             string                         `json:"status"`
+	SnapshotGeneration int                            `json:"snapshot_generation"`
+	LogLevel           string                         `json:"log_level"`
+	Modules            map[string]config.ModuleConfig `json:"modules,omitempty"`
+}
+
+type Starter interface {
+	Start(spawn WorkerSpawn) (ManagedProcess, error)
+}
+
+type ManagedProcess interface {
+	Stop() error
+}
+
+type forcedStopReporter interface {
+	ForcedStop() bool
+}
+
+type HealthChecker interface {
+	Check(port int) bool
+}
+
+type WorkerClient interface {
+	ToggleModule(port int, moduleName string) error
+	PatchModule(port int, moduleName string, cfg config.ModuleConfig) error
+	SwitchProvider(port int, runtime provider.RuntimeProvider) error
+	GetStatus(port int) (WorkerStatus, error)
+}
+
+type WorkerStatus struct {
+	SnapshotGeneration int                            `json:"snapshot_generation"`
+	Provider           provider.RedactedProvider      `json:"provider"`
+	Modules            map[string]config.ModuleConfig `json:"modules"`
+	ConfigPatchState   string                         `json:"config_patch_state,omitempty"`
+	ConfigPatchDetail  map[string]string              `json:"config_patch_detail,omitempty"`
+}
+
+type WorkerDetail struct {
+	Name               string                         `json:"name"`
+	Port               int                            `json:"port"`
+	Role               string                         `json:"role"`
+	Provider           provider.RedactedProvider      `json:"provider"`
+	Status             string                         `json:"status"`
+	SnapshotGeneration int                            `json:"snapshot_generation"`
+	LogLevel           string                         `json:"log_level"`
+	ConfigPatchState   string                         `json:"config_patch_state,omitempty"`
+	ConfigPatchDetail  map[string]string              `json:"config_patch_detail,omitempty"`
+	Modules            map[string]config.ModuleConfig `json:"modules,omitempty"`
+}
+
+const healthyRetryResetWindow = 60 * time.Second
+
+var builtInModuleNames = []string{
+	"image_filter",
+	"api_translate",
+	"model_override",
+	"config_patch",
+	"request_log",
+	"debug_sse",
+}
+
+func New(cfg Config) *Manager {
+	cfg.Config.ApplyDefaults()
+	store := config.NewStore(cfg.ConfigPath, cfg.Config)
+	m := &Manager{
+		config:             cfg.Config,
+		configPath:         cfg.ConfigPath,
+		configStatus:       cfg.ConfigStatus,
+		executable:         cfg.Executable,
+		starter:            cfg.Starter,
+		healthChecker:      cfg.HealthChecker,
+		workerClient:       cfg.WorkerClient,
+		clock:              time.Now,
+		healthWait:         10 * time.Second,
+		healthPoll:         100 * time.Millisecond,
+		store:              store,
+		events:             newEventBus(1024),
+		processes:          map[string]ManagedProcess{},
+		statuses:           map[string]string{},
+		retries:            map[string]int{},
+		healthySince:       map[string]time.Time{},
+		generations:        map[string]int{},
+		logs:               map[string]*logging.WorkerLogSink{},
+		configPatchStates:  map[string]string{},
+		configPatchDetails: map[string]map[string]string{},
+	}
+	if cfg.ConfigPath != "" {
+		m.stopConfigWriter = store.StartAsyncWriter()
+	}
+	if err := syncCodexProfileFiles(cfg.Config); err != nil {
+		m.configStatus.LastSaveError = err.Error()
+	}
+	return m
+}
+
+func (m *Manager) CheckPortAvailable(workerName string, port int) error {
+	workers := m.workerConfigSnapshot()
+	for name, worker := range workers {
+		if name != workerName && worker.Port == port {
+			return fmt.Errorf("port :%d is used by worker '%s'", port, name)
+		}
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return fmt.Errorf("port :%d is already in use by another process", port)
+	}
+	return listener.Close()
+}
+
+func (m *Manager) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	m.registerRoutes(mux)
+	mux.ServeHTTP(rw, r)
+}
+
+func (m *Manager) Close() {
+	m.mu.Lock()
+	stopConfigWriter := m.stopConfigWriter
+	m.stopConfigWriter = nil
+	events := m.events
+	m.events = nil
+	m.mu.Unlock()
+
+	if stopConfigWriter != nil {
+		stopConfigWriter()
+	}
+	if events != nil {
+		events.Close()
+	}
+}
+
+func (m *Manager) workerSummaries() []WorkerSummary {
+	type summarySeed struct {
+		name          string
+		worker        config.WorkerConfig
+		profile       config.ProviderProfile
+		providerFound bool
+		status        string
+		generation    int
+	}
+
+	m.mu.RLock()
+	names := make([]string, 0, len(m.config.Workers))
+	for name := range m.config.Workers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	seeds := make([]summarySeed, 0, len(names))
+	for _, name := range names {
+		worker := m.config.Workers[name]
+		profile, ok := m.config.Providers[worker.Provider]
+		seeds = append(seeds, summarySeed{
+			name:          name,
+			worker:        cloneWorkerConfig(worker),
+			profile:       profile,
+			providerFound: ok,
+			status:        m.workerStatusLocked(name),
+			generation:    m.workerGenerationLocked(name),
+		})
+	}
+	m.mu.RUnlock()
+
+	out := make([]WorkerSummary, 0, len(seeds))
+	for _, seed := range seeds {
+		runtimeProvider := provider.RuntimeProvider{Name: seed.worker.Provider}
+		if seed.providerFound {
+			runtimeProvider, _ = provider.Resolve(seed.worker.Provider, seed.profile)
+		}
+		out = append(out, WorkerSummary{
+			Name:               seed.name,
+			Port:               seed.worker.Port,
+			Role:               seed.worker.Role,
+			Provider:           runtimeProvider.Redacted(),
+			Status:             seed.status,
+			SnapshotGeneration: seed.generation,
+			LogLevel:           workerLogLevel(seed.worker),
+			Modules:            workerModulesWithBuiltIns(seed.worker.Modules),
+		})
+	}
+	return out
+}
+
+func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDetail {
+	runtimeProvider := provider.RuntimeProvider{Name: worker.Provider}
+	if profile, ok := m.providerProfileSnapshot()[worker.Provider]; ok {
+		runtimeProvider, _ = provider.Resolve(worker.Provider, profile)
+	}
+
+	detail := WorkerDetail{
+		Name:               name,
+		Port:               worker.Port,
+		Role:               worker.Role,
+		Provider:           runtimeProvider.Redacted(),
+		Status:             m.workerStatus(name),
+		SnapshotGeneration: m.workerGeneration(name),
+		LogLevel:           workerLogLevel(worker),
+		Modules:            workerModulesWithBuiltIns(worker.Modules),
+		ConfigPatchState:   m.configPatchState(name),
+		ConfigPatchDetail:  m.configPatchDetail(name),
+	}
+
+	if detail.Status != "running" {
+		return detail
+	}
+
+	client := m.workerClient
+	if client == nil {
+		client = HTTPWorkerClient{Client: http.DefaultClient}
+	}
+	status, err := client.GetStatus(worker.Port)
+	if err != nil {
+		return detail
+	}
+	if status.SnapshotGeneration > 0 {
+		detail.SnapshotGeneration = status.SnapshotGeneration
+	}
+	if status.Provider.Name != "" {
+		detail.Provider = status.Provider
+	}
+	if status.Modules != nil {
+		detail.Modules = workerModulesWithBuiltIns(status.Modules)
+	}
+	detail.ConfigPatchState = status.ConfigPatchState
+	detail.ConfigPatchDetail = status.ConfigPatchDetail
+	return detail
+}
+
+func workerLogLevel(worker config.WorkerConfig) string {
+	if worker.LogLevel == "" {
+		return "simple"
+	}
+	return worker.LogLevel
+}
+
+func (m *Manager) resolveProvider(name string) (provider.RuntimeProvider, error) {
+	m.mu.RLock()
+	profile, ok := m.config.Providers[name]
+	m.mu.RUnlock()
+	if !ok {
+		return provider.RuntimeProvider{Name: name}, fmt.Errorf("provider %q not found", name)
+	}
+	return provider.Resolve(name, profile)
+}
+
+func (m *Manager) workerByPort(port int) (string, config.WorkerConfig, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for name, worker := range m.config.Workers {
+		if worker.Port == port {
+			return name, cloneWorkerConfig(worker), true
+		}
+	}
+	return "", config.WorkerConfig{}, false
+}
+
+func (m *Manager) updateConfig(fn func(*config.Config)) {
+	m.store.Update(fn)
+	_, status := m.syncConfigFromStore()
+	if err := syncCodexProfileFiles(m.config); err != nil {
+		m.mu.Lock()
+		m.configStatus.LastSaveError = err.Error()
+		m.mu.Unlock()
+	}
+	m.publishEvent("config.status.changed", map[string]any{"dirty": status.Dirty, "generation": status.Generation})
+}
+
+func (m *Manager) syncConfigFromStore() (config.Config, config.Status) {
+	cfg := cloneConfig(m.store.Config())
+	status := m.store.Status()
+	m.mu.Lock()
+	m.config = cfg
+	m.configStatus = status
+	m.mu.Unlock()
+	return cfg, status
+}
+
+func (m *Manager) syncConfigStatusFromStore() config.Status {
+	status := m.store.Status()
+	m.mu.Lock()
+	m.configStatus = status
+	m.mu.Unlock()
+	return status
+}
+
+func (m *Manager) publishEvent(eventType string, payload map[string]any) {
+	m.mu.RLock()
+	events := m.events
+	m.mu.RUnlock()
+	if events != nil {
+		events.Publish(eventType, payload)
+	}
+}
+
+func (m *Manager) workerStatus(name string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.workerStatusLocked(name)
+}
+
+func (m *Manager) configPatchState(name string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.configPatchStates[name]
+}
+
+func (m *Manager) configPatchDetail(name string) map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	detail := m.configPatchDetails[name]
+	if len(detail) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(detail))
+	for key, value := range detail {
+		out[key] = value
+	}
+	return out
+}
+
+func (m *Manager) setConfigPatchStatus(name string, state module.ConfigPatchState, detail map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if state == "" || state == module.ConfigPatchClean || state == module.ConfigPatchRecovered || state == module.ConfigPatchActive {
+		delete(m.configPatchStates, name)
+		delete(m.configPatchDetails, name)
+		return
+	}
+	m.configPatchStates[name] = string(state)
+	if len(detail) == 0 {
+		delete(m.configPatchDetails, name)
+		return
+	}
+	cloned := make(map[string]string, len(detail))
+	for key, value := range detail {
+		cloned[key] = value
+	}
+	m.configPatchDetails[name] = cloned
+}
+
+func (m *Manager) workerGeneration(name string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.workerGenerationLocked(name)
+}
+
+func (m *Manager) workerStatusLocked(name string) string {
+	if status := m.statuses[name]; status != "" {
+		return status
+	}
+	return "configured"
+}
+
+func (m *Manager) workerGenerationLocked(name string) int {
+	if generation := m.generations[name]; generation > 0 {
+		return generation
+	}
+	if _, ok := m.config.Workers[name]; ok {
+		return 1
+	}
+	return 0
+}
+
+func (m *Manager) setWorkerGenerationLocked(name string, generation int) {
+	if generation < 1 {
+		generation = 1
+	}
+	m.generations[name] = generation
+}
+
+func (m *Manager) bumpWorkerGeneration(name string) {
+	m.mu.Lock()
+	m.generations[name] = m.workerGenerationLocked(name) + 1
+	m.mu.Unlock()
+}
+
+func (m *Manager) StartWorker(name string) error {
+	return m.startWorker(name, true)
+}
+
+func (m *Manager) startWorker(name string, resetRetries bool) error {
+	if resetRetries {
+		m.mu.Lock()
+		m.retries[name] = 0
+		delete(m.healthySince, name)
+		m.mu.Unlock()
+	}
+	spawn, err := m.BuildWorkerSpawn(name)
+	if err != nil {
+		m.mu.Lock()
+		m.statuses[name] = "failed"
+		m.mu.Unlock()
+		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		return err
+	}
+	spawn.LogWriter = m.LogSink(name)
+	if m.starter == nil {
+		m.mu.Lock()
+		m.statuses[name] = "running"
+		m.setWorkerGenerationLocked(name, 1)
+		m.mu.Unlock()
+		m.publishEvent("worker.started", map[string]any{"worker": name, "status": "running"})
+		return nil
+	}
+	process, err := m.starter.Start(spawn)
+	if err != nil {
+		m.mu.Lock()
+		m.statuses[name] = "failed"
+		m.mu.Unlock()
+		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		return err
+	}
+	m.mu.Lock()
+	m.processes[name] = process
+	m.statuses[name] = "running"
+	m.setWorkerGenerationLocked(name, 1)
+	m.mu.Unlock()
+	m.publishEvent("worker.started", map[string]any{"worker": name, "status": "running"})
+	return nil
+}
+
+func (m *Manager) LogSink(name string) *logging.WorkerLogSink {
+	m.mu.RLock()
+	if sink := m.logs[name]; sink != nil {
+		sink.SetLevel(workerLogLevel(m.config.Workers[name]))
+		m.mu.RUnlock()
+		return sink
+	}
+	worker := m.config.Workers[name]
+	logDir := m.config.Defaults.LogDir
+	m.mu.RUnlock()
+
+	if logDir == "" || logDir == "~/.codex-proxy/logs" {
+		logDir = filepath.Join(os.TempDir(), "codex-proxy-logs")
+	}
+	sink, err := logging.NewWorkerLogSink(filepath.Join(logDir, fmt.Sprintf("worker-%d.log", worker.Port)), 1000)
+	if err != nil {
+		sink, _ = logging.NewWorkerLogSink(filepath.Join(os.TempDir(), fmt.Sprintf("codex-proxy-worker-%d.log", worker.Port)), 1000)
+	}
+	if sink != nil {
+		sink.SetLevel(workerLogLevel(worker))
+	}
+
+	m.mu.Lock()
+	if existing := m.logs[name]; existing != nil {
+		m.mu.Unlock()
+		if sink != nil {
+			_ = sink.Close()
+		}
+		return existing
+	}
+	m.logs[name] = sink
+	m.mu.Unlock()
+	return sink
+}
+
+func (m *Manager) StopWorker(name string) error {
+	m.mu.Lock()
+	process := m.processes[name]
+	if process != nil {
+		delete(m.processes, name)
+		m.statuses[name] = "stopping"
+	}
+	m.mu.Unlock()
+
+	status, err := stopManagedProcess(process)
+	if err != nil {
+		m.mu.Lock()
+		m.statuses[name] = "failed"
+		m.mu.Unlock()
+		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		return err
+	}
+	m.mu.Lock()
+	m.statuses[name] = status
+	m.mu.Unlock()
+	m.publishEvent("worker.stopped", map[string]any{"worker": name, "status": status})
+	return nil
+}
+
+func (m *Manager) RestartWorker(name string) error {
+	return m.restartWorker(name, true)
+}
+
+func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next config.WorkerConfig) error {
+	if next.LogLevel == "" {
+		next.LogLevel = "simple"
+	}
+	if sink := m.LogSink(name); sink != nil {
+		sink.SetLevel(next.LogLevel)
+	}
+	wasRunning := m.workerStatus(name) == "running"
+	if next.Port == current.Port {
+		m.updateConfig(func(cfgRoot *config.Config) {
+			cfgRoot.Workers[name] = next
+		})
+		m.publishWorkerUpdated(name, next)
+		if wasRunning {
+			return m.RestartWorker(name)
+		}
+		return nil
+	}
+
+	oldProcess := m.processForWorker(name)
+	m.updateConfig(func(cfgRoot *config.Config) {
+		cfgRoot.Workers[name] = next
+	})
+	if wasRunning {
+		if err := m.startWorker(name, true); err != nil {
+			m.updateConfig(func(cfgRoot *config.Config) {
+				cfgRoot.Workers[name] = current
+			})
+			m.mu.Lock()
+			if oldProcess != nil {
+				m.processes[name] = oldProcess
+				m.statuses[name] = "running"
+			}
+			m.mu.Unlock()
+			return err
+		}
+		if err := m.waitForWorkerHealth(next.Port); err != nil {
+			newProcess := m.processForWorker(name)
+			_, _ = stopManagedProcess(newProcess)
+			m.updateConfig(func(cfgRoot *config.Config) {
+				cfgRoot.Workers[name] = current
+			})
+			m.mu.Lock()
+			if oldProcess != nil {
+				m.processes[name] = oldProcess
+				m.statuses[name] = "running"
+			} else {
+				delete(m.processes, name)
+				m.statuses[name] = "failed"
+			}
+			m.mu.Unlock()
+			if oldProcess == nil {
+				m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+			}
+			return err
+		}
+		m.publishWorkerUpdated(name, next)
+		if _, err := stopManagedProcess(oldProcess); err != nil {
+			m.mu.Lock()
+			m.statuses[name] = "failed"
+			m.mu.Unlock()
+			m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+			return err
+		}
+		m.mu.Lock()
+		m.statuses[name] = "running"
+		m.mu.Unlock()
+		return nil
+	}
+	m.publishWorkerUpdated(name, next)
+	return nil
+}
+
+func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) {
+	m.publishEvent("worker.updated", map[string]any{
+		"worker":    name,
+		"port":      worker.Port,
+		"role":      worker.Role,
+		"provider":  worker.Provider,
+		"log_level": workerLogLevel(worker),
+		"modules":   cloneModules(worker.Modules),
+	})
+}
+
+func (m *Manager) waitForWorkerHealth(port int) error {
+	checker := m.healthChecker
+	if checker == nil {
+		checker = HTTPHealthChecker{Client: http.DefaultClient}
+	}
+	deadline := m.clock().Add(m.healthWait)
+	for {
+		if checker.Check(port) {
+			return nil
+		}
+		if !m.clock().Before(deadline) {
+			return fmt.Errorf("worker on port :%d did not become healthy", port)
+		}
+		time.Sleep(m.healthPoll)
+	}
+}
+
+func (m *Manager) processForWorker(name string) ManagedProcess {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.processes[name]
+}
+
+func stopManagedProcess(process ManagedProcess) (string, error) {
+	if process == nil {
+		return "stopped", nil
+	}
+	if err := process.Stop(); err != nil {
+		return "failed", err
+	}
+	if reporter, ok := process.(forcedStopReporter); ok && reporter.ForcedStop() {
+		return "stopped (forced)", nil
+	}
+	return "stopped", nil
+}
+
+func (m *Manager) restartWorker(name string, resetRetries bool) error {
+	if err := m.StopWorker(name); err != nil {
+		return err
+	}
+	if err := m.startWorker(name, resetRetries); err != nil {
+		return err
+	}
+	m.publishEvent("worker.restarted", map[string]any{"worker": name, "status": "running"})
+	return nil
+}
+
+func (m *Manager) RecordHealth(name string, healthy bool) {
+	if healthy {
+		now := m.clock()
+		m.mu.Lock()
+		since, ok := m.healthySince[name]
+		if !ok {
+			since = now
+			m.healthySince[name] = since
+		}
+		if now.Sub(since) >= healthyRetryResetWindow {
+			m.retries[name] = 0
+		}
+		if m.workerStatusLocked(name) != "stopped" {
+			m.statuses[name] = "running"
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	m.mu.Lock()
+	delete(m.healthySince, name)
+	if m.workerStatusLocked(name) == "failed" {
+		m.mu.Unlock()
+		return
+	}
+	m.retries[name]++
+	if m.retries[name] >= 10 {
+		m.statuses[name] = "failed"
+		m.mu.Unlock()
+		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": "worker health check failed"})
+		return
+	}
+	m.statuses[name] = "restarting"
+	m.mu.Unlock()
+
+	if err := m.restartWorker(name, false); err != nil {
+		m.mu.Lock()
+		m.statuses[name] = "failed"
+		m.mu.Unlock()
+		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+	}
+}
+
+func (m *Manager) StartHealthMonitor(interval time.Duration) func() {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	checker := m.healthChecker
+	if checker == nil {
+		checker = HTTPHealthChecker{Client: http.DefaultClient}
+	}
+	done := make(chan struct{})
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				for _, target := range m.healthTargets() {
+					m.RecordHealth(target.name, checker.Check(target.port))
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+type HTTPHealthChecker struct {
+	Client *http.Client
+}
+
+func (c HTTPHealthChecker) Check(port int) bool {
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/_proxy/health", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func (m *Manager) StartConfiguredWorkers() error {
+	workers := m.workerConfigSnapshot()
+	names := make([]string, 0, len(workers))
+	for name := range workers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var errs []error
+	for _, name := range names {
+		state, detail, err := recoverWorkerConfigPatch(workers[name], name)
+		m.setConfigPatchStatus(name, state, detail)
+		if err != nil {
+			m.mu.Lock()
+			m.statuses[name] = "failed"
+			m.mu.Unlock()
+			m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+	}
+	for _, name := range names {
+		if m.workerStatus(name) == "failed" {
+			continue
+		}
+		if err := m.StartWorker(name); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func recoverWorkerConfigPatch(worker config.WorkerConfig, workerName string) (module.ConfigPatchState, map[string]string, error) {
+	moduleCfg, ok := worker.Modules["config_patch"]
+	if !ok || !moduleCfg.Enabled {
+		return module.ConfigPatchClean, nil, nil
+	}
+	configPath, _ := moduleCfg.Params["config_path"].(string)
+	if configPath == "" {
+		configPath = expandHomePath("~/.codex/config.toml")
+	}
+	stateDir, _ := moduleCfg.Params["state_dir"].(string)
+	if stateDir == "" {
+		stateDir = expandHomePath("~/.codex-proxy")
+	}
+	patch := module.NewConfigPatch(module.ConfigPatchOptions{
+		StateDir:    stateDir,
+		ConfigPath:  configPath,
+		WorkerID:    workerName,
+		WorkerPort:  worker.Port,
+		PatchedBase: fmt.Sprintf("http://127.0.0.1:%d", worker.Port),
+	})
+	if err := patch.RecoverStaleJournal(); err != nil {
+		return patch.State(), patch.Detail(), err
+	}
+	switch patch.State() {
+	case module.ConfigPatchUnresolved, module.ConfigPatchFailed:
+		return patch.State(), patch.Detail(), fmt.Errorf("config_patch recovery state %s must be resolved before enabling", patch.State())
+	default:
+		return patch.State(), patch.Detail(), nil
+	}
+}
+
+func expandHomePath(path string) string {
+	if len(path) >= 2 && path[:2] == "~/" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home + path[1:]
+		}
+	}
+	return path
+}
+
+type healthTarget struct {
+	name string
+	port int
+}
+
+func (m *Manager) healthTargets() []healthTarget {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	targets := make([]healthTarget, 0, len(m.config.Workers))
+	for name, worker := range m.config.Workers {
+		if m.workerStatusLocked(name) == "running" {
+			targets = append(targets, healthTarget{name: name, port: worker.Port})
+		}
+	}
+	return targets
+}
+
+func (m *Manager) workerConfigSnapshot() map[string]config.WorkerConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	workers := make(map[string]config.WorkerConfig, len(m.config.Workers))
+	for name, worker := range m.config.Workers {
+		workers[name] = cloneWorkerConfig(worker)
+	}
+	return workers
+}
+
+func (m *Manager) providerProfileSnapshot() map[string]config.ProviderProfile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	providers := make(map[string]config.ProviderProfile, len(m.config.Providers))
+	for name, profile := range m.config.Providers {
+		providers[name] = profile
+	}
+	return providers
+}
+
+func (m *Manager) workerConfig(name string) (config.WorkerConfig, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	worker, ok := m.config.Workers[name]
+	if !ok {
+		return config.WorkerConfig{}, false
+	}
+	return cloneWorkerConfig(worker), true
+}
+
+func (m *Manager) configuredConfigPath() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.configPath
+}
+
+type liveWorkerTarget struct {
+	port int
+}
+
+func (m *Manager) liveWorkersUsingProvider(providerName string) []liveWorkerTarget {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	targets := []liveWorkerTarget{}
+	for workerName, worker := range m.config.Workers {
+		if worker.Provider != providerName || m.workerStatusLocked(workerName) != "running" {
+			continue
+		}
+		targets = append(targets, liveWorkerTarget{port: worker.Port})
+	}
+	return targets
+}
+
+func cloneConfig(cfg config.Config) config.Config {
+	out := config.Config{
+		Defaults:  cfg.Defaults,
+		Workers:   make(map[string]config.WorkerConfig, len(cfg.Workers)),
+		Providers: make(map[string]config.ProviderProfile, len(cfg.Providers)),
+	}
+	for name, worker := range cfg.Workers {
+		out.Workers[name] = cloneWorkerConfig(worker)
+	}
+	for name, profile := range cfg.Providers {
+		out.Providers[name] = profile
+	}
+	return out
+}
+
+func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
+	return config.WorkerConfig{
+		Role:     worker.Role,
+		Port:     worker.Port,
+		Provider: worker.Provider,
+		LogLevel: workerLogLevel(worker),
+		Modules:  cloneModules(worker.Modules),
+	}
+}
+
+func cloneModules(modules map[string]config.ModuleConfig) map[string]config.ModuleConfig {
+	out := make(map[string]config.ModuleConfig, len(modules))
+	for name, module := range modules {
+		out[name] = cloneModuleConfig(module)
+	}
+	return out
+}
+
+func workerModulesWithBuiltIns(modules map[string]config.ModuleConfig) map[string]config.ModuleConfig {
+	out := cloneModules(modules)
+	for _, name := range builtInModuleNames {
+		if _, ok := out[name]; !ok {
+			out[name] = config.ModuleConfig{Enabled: false, Params: map[string]any{}}
+		}
+	}
+	return out
+}
+
+func cloneModuleConfig(module config.ModuleConfig) config.ModuleConfig {
+	out := config.ModuleConfig{
+		Enabled: module.Enabled,
+	}
+	if module.Params != nil {
+		out.Params = make(map[string]any, len(module.Params))
+		for key, value := range module.Params {
+			out.Params[key] = value
+		}
+	}
+	return out
+}

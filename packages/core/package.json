@@ -1,0 +1,20 @@
+{
+  "name": "@codex-proxy/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./global": "./src/global.ts",
+    "./flag/flag": "./src/flag/flag.ts",
+    "./installation/version": "./src/installation/version.ts",
+    "./util/flock": "./src/util/flock.ts",
+    "./util/glob": "./src/util/glob.ts",
+    "./util/which": "./src/util/which.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.74",
+    "glob": "13.0.5",
+    "minimatch": "10.2.5",
+    "which": "6.0.1",
+    "xdg-basedir": "5.1.0"
+  }
+}

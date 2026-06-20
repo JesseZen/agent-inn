@@ -1,0 +1,86 @@
+import { ScrollBoxRenderable, TextAttributes } from "@opentui/core"
+import { useSDK } from "../context/sdk"
+import { useTheme } from "../context/theme"
+import { useTerminalDimensions } from "@opentui/solid"
+import { createSignal, onMount, onCleanup, For, Show } from "solid-js"
+import type { WorkerSummary } from "../context/sdk"
+
+export function DialogLogs(props: { worker: WorkerSummary; initialLines?: string[] }) {
+  const sdk = useSDK()
+  const { theme } = useTheme()
+  const dimensions = useTerminalDimensions()
+  const [lines, setLines] = createSignal<string[]>(props.initialLines ?? [])
+  const [loading, setLoading] = createSignal(true)
+  const [connected, setConnected] = createSignal(false)
+
+  onMount(async () => {
+    try {
+      if (!props.initialLines) {
+        const existing = await sdk.client.getLogs(props.worker.port)
+        setLines(existing)
+      }
+    } catch {
+      // may have no logs yet
+    } finally {
+      setLoading(false)
+    }
+
+    // Connect to SSE log stream
+    const url = sdk.client.logsUrl(props.worker.port)
+    const controller = new AbortController()
+    setConnected(true)
+
+    sdk.fetch(url, { signal: controller.signal, headers: { Accept: "text/event-stream" } })
+      .then(async (res) => {
+        if (!res.ok || !res.body) return
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const splitLines = buffer.split("\n")
+          buffer = splitLines.pop() ?? ""
+          for (const line of splitLines) {
+            if (line.startsWith("data: ")) {
+              const payload = JSON.parse(line.slice(6)) as { line?: string }
+              if (typeof payload.line !== "string") continue
+              setLines((prev) => [...prev.slice(-499), payload.line!])
+            }
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setConnected(false))
+
+    onCleanup(() => controller.abort())
+  })
+
+  const height = () => Math.min(dimensions().height - 8, 30)
+
+  return (
+    <box
+      width={Math.min(88, dimensions().width - 4)}
+      backgroundColor={theme.backgroundPanel}
+      paddingTop={1}
+      paddingBottom={1}
+      flexDirection="column"
+    >
+      <box paddingLeft={2} paddingBottom={1}>
+        <text fg={theme.text} attributes={TextAttributes.BOLD}>
+          Logs: {props.worker.name} (:{props.worker.port})
+        </text>
+        <text fg={theme.textMuted}> {connected() ? "● live" : "○ disconnected"}</text>
+      </box>
+      <scrollbox height={height()} paddingLeft={1} paddingRight={1}>
+        <For each={lines()}>
+          {(line) => <text fg={theme.textMuted}>{line}</text>}
+        </For>
+        <Show when={!loading() && lines().length === 0}>
+          <text fg={theme.textMuted}>No logs yet</text>
+        </Show>
+      </scrollbox>
+    </box>
+  )
+}
