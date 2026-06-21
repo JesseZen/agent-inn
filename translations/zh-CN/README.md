@@ -102,7 +102,6 @@ cd tui && CODEX_PROXY_URL=http://localhost:8080 bun run dev
 | `/status` | | 查看 Workers、Upstreams 和配置状态 |
 | `/config` | `/settings` | 修改配置 (选择类别 → 对象 → 字段 → 更改值) |
 | `/new` | | 创建一个新的 Worker |
-| `/switch` | | 切换 Worker 的 Upstream |
 | `/restart` | | 重启 Worker |
 | `/stop` | | 停止 Worker |
 | `/logs` | | 查看 Worker 日志 |

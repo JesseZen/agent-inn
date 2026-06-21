@@ -102,7 +102,6 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 | `/status` | | View Workers, Upstreams, and config status |
 | `/config` | `/settings` | Modify config (select category → object → field → change value) |
 | `/new` | | Create a new Worker |
-| `/switch` | | Switch a Worker's Upstream |
 | `/restart` | | Restart a Worker |
 | `/stop` | | Stop a Worker |
 | `/logs` | | View Worker logs |

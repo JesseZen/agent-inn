@@ -21,14 +21,13 @@ type Field = {
   key: FieldKey
   title: string
   placeholder: string
-  defaultValue?: string
   hidden?: boolean
 }
 
 const FIELDS: Field[] = [
   { key: "base_url", title: "Base URL", placeholder: "https://example.com/v1" },
   { key: "api_key", title: "API Key", placeholder: "sk-...", hidden: true },
-  { key: "api_format", title: "API Format", placeholder: "responses or chat_completions", defaultValue: "chat_completions" },
+  { key: "api_format", title: "API Format", placeholder: "responses or chat_completions" },
 ]
 
 export function DialogUpstream() {
@@ -114,7 +113,7 @@ function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: "create
 
 function describe(field: Field, draft: Draft) {
   if (field.hidden) return draft.has_api_key ? "******" : "none"
-  return draft[field.key] || field.defaultValue || "—"
+  return draft[field.key] || "—"
 }
 
 async function editField(dialog: ReturnType<typeof useDialog>, field: Field, draft: Draft) {
@@ -139,7 +138,7 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
   }
 
   const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.base_url || "upstream"}`, {
-    value: draft[field.key] || field.defaultValue || "",
+    value: draft[field.key],
     placeholder: field.placeholder,
   })
   if (result === null) return

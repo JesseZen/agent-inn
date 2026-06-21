@@ -85,7 +85,7 @@ function createProxyHarness() {
     } satisfies ProxyConfigStatus,
   }
   const calls = {
-    patchWorker: [] as Array<{ port: number; upstream: string }>,
+    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     saveConfig: 0,
     getLogs: 0,
@@ -155,14 +155,17 @@ function createProxyHarness() {
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string }
-      calls.patchWorker.push({ port: 6767, upstream: body.upstream })
+      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; log_level?: string }
+      calls.patchWorker.push({ port: 6767, upstream: body.upstream, log_level: body.log_level })
       const nextUpstream = providers.get(body.upstream)
       if (nextUpstream) {
         workers.set(6767, {
           ...workers.get(6767)!,
           upstream: nextUpstream,
         })
+      }
+      if (body.log_level) {
+        workers.set(6767, { ...workers.get(6767)!, log_level: body.log_level })
       }
       return json(workers.get(6767)!)
     }
@@ -265,13 +268,15 @@ async function mountProxyApp() {
   }
 }
 
-test("proxy switch updates worker provider and status detail reflects the change", async () => {
+test("proxy status switch upstream action updates worker provider and reflects the change", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.switch")
+    app.api.keymap.dispatchCommand("proxy.status")
     await app.render()
-    expect(app.frame()).toContain("Switch Worker Upstream")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("Switch Upstream")
 
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
@@ -441,6 +446,52 @@ test("proxy upstream creates a new upstream", async () => {
   }
 })
 
+test("proxy upstream editor shows empty api_format as dash and persists edits", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.upstream")
+    await app.render()
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Upstream: openai")
+    })
+
+    await app.render()
+    const frame = app.frame()
+    expect(frame).toContain("API Format")
+    expect(frame).not.toContain("chat_completions")
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("API Format: https://api.openai.com/v1")
+    })
+
+    await app.mockInput.typeText("responses")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.patchUpstream.length === 1)
+
+    expect(app.calls.patchUpstream).toEqual([
+      { name: "openai", body: { api_format: "responses" } },
+    ])
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("responses")
+    })
+    expect(app.frame()).toContain("responses")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy status detail view logs action opens worker logs", async () => {
   const app = await mountProxyApp()
 
@@ -473,6 +524,37 @@ test("proxy launch registers a launch command", async () => {
     app.api.keymap.dispatchCommand("proxy.launch")
     await app.render()
     expect(app.frame()).toContain("Launch Codex CLI")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers editor patches log_level field", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    expect(app.frame()).toContain("Manage Workers")
+    expect(app.frame()).toContain("Create New Worker")
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("Edit Worker: app")
+
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("Log Level: app")
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.patchWorker.some((c) => c.log_level === "detail"))
+    await app.render()
+
+    expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
   } finally {
     await app.cleanup()
   }
