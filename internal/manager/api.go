@@ -429,7 +429,7 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 			"api_format":  profile.APIFormat,
 		}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"providers": out})
+	writeJSON(rw, http.StatusOK, map[string]any{"upstreams": out})
 }
 
 func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) {
