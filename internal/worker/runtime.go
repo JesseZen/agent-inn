@@ -18,7 +18,7 @@ type RuntimeConfigSnapshot struct {
 
 func (s RuntimeConfigSnapshot) Validate() error {
 	if s.Upstream.BaseURL == "" {
-		return fmt.Errorf("provider base URL is required")
+		return fmt.Errorf("upstream base URL is required")
 	}
 	return nil
 }
