@@ -346,7 +346,7 @@ func TestManagerPublishesProviderUpdatedAfterGenerationBump(t *testing.T) {
 	}
 }
 
-func nextEventOfType(t *testing.T, sub *eventSubscription, eventType string) Event {
+func nextEventOfType(t *testing.T, sub *eventSubscription, eventType EventType) Event {
 	t.Helper()
 	deadline := time.After(time.Second)
 	for {
@@ -361,7 +361,7 @@ func nextEventOfType(t *testing.T, sub *eventSubscription, eventType string) Eve
 	}
 }
 
-func assertNoEventOfType(t *testing.T, sub *eventSubscription, eventType string, timeout time.Duration) {
+func assertNoEventOfType(t *testing.T, sub *eventSubscription, eventType EventType, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {

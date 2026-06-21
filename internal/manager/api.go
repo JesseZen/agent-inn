@@ -92,7 +92,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(rw, http.StatusCreated, map[string]any{"name": payload.Name, "port": payload.Port, "status": m.workerStatus(payload.Name)})
+	writeJSON(rw, http.StatusCreated, map[string]any{"name": payload.Name, "port": payload.Port, "status": string(m.workerStatus(payload.Name))})
 }
 
 func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
-		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": m.workerStatus(workerName)})
+		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": string(m.workerStatus(workerName))})
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodPatch {
@@ -183,7 +183,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": m.workerStatus(workerName)})
+		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": string(m.workerStatus(workerName))})
 		return
 	}
 	if len(parts) == 2 && parts[1] == "restart" && r.Method == http.MethodPost {
@@ -201,7 +201,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
-		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": m.workerStatus(workerName)})
+		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": string(m.workerStatus(workerName))})
 		return
 	}
 	if len(parts) == 2 && parts[1] == "stream" && r.Method == http.MethodGet {
@@ -266,10 +266,10 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			worker.Modules[moduleName] = cfg
 			cfgRoot.Workers[workerName] = worker
 		})
-		if m.workerStatus(workerName) == "running" {
+		if m.workerStatus(workerName) == WorkerStateRunning {
 			m.bumpWorkerGeneration(workerName)
 		}
-		m.publishEvent("module.updated", map[string]any{"worker": workerName, "port": port, "module": moduleName, "enabled": cfg.Enabled, "params": cfg.Params})
+		m.publishEvent(EventModuleUpdated, map[string]any{"worker": workerName, "port": port, "module": moduleName, "enabled": cfg.Enabled, "params": cfg.Params})
 		writeJSON(rw, http.StatusOK, map[string]any{
 			"worker": workerName,
 			"port":   port,
@@ -315,10 +315,10 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		worker.Modules[moduleName] = cfg
 		cfgRoot.Workers[workerName] = worker
 	})
-	if m.workerStatus(workerName) == "running" {
+	if m.workerStatus(workerName) == WorkerStateRunning {
 		m.bumpWorkerGeneration(workerName)
 	}
-	m.publishEvent("module.updated", map[string]any{"worker": workerName, "port": port, "module": moduleName, "enabled": cfg.Enabled, "params": cfg.Params})
+	m.publishEvent(EventModuleUpdated, map[string]any{"worker": workerName, "port": port, "module": moduleName, "enabled": cfg.Enabled, "params": cfg.Params})
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"worker": workerName,
 		"port":   port,
@@ -339,7 +339,7 @@ func (m *Manager) validateConfigPatchOwner(workerName string, moduleName string)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for otherName, worker := range m.config.Workers {
-		if otherName == workerName || m.workerStatusLocked(otherName) != "running" {
+		if otherName == workerName || m.workerStatusLocked(otherName) != WorkerStateRunning {
 			continue
 		}
 		if worker.Modules["config_patch"].Enabled {
@@ -355,7 +355,7 @@ func (m *Manager) validateConfigPatchRecoveryState(workerName string) error {
 		return configPatchRecoveryStateError{state: state}
 	}
 	worker, ok := m.workerConfig(workerName)
-	if !ok || m.workerStatus(workerName) != "running" {
+	if !ok || m.workerStatus(workerName) != WorkerStateRunning {
 		return nil
 	}
 	client := m.workerClient
@@ -393,7 +393,7 @@ func validWorkerLogLevel(level string) bool {
 }
 
 func (m *Manager) patchLiveWorkerModule(workerName string, port int, moduleName string, cfg config.ModuleConfig) error {
-	if m.workerStatus(workerName) != "running" {
+	if m.workerStatus(workerName) != WorkerStateRunning {
 		return nil
 	}
 	client := m.workerClient
@@ -404,7 +404,7 @@ func (m *Manager) patchLiveWorkerModule(workerName string, port int, moduleName 
 }
 
 func (m *Manager) toggleLiveWorkerModule(workerName string, port int, moduleName string) error {
-	if m.workerStatus(workerName) != "running" {
+	if m.workerStatus(workerName) != WorkerStateRunning {
 		return nil
 	}
 	client := m.workerClient
@@ -476,7 +476,7 @@ func (m *Manager) handleProviderByName(rw http.ResponseWriter, r *http.Request) 
 		cfgRoot.Providers[name] = profile
 	})
 	m.bumpLiveWorkersUsingProvider(name)
-	m.publishEvent("provider.updated", map[string]any{"provider": name})
+	m.publishEvent(EventProviderUpdated, map[string]any{"provider": name})
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"name":        name,
 		"base_url":    profile.BaseURL,
@@ -502,7 +502,7 @@ func (m *Manager) bumpLiveWorkersUsingProvider(providerName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for workerName, worker := range m.config.Workers {
-		if worker.Provider == providerName && m.workerStatusLocked(workerName) == "running" {
+		if worker.Provider == providerName && m.workerStatusLocked(workerName) == WorkerStateRunning {
 			m.generations[workerName] = m.workerGenerationLocked(workerName) + 1
 		}
 	}
