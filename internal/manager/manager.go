@@ -43,7 +43,7 @@ type Manager struct {
 	stopConfigWriter   func()
 	events             *eventBus
 	processes          map[string]ManagedProcess
-	statuses           map[string]string
+	statuses           map[string]WorkerState
 	retries            map[string]int
 	healthySince       map[string]time.Time
 	generations        map[string]int
@@ -133,9 +133,9 @@ func New(cfg Config) *Manager {
 		healthWait:         10 * time.Second,
 		healthPoll:         100 * time.Millisecond,
 		store:              store,
-		events:             newEventBus(1024),
+		events:             newEventBus(defaultEventBusCapacity),
 		processes:          map[string]ManagedProcess{},
-		statuses:           map[string]string{},
+		statuses:           map[string]WorkerState{},
 		retries:            map[string]int{},
 		healthySince:       map[string]time.Time{},
 		generations:        map[string]int{},
@@ -214,7 +214,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			worker:        cloneWorkerConfig(worker),
 			profile:       profile,
 			providerFound: ok,
-			status:        m.workerStatusLocked(name),
+			status:        string(m.workerStatusLocked(name)),
 			generation:    m.workerGenerationLocked(name),
 		})
 	}
@@ -251,7 +251,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Port:               worker.Port,
 		Role:               worker.Role,
 		Provider:           runtimeProvider.Redacted(),
-		Status:             m.workerStatus(name),
+		Status:             string(m.workerStatus(name)),
 		SnapshotGeneration: m.workerGeneration(name),
 		LogLevel:           workerLogLevel(worker),
 		Modules:            workerModulesWithBuiltIns(worker.Modules),
@@ -259,7 +259,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		ConfigPatchDetail:  m.configPatchDetail(name),
 	}
 
-	if detail.Status != "running" {
+	if detail.Status != string(WorkerStateRunning) {
 		return detail
 	}
 
@@ -321,7 +321,7 @@ func (m *Manager) updateConfig(fn func(*config.Config)) {
 		m.configStatus.LastSaveError = err.Error()
 		m.mu.Unlock()
 	}
-	m.publishEvent("config.status.changed", map[string]any{"dirty": status.Dirty, "generation": status.Generation})
+	m.publishEvent(EventConfigStatusChanged, map[string]any{"dirty": status.Dirty, "generation": status.Generation})
 }
 
 func (m *Manager) syncConfigFromStore() (config.Config, config.Status) {
@@ -342,7 +342,7 @@ func (m *Manager) syncConfigStatusFromStore() config.Status {
 	return status
 }
 
-func (m *Manager) publishEvent(eventType string, payload map[string]any) {
+func (m *Manager) publishEvent(eventType EventType, payload map[string]any) {
 	m.mu.RLock()
 	events := m.events
 	m.mu.RUnlock()
@@ -351,7 +351,7 @@ func (m *Manager) publishEvent(eventType string, payload map[string]any) {
 	}
 }
 
-func (m *Manager) workerStatus(name string) string {
+func (m *Manager) workerStatus(name string) WorkerState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.workerStatusLocked(name)
@@ -403,11 +403,11 @@ func (m *Manager) workerGeneration(name string) int {
 	return m.workerGenerationLocked(name)
 }
 
-func (m *Manager) workerStatusLocked(name string) string {
+func (m *Manager) workerStatusLocked(name string) WorkerState {
 	if status := m.statuses[name]; status != "" {
 		return status
 	}
-	return "configured"
+	return WorkerStateConfigured
 }
 
 func (m *Manager) workerGenerationLocked(name string) int {
@@ -447,34 +447,34 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 	spawn, err := m.BuildWorkerSpawn(name)
 	if err != nil {
 		m.mu.Lock()
-		m.statuses[name] = "failed"
+		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
-		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 		return err
 	}
 	spawn.LogWriter = m.LogSink(name)
 	if m.starter == nil {
 		m.mu.Lock()
-		m.statuses[name] = "running"
+		m.statuses[name] = WorkerStateRunning
 		m.setWorkerGenerationLocked(name, 1)
 		m.mu.Unlock()
-		m.publishEvent("worker.started", map[string]any{"worker": name, "status": "running"})
+		m.publishEvent(EventWorkerStarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 		return nil
 	}
 	process, err := m.starter.Start(spawn)
 	if err != nil {
 		m.mu.Lock()
-		m.statuses[name] = "failed"
+		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
-		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 		return err
 	}
 	m.mu.Lock()
 	m.processes[name] = process
-	m.statuses[name] = "running"
+	m.statuses[name] = WorkerStateRunning
 	m.setWorkerGenerationLocked(name, 1)
 	m.mu.Unlock()
-	m.publishEvent("worker.started", map[string]any{"worker": name, "status": "running"})
+	m.publishEvent(EventWorkerStarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 	return nil
 }
 
@@ -518,22 +518,22 @@ func (m *Manager) StopWorker(name string) error {
 	process := m.processes[name]
 	if process != nil {
 		delete(m.processes, name)
-		m.statuses[name] = "stopping"
+		m.statuses[name] = WorkerStateStopping
 	}
 	m.mu.Unlock()
 
 	status, err := stopManagedProcess(process)
 	if err != nil {
 		m.mu.Lock()
-		m.statuses[name] = "failed"
+		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
-		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 		return err
 	}
 	m.mu.Lock()
 	m.statuses[name] = status
 	m.mu.Unlock()
-	m.publishEvent("worker.stopped", map[string]any{"worker": name, "status": status})
+	m.publishEvent(EventWorkerStopped, map[string]any{"worker": name, "status": string(status)})
 	return nil
 }
 
@@ -548,7 +548,7 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 	if sink := m.LogSink(name); sink != nil {
 		sink.SetLevel(next.LogLevel)
 	}
-	wasRunning := m.workerStatus(name) == "running"
+	wasRunning := m.workerStatus(name) == WorkerStateRunning
 	if next.Port == current.Port {
 		m.updateConfig(func(cfgRoot *config.Config) {
 			cfgRoot.Workers[name] = next
@@ -572,7 +572,7 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 			m.mu.Lock()
 			if oldProcess != nil {
 				m.processes[name] = oldProcess
-				m.statuses[name] = "running"
+				m.statuses[name] = WorkerStateRunning
 			}
 			m.mu.Unlock()
 			return err
@@ -586,27 +586,27 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 			m.mu.Lock()
 			if oldProcess != nil {
 				m.processes[name] = oldProcess
-				m.statuses[name] = "running"
+				m.statuses[name] = WorkerStateRunning
 			} else {
 				delete(m.processes, name)
-				m.statuses[name] = "failed"
+				m.statuses[name] = WorkerStateFailed
 			}
 			m.mu.Unlock()
 			if oldProcess == nil {
-				m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+				m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 			}
 			return err
 		}
 		m.publishWorkerUpdated(name, next)
 		if _, err := stopManagedProcess(oldProcess); err != nil {
 			m.mu.Lock()
-			m.statuses[name] = "failed"
+			m.statuses[name] = WorkerStateFailed
 			m.mu.Unlock()
-			m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+			m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 			return err
 		}
 		m.mu.Lock()
-		m.statuses[name] = "running"
+		m.statuses[name] = WorkerStateRunning
 		m.mu.Unlock()
 		return nil
 	}
@@ -615,7 +615,7 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 }
 
 func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) {
-	m.publishEvent("worker.updated", map[string]any{
+	m.publishEvent(EventWorkerUpdated, map[string]any{
 		"worker":    name,
 		"port":      worker.Port,
 		"role":      worker.Role,
@@ -648,17 +648,17 @@ func (m *Manager) processForWorker(name string) ManagedProcess {
 	return m.processes[name]
 }
 
-func stopManagedProcess(process ManagedProcess) (string, error) {
+func stopManagedProcess(process ManagedProcess) (WorkerState, error) {
 	if process == nil {
-		return "stopped", nil
+		return WorkerStateStopped, nil
 	}
 	if err := process.Stop(); err != nil {
-		return "failed", err
+		return WorkerStateFailed, err
 	}
 	if reporter, ok := process.(forcedStopReporter); ok && reporter.ForcedStop() {
-		return "stopped (forced)", nil
+		return WorkerStateStoppedForced, nil
 	}
-	return "stopped", nil
+	return WorkerStateStopped, nil
 }
 
 func (m *Manager) restartWorker(name string, resetRetries bool) error {
@@ -668,7 +668,7 @@ func (m *Manager) restartWorker(name string, resetRetries bool) error {
 	if err := m.startWorker(name, resetRetries); err != nil {
 		return err
 	}
-	m.publishEvent("worker.restarted", map[string]any{"worker": name, "status": "running"})
+	m.publishEvent(EventWorkerRestarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 	return nil
 }
 
@@ -684,8 +684,8 @@ func (m *Manager) RecordHealth(name string, healthy bool) {
 		if now.Sub(since) >= healthyRetryResetWindow {
 			m.retries[name] = 0
 		}
-		if m.workerStatusLocked(name) != "stopped" {
-			m.statuses[name] = "running"
+		if m.workerStatusLocked(name) != WorkerStateStopped {
+			m.statuses[name] = WorkerStateRunning
 		}
 		m.mu.Unlock()
 		return
@@ -693,25 +693,25 @@ func (m *Manager) RecordHealth(name string, healthy bool) {
 
 	m.mu.Lock()
 	delete(m.healthySince, name)
-	if m.workerStatusLocked(name) == "failed" {
+	if m.workerStatusLocked(name) == WorkerStateFailed {
 		m.mu.Unlock()
 		return
 	}
 	m.retries[name]++
 	if m.retries[name] >= 10 {
-		m.statuses[name] = "failed"
+		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
-		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": "worker health check failed"})
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": "worker health check failed"})
 		return
 	}
-	m.statuses[name] = "restarting"
+	m.statuses[name] = WorkerStateRestarting
 	m.mu.Unlock()
 
 	if err := m.restartWorker(name, false); err != nil {
 		m.mu.Lock()
-		m.statuses[name] = "failed"
+		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
-		m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 	}
 }
 
@@ -772,15 +772,15 @@ func (m *Manager) StartConfiguredWorkers() error {
 		m.setConfigPatchStatus(name, state, detail)
 		if err != nil {
 			m.mu.Lock()
-			m.statuses[name] = "failed"
+			m.statuses[name] = WorkerStateFailed
 			m.mu.Unlock()
-			m.publishEvent("worker.health.changed", map[string]any{"worker": name, "status": "failed", "error": redactedErrorMessage(err)})
+			m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
 	}
 	for _, name := range names {
-		if m.workerStatus(name) == "failed" {
+		if m.workerStatus(name) == WorkerStateFailed {
 			continue
 		}
 		if err := m.StartWorker(name); err != nil {
@@ -841,7 +841,7 @@ func (m *Manager) healthTargets() []healthTarget {
 
 	targets := make([]healthTarget, 0, len(m.config.Workers))
 	for name, worker := range m.config.Workers {
-		if m.workerStatusLocked(name) == "running" {
+		if m.workerStatusLocked(name) == WorkerStateRunning {
 			targets = append(targets, healthTarget{name: name, port: worker.Port})
 		}
 	}
@@ -897,7 +897,7 @@ func (m *Manager) liveWorkersUsingProvider(providerName string) []liveWorkerTarg
 
 	targets := []liveWorkerTarget{}
 	for workerName, worker := range m.config.Workers {
-		if worker.Provider != providerName || m.workerStatusLocked(workerName) != "running" {
+		if worker.Provider != providerName || m.workerStatusLocked(workerName) != WorkerStateRunning {
 			continue
 		}
 		targets = append(targets, liveWorkerTarget{port: worker.Port})

@@ -72,7 +72,7 @@ func (m *Manager) handleWorkerStream(rw http.ResponseWriter, r *http.Request, wo
 	lines, sub, cancel := sink.SnapshotAndSubscribe()
 	defer cancel()
 	for _, line := range lines {
-		if err := writeSSEEvent(rw, Event{Type: "stream.raw_redacted", Payload: map[string]any{"worker": workerName, "line": line}}); err != nil {
+		if err := writeSSEEvent(rw, Event{Type: EventStreamRawRedacted, Payload: map[string]any{"worker": workerName, "line": line}}); err != nil {
 			return
 		}
 	}
@@ -91,7 +91,7 @@ func (m *Manager) handleWorkerStream(rw http.ResponseWriter, r *http.Request, wo
 			if !ok {
 				return
 			}
-			if err := writeSSEEvent(rw, Event{Type: "stream.raw_redacted", Payload: map[string]any{"worker": workerName, "line": line}}); err != nil {
+			if err := writeSSEEvent(rw, Event{Type: EventStreamRawRedacted, Payload: map[string]any{"worker": workerName, "line": line}}); err != nil {
 				return
 			}
 			flusher.Flush()
