@@ -11,8 +11,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
 )
 
 type WorkerSpawn struct {
@@ -205,12 +203,7 @@ func ignoreManagedStopExit(err error) error {
 }
 
 func (m *Manager) BuildWorkerSpawn(workerName string) (WorkerSpawn, error) {
-	m.mu.RLock()
-	cfg := cloneConfig(m.config)
-	generation := appruntime.Generation(m.workerGenerationLocked(workerName))
-	m.mu.RUnlock()
-
-	runtime, err := (RuntimeBuilder{}).Build(cfg, workerName, generation)
+	runtime, err := m.runtimeForWorker(workerName)
 	if err != nil {
 		return WorkerSpawn{}, err
 	}

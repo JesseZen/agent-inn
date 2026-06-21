@@ -5,32 +5,9 @@ import (
 
 	"github.com/jesse/codex-app-proxy/internal/module"
 	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
 )
 
 var runtimeModuleNames = []string{"image_filter", "api_translate", "model_override", "request_log", "debug_sse"}
-
-func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapshot, error) {
-	modules := buildRuntimeModules(runtime.Modules, runtime.Upstream.APIFormat)
-	generation := int(runtime.Generation)
-	if generation == 0 {
-		generation = 1
-	}
-	snapshot := RuntimeConfigSnapshot{
-		Generation: generation,
-		Upstream: upstream.RuntimeUpstream{
-			Name:      string(runtime.Upstream.ID),
-			BaseURL:   runtime.Upstream.BaseURL,
-			APIKey:    runtime.Upstream.APIKey,
-			APIFormat: string(runtime.Upstream.APIFormat),
-		},
-		Modules: modules,
-	}
-	if err := snapshot.Validate(); err != nil {
-		return RuntimeConfigSnapshot{}, err
-	}
-	return snapshot, nil
-}
 
 func buildRuntimeModules(configs map[string]appruntime.ModuleConfig, apiFormat appruntime.APIFormat) []module.Middleware {
 	modules := make([]module.Middleware, 0, len(runtimeModuleNames))

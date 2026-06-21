@@ -952,21 +952,22 @@ func TestManagerConfigAndProviderPersistenceAPI(t *testing.T) {
 	if !strings.Contains(string(data), "https://relay.example/v1") || !strings.Contains(string(data), "api_key: sk-file") || strings.Contains(string(data), "api_key_ref") {
 		t.Fatalf("bad persisted config:\n%s", data)
 	}
-	if client.switchedPort != 6767 || client.switchedProvider.Name != "openai" || client.switchedProvider.BaseURL != "https://relay.example/v1" || client.switchedProvider.APIFormat != "chat_completions" {
-		t.Fatalf("live provider switch was not called: port=%d provider=%#v", client.switchedPort, client.switchedProvider)
+	if client.appliedRuntimes[6767].Upstream.ID != "openai" || client.appliedRuntimes[6767].Upstream.BaseURL != "https://relay.example/v1" || client.appliedRuntimes[6767].Upstream.APIFormat != "chat_completions" {
+		t.Fatalf("live runtime apply was not called: %#v", client.appliedRuntimes)
 	}
 }
 
-func TestManagerProviderUpdateFailsBeforePersistingWhenLiveWorkerRejects(t *testing.T) {
+func TestManagerUpstreamUpdatePersistsDesiredStateAndMarksFailedApplyOutOfSync(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	client := &recordingWorkerClient{switchErr: errors.New("worker rejected provider")}
+	client := &recordingWorkerClient{applyErrByPort: map[int]error{11199: errors.New("worker rejected runtime")}}
 	m := New(Config{
 		ConfigPath: configPath,
 		Config: config.Config{
 			Workers: map[string]config.WorkerConfig{
 				"app": {Port: 6767, Upstream: "openai"},
+				"cli": {Port: 11199, Upstream: "openai"},
 			},
 			Upstreams: map[string]config.UpstreamProfile{
 				"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "sk-file"},
@@ -976,16 +977,29 @@ func TestManagerProviderUpdateFailsBeforePersistingWhenLiveWorkerRejects(t *test
 	})
 	defer m.Close()
 	m.statuses["app"] = "running"
+	m.statuses["cli"] = "running"
 
 	res := httptest.NewRecorder()
-	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/openai", strings.NewReader(`{"base_url":"https://bad.example/v1","api_key":"sk-file","api_format":"chat_completions"}`)))
-	if res.Code != http.StatusBadGateway {
-		t.Fatalf("expected live worker failure, got %d: %s", res.Code, res.Body.String())
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/openai", strings.NewReader(`{"base_url":"https://relay.example/v1","api_key":"sk-file","api_format":"chat_completions"}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected desired update success, got %d: %s", res.Code, res.Body.String())
 	}
 
 	cfg := m.store.Config()
-	if cfg.Upstreams["openai"].BaseURL != "https://api.openai.com/v1" {
-		t.Fatalf("provider update persisted after live worker failure: %#v", cfg.Upstreams["openai"])
+	if cfg.Upstreams["openai"].BaseURL != "https://relay.example/v1" {
+		t.Fatalf("upstream update was not persisted: %#v", cfg.Upstreams["openai"])
+	}
+	if client.appliedRuntimes[6767].Upstream.BaseURL != "https://relay.example/v1" {
+		t.Fatalf("healthy worker did not receive runtime: %#v", client.appliedRuntimes)
+	}
+	if client.appliedRuntimes[11199].Upstream.BaseURL != "https://relay.example/v1" {
+		t.Fatalf("failing worker was not attempted: %#v", client.appliedRuntimes)
+	}
+	if got := m.workerStatus("app"); got != WorkerStateRunning {
+		t.Fatalf("healthy worker status changed: %s", got)
+	}
+	if got := m.workerStatus("cli"); got != WorkerStateOutOfSync {
+		t.Fatalf("failing worker status = %s, want %s", got, WorkerStateOutOfSync)
 	}
 }
 
@@ -1346,7 +1360,9 @@ type recordingWorkerClient struct {
 	switchErr        error
 	appliedPort      int
 	appliedRuntime   appruntime.WorkerRuntime
+	appliedRuntimes  map[int]appruntime.WorkerRuntime
 	applyErr         error
+	applyErrByPort   map[int]error
 	statusBody       string
 }
 
@@ -1372,6 +1388,15 @@ func (c *recordingWorkerClient) SwitchUpstream(port int, runtime upstream.Runtim
 func (c *recordingWorkerClient) ApplyRuntime(port int, runtime appruntime.WorkerRuntime) (ApplyRuntimeStatus, error) {
 	c.appliedPort = port
 	c.appliedRuntime = runtime
+	if c.appliedRuntimes == nil {
+		c.appliedRuntimes = map[int]appruntime.WorkerRuntime{}
+	}
+	c.appliedRuntimes[port] = runtime
+	if c.applyErrByPort != nil {
+		if err := c.applyErrByPort[port]; err != nil {
+			return ApplyRuntimeStatus{}, err
+		}
+	}
 	if c.applyErr != nil {
 		return ApplyRuntimeStatus{}, c.applyErr
 	}
