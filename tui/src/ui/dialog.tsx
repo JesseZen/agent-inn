@@ -144,6 +144,15 @@ function init() {
       })
       refocus()
     },
+    pop() {
+      const current = store.stack.at(-1)
+      current?.onClose?.()
+      setStore("stack", store.stack.slice(0, -1))
+      if (store.stack.length <= 1) {
+        setStore("size", "medium")
+      }
+      refocus()
+    },
     replace(input: any, onClose?: () => void) {
       if (store.stack.length === 0) {
         focus = renderer.currentFocusedRenderable
