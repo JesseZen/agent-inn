@@ -64,6 +64,8 @@ providers:
 		return nil
 	})
 	defer restore()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
 
 	var stderr bytes.Buffer
 	code := Run([]string{"--config", configPath, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
@@ -99,6 +101,8 @@ providers:
 		return nil
 	})
 	defer restore()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
 
 	var stderr bytes.Buffer
 	code := Run([]string{"--config", configPath, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
@@ -107,6 +111,43 @@ providers:
 	}
 	if !called {
 		t.Fatal("root runner was not called")
+	}
+}
+
+func TestRunRootRejectsSecondInstanceWhenLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+workers:
+  app:
+    port: 6767
+    provider: openai
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	holdLockForTest(t)
+
+	var called bool
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		called = true
+		return nil
+	})
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config", configPath, "--manager-port", "19091"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit when lock held, got 0: %s", stderr.String())
+	}
+	if called {
+		t.Fatal("root runner should not be called when lock is held")
+	}
+	if !strings.Contains(stderr.String(), "another instance") {
+		t.Fatalf("expected 'another instance' error, got: %s", stderr.String())
 	}
 }
 
@@ -218,6 +259,44 @@ func TestRootRunnerDoesNotWriteConfiguredWorkerStartupFailureToTerminal(t *testi
 	}
 	if strings.Contains(logOutput.String(), startErr.Error()) {
 		t.Fatalf("startup error should not be written to terminal log output: %q", logOutput.String())
+	}
+}
+
+// holdLockForTest 替换 rootLockerFactory 让 Run 抢锁失败，模拟第二实例启动。
+func holdLockForTest(t *testing.T) {
+	t.Helper()
+	previous := rootLockerFactory
+	rootLockerFactory = func() rootLocker {
+		return lockedLocker{}
+	}
+	t.Cleanup(func() { rootLockerFactory = previous })
+}
+
+type lockedLocker struct{}
+
+func (lockedLocker) Acquire() (func(), error) {
+	return nil, errAlreadyLocked
+}
+
+// noopLocker 总是成功抢锁，用于走 runRoot 的测试避免依赖真 /tmp/cap.lock。
+type noopLocker struct{}
+
+func (noopLocker) Acquire() (func(), error) {
+	return func() {}, nil
+}
+
+func TestFlockLockerRejectsSecondAcquireOnSamePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.lock")
+	first := flockLocker{path: path}
+	release, err := first.Acquire()
+	if err != nil {
+		t.Fatalf("first acquire should succeed: %v", err)
+	}
+	defer release()
+
+	second := flockLocker{path: path}
+	if _, err := second.Acquire(); err == nil {
+		t.Fatal("second acquire on same path should fail while first is held")
 	}
 }
 

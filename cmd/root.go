@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -76,6 +77,49 @@ var rootProgramFactory = func(addr string, startupStatus string) rootProgram {
 }
 
 var rootLogWriter io.Writer = os.Stderr
+
+// rootLocker 抢占独占锁，避免两个 root 进程同时运行 manager + TUI 导致状态不同步。
+type rootLocker interface {
+	Acquire() (release func(), err error)
+}
+
+// flockLocker 用文件锁实现独占。锁文件路径固定，进程退出时由 OS 释放。
+type flockLocker struct {
+	path string
+}
+
+func defaultLockPath() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return filepath.Join(dir, constants.LockFileName)
+	}
+	return filepath.Join(os.TempDir(), constants.LockFileName)
+}
+
+func (l flockLocker) Acquire() (func(), error) {
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock file %s: %w", l.path, err)
+	}
+	if err := flockTryLock(f); err != nil {
+		_ = f.Close()
+		return nil, errAlreadyLocked
+	}
+	return func() { _ = f.Close() }, nil
+}
+
+var rootLockerFactory = func() rootLocker {
+	return flockLocker{path: defaultLockPath()}
+}
+
+// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/cap.lock。
+func setRootLockerFactoryForTest(locker rootLocker) func() {
+	previous := rootLockerFactory
+	rootLockerFactory = func() rootLocker { return locker }
+	return func() { rootLockerFactory = previous }
+}
+
+// errAlreadyLocked 是抢锁失败的哨兵错误，runRoot 据此输出友好提示。
+var errAlreadyLocked = fmt.Errorf("another instance is already running")
 
 var rootRunner = func(opts RootOptions) error {
 	mgr := rootManagerFactory(opts)
@@ -209,6 +253,13 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+
+	release, err := rootLockerFactory().Acquire()
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to start: %v\n", err)
+		return 1
+	}
+	defer release()
 
 	cfg, err := config.LoadFile(*configPath)
 	if err != nil {
