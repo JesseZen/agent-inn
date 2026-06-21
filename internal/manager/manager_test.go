@@ -15,6 +15,7 @@ import (
 
 	"github.com/jesse/codex-app-proxy/internal/config"
 	"github.com/jesse/codex-app-proxy/internal/module"
+	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
 	"github.com/jesse/codex-app-proxy/internal/upstream"
 )
 
@@ -143,11 +144,14 @@ func TestManagerBuildsWorkerRuntimeConfigForFDWithoutSecretInArgs(t *testing.T) 
 	if !strings.Contains(string(spawn.RuntimeJSON), "sk-secret") {
 		t.Fatalf("runtime fd payload missing resolved secret: %s", spawn.RuntimeJSON)
 	}
-	var decoded map[string]any
+	var decoded appruntime.WorkerRuntime
 	if err := json.Unmarshal(spawn.RuntimeJSON, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded["port"].(float64) != 6767 {
+	if decoded.ID != "codex-app" || decoded.ListenPort != 6767 || decoded.Generation != 1 {
+		t.Fatalf("bad runtime payload: %#v", decoded)
+	}
+	if decoded.Upstream.ID != "openai" || decoded.Upstream.APIKey != "sk-secret" {
 		t.Fatalf("bad runtime payload: %#v", decoded)
 	}
 }

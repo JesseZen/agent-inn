@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
 )
 
 type WorkerSpawn struct {
@@ -202,54 +204,22 @@ func ignoreManagedStopExit(err error) error {
 	return err
 }
 
-type workerRuntimeConfig struct {
-	Port     int                     `json:"port"`
-	Role     string                  `json:"role,omitempty"`
-	Upstream upstreamRuntimeForJSON  `json:"upstream"`
-	Modules  map[string]configModule `json:"modules,omitempty"`
-}
-
-type upstreamRuntimeForJSON struct {
-	Name      string `json:"name"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key,omitempty"`
-	APIFormat string `json:"api_format,omitempty"`
-}
-
-type configModule struct {
-	Enabled bool           `json:"enabled"`
-	Params  map[string]any `json:"params,omitempty"`
-}
-
 func (m *Manager) BuildWorkerSpawn(workerName string) (WorkerSpawn, error) {
-	worker, ok := m.workerConfig(workerName)
-	if !ok {
-		return WorkerSpawn{}, fmt.Errorf("worker %q not found", workerName)
-	}
-	runtimeUpstream, err := m.resolveUpstream(worker.Upstream)
+	m.mu.RLock()
+	cfg := cloneConfig(m.config)
+	generation := appruntime.Generation(m.workerGenerationLocked(workerName))
+	m.mu.RUnlock()
+
+	runtime, err := (RuntimeBuilder{}).Build(cfg, workerName, generation)
 	if err != nil {
 		return WorkerSpawn{}, err
-	}
-	runtime := workerRuntimeConfig{
-		Port: worker.Port,
-		Role: worker.Role,
-		Upstream: upstreamRuntimeForJSON{
-			Name:      runtimeUpstream.Name,
-			BaseURL:   runtimeUpstream.BaseURL,
-			APIKey:    runtimeUpstream.APIKey,
-			APIFormat: runtimeUpstream.APIFormat,
-		},
-		Modules: map[string]configModule{},
-	}
-	for name, module := range worker.Modules {
-		runtime.Modules[name] = configModule{Enabled: module.Enabled, Params: module.Params}
 	}
 	payload, err := json.Marshal(runtime)
 	if err != nil {
 		return WorkerSpawn{}, err
 	}
 	return WorkerSpawn{
-		Args:        []string{"worker", "--port", fmt.Sprintf("%d", worker.Port), "--config-fd", "3"},
+		Args:        []string{"worker", "--port", fmt.Sprintf("%d", runtime.ListenPort), "--config-fd", "3"},
 		RuntimeJSON: payload,
 	}, nil
 }
