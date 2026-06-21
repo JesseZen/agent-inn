@@ -8,10 +8,12 @@ import (
 
 type Event struct {
 	ID      int64          `json:"id"`
-	Type    string         `json:"type"`
+	Type    EventType      `json:"type"`
 	At      time.Time      `json:"at"`
 	Payload map[string]any `json:"payload,omitempty"`
 }
+
+const defaultEventBusCapacity = 1024
 
 type eventBus struct {
 	mu          sync.Mutex
@@ -30,7 +32,7 @@ type eventSubscription struct {
 
 func newEventBus(capacity int) *eventBus {
 	if capacity <= 0 {
-		capacity = 1024
+		capacity = defaultEventBusCapacity
 	}
 	return &eventBus{
 		capacity:    capacity,
@@ -38,7 +40,7 @@ func newEventBus(capacity int) *eventBus {
 	}
 }
 
-func (b *eventBus) Publish(eventType string, payload map[string]any) Event {
+func (b *eventBus) Publish(eventType EventType, payload map[string]any) Event {
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()

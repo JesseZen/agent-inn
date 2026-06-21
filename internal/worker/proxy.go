@@ -13,6 +13,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/module"
 )
 
@@ -46,7 +47,7 @@ func (w *Worker) UpdateSnapshot(snapshot RuntimeConfigSnapshot) error {
 }
 
 func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/_proxy/") {
+	if strings.HasPrefix(r.URL.Path, constants.ProxyPathPrefix) {
 		w.serveManagement(rw, r)
 		return
 	}

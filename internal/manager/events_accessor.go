@@ -34,7 +34,7 @@ func payloadBoolMap(value any) map[string]bool {
 
 // AsWorkerStarted 解析 worker.started 事件。ok=false 表示类型不匹配。
 func (e Event) AsWorkerStarted() (worker string, status string, ok bool) {
-	if e.Type != "worker.started" {
+	if e.Type != EventWorkerStarted {
 		return "", "", false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -44,7 +44,7 @@ func (e Event) AsWorkerStarted() (worker string, status string, ok bool) {
 
 // AsWorkerStopped 解析 worker.stopped 事件。ok=false 表示类型不匹配。
 func (e Event) AsWorkerStopped() (worker string, status string, ok bool) {
-	if e.Type != "worker.stopped" {
+	if e.Type != EventWorkerStopped {
 		return "", "", false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -54,7 +54,7 @@ func (e Event) AsWorkerStopped() (worker string, status string, ok bool) {
 
 // AsWorkerRestarted 解析 worker.restarted 事件。ok=false 表示类型不匹配。
 func (e Event) AsWorkerRestarted() (worker string, status string, ok bool) {
-	if e.Type != "worker.restarted" {
+	if e.Type != EventWorkerRestarted {
 		return "", "", false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -64,7 +64,7 @@ func (e Event) AsWorkerRestarted() (worker string, status string, ok bool) {
 
 // AsWorkerHealthChanged 解析 worker.health.changed 事件。ok=false 表示类型不匹配。
 func (e Event) AsWorkerHealthChanged() (worker string, status string, errMsg string, ok bool) {
-	if e.Type != "worker.health.changed" {
+	if e.Type != EventWorkerHealthChanged {
 		return "", "", "", false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -75,7 +75,7 @@ func (e Event) AsWorkerHealthChanged() (worker string, status string, errMsg str
 
 // AsWorkerUpdated 解析 worker.updated 事件。ok=false 表示类型不匹配。
 func (e Event) AsWorkerUpdated() (worker string, port int, provider string, logLevel string, modules map[string]bool, ok bool) {
-	if e.Type != "worker.updated" {
+	if e.Type != EventWorkerUpdated {
 		return "", 0, "", "", nil, false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -88,7 +88,7 @@ func (e Event) AsWorkerUpdated() (worker string, port int, provider string, logL
 
 // AsModuleUpdated 解析 module.updated 事件。ok=false 表示类型不匹配。
 func (e Event) AsModuleUpdated() (worker string, port int, module string, enabled bool, params map[string]any, ok bool) {
-	if e.Type != "module.updated" {
+	if e.Type != EventModuleUpdated {
 		return "", 0, "", false, nil, false
 	}
 	worker, _ = e.Payload["worker"].(string)
@@ -101,7 +101,7 @@ func (e Event) AsModuleUpdated() (worker string, port int, module string, enable
 
 // AsProviderUpdated 解析 provider.updated 事件。ok=false 表示类型不匹配。
 func (e Event) AsProviderUpdated() (provider string, ok bool) {
-	if e.Type != "provider.updated" {
+	if e.Type != EventProviderUpdated {
 		return "", false
 	}
 	provider, _ = e.Payload["provider"].(string)
@@ -110,7 +110,7 @@ func (e Event) AsProviderUpdated() (provider string, ok bool) {
 
 // AsConfigStatusChanged 解析 config.status.changed 事件。ok=false 表示类型不匹配。
 func (e Event) AsConfigStatusChanged() (dirty bool, generation int, ok bool) {
-	if e.Type != "config.status.changed" {
+	if e.Type != EventConfigStatusChanged {
 		return false, 0, false
 	}
 	dirty, _ = e.Payload["dirty"].(bool)
@@ -120,7 +120,7 @@ func (e Event) AsConfigStatusChanged() (dirty bool, generation int, ok bool) {
 
 // AsStreamRawRedacted 解析 stream.raw_redacted 事件。ok=false 表示类型不匹配。
 func (e Event) AsStreamRawRedacted() (worker string, line string, ok bool) {
-	if e.Type != "stream.raw_redacted" {
+	if e.Type != EventStreamRawRedacted {
 		return "", "", false
 	}
 	worker, _ = e.Payload["worker"].(string)

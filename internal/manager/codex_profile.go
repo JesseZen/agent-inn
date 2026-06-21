@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -44,7 +45,7 @@ func codexProfilePath(name string) string {
 func syncCodexProfileFiles(cfg config.Config) error {
 	for name, worker := range cfg.Workers {
 		profile := cfg.Providers[worker.Provider]
-		profile.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", worker.Port)
+		profile.BaseURL = fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, worker.Port)
 		if err := writeCodexProfileFile(name, profile); err != nil {
 			return fmt.Errorf("write profile %s: %w", name, err)
 		}
