@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/module"
 	"github.com/jesse/codex-app-proxy/internal/provider"
 	"github.com/jesse/codex-app-proxy/internal/worker"
@@ -76,7 +77,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		snapshot.ConfigPatchDetail = patch.Detail()
 	}
 	w := worker.New(worker.Options{Snapshot: snapshot})
-	server := newWorkerServer("127.0.0.1:"+strconv.Itoa(cfg.Port), w)
+	server := newWorkerServer(constants.LocalhostAddr+":"+strconv.Itoa(cfg.Port), w)
 	shutdown := newWorkerShutdown(server, patch, workerShutdownTimeout)
 	server.InstallOrphanWatcher(stdin, shutdown)
 	stopSignals := make(chan os.Signal, 1)
@@ -160,7 +161,7 @@ func buildConfigPatch(cfg WorkerRuntimeConfig) (*module.ConfigPatch, bool) {
 		ConfigPath:  configPath,
 		WorkerID:    fmt.Sprintf("worker-%d", cfg.Port),
 		WorkerPort:  cfg.Port,
-		PatchedBase: fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
+		PatchedBase: fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, cfg.Port),
 	}), true
 }
 

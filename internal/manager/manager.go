@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/logging"
 	"github.com/jesse/codex-app-proxy/internal/module"
 	"github.com/jesse/codex-app-proxy/internal/provider"
@@ -159,7 +160,7 @@ func (m *Manager) CheckPortAvailable(workerName string, port int) error {
 			return fmt.Errorf("port :%d is used by worker '%s'", port, name)
 		}
 	}
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", constants.LocalhostAddr, port))
 	if err != nil {
 		return fmt.Errorf("port :%d is already in use by another process", port)
 	}
@@ -750,7 +751,7 @@ func (c HTTPHealthChecker) Check(port int) bool {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/_proxy/health", port))
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d%s", constants.LocalhostAddr, port, constants.ProxyHealthPath))
 	if err != nil {
 		return false
 	}
@@ -808,7 +809,7 @@ func recoverWorkerConfigPatch(worker config.WorkerConfig, workerName string) (mo
 		ConfigPath:  configPath,
 		WorkerID:    workerName,
 		WorkerPort:  worker.Port,
-		PatchedBase: fmt.Sprintf("http://127.0.0.1:%d", worker.Port),
+		PatchedBase: fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, worker.Port),
 	})
 	if err := patch.RecoverStaleJournal(); err != nil {
 		return patch.State(), patch.Detail(), err

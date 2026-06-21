@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-var version = "2.0.0-alpha.6"
+var version = "2.0.0-alpha.7"
 
 func runVersion(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "codex-proxy %s\n", version)
