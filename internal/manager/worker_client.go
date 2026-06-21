@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/provider"
 )
 
@@ -15,7 +16,7 @@ type HTTPWorkerClient struct {
 }
 
 func (c HTTPWorkerClient) ToggleModule(port int, moduleName string) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/_proxy/modules/%s/toggle", port, moduleName)
+	url := fmt.Sprintf("http://%s:%d%s%s/toggle", constants.LocalhostAddr, port, constants.ProxyModulesPrefix, moduleName)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func (c HTTPWorkerClient) PatchModule(port int, moduleName string, cfg config.Mo
 	if err := json.NewEncoder(&body).Encode(cfg); err != nil {
 		return err
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/_proxy/modules/%s", port, moduleName)
+	url := fmt.Sprintf("http://%s:%d%s%s", constants.LocalhostAddr, port, constants.ProxyModulesPrefix, moduleName)
 	req, err := http.NewRequest(http.MethodPatch, url, &body)
 	if err != nil {
 		return err
@@ -44,7 +45,7 @@ func (c HTTPWorkerClient) SwitchProvider(port int, runtime provider.RuntimeProvi
 	}{Provider: runtime}); err != nil {
 		return err
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/_proxy/switch", port)
+	url := fmt.Sprintf("http://%s:%d%s", constants.LocalhostAddr, port, constants.ProxySwitchPath)
 	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
 		return err
@@ -54,7 +55,7 @@ func (c HTTPWorkerClient) SwitchProvider(port int, runtime provider.RuntimeProvi
 }
 
 func (c HTTPWorkerClient) GetStatus(port int) (WorkerStatus, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/_proxy/status", port)
+	url := fmt.Sprintf("http://%s:%d%s", constants.LocalhostAddr, port, constants.ProxyStatusPath)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return WorkerStatus{}, err

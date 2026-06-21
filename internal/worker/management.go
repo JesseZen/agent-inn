@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/module"
 	"github.com/jesse/codex-app-proxy/internal/provider"
 )
 
 func (w *Worker) serveManagement(rw http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/_proxy/health" && r.Method == http.MethodGet {
+	if r.URL.Path == constants.ProxyHealthPath && r.Method == http.MethodGet {
 		rw.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(rw).Encode(map[string]any{
 			"status": "ok",
@@ -19,15 +20,15 @@ func (w *Worker) serveManagement(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if r.URL.Path == "/_proxy/status" && r.Method == http.MethodGet {
+	if r.URL.Path == constants.ProxyStatusPath && r.Method == http.MethodGet {
 		w.writeStatus(rw)
 		return
 	}
-	if r.URL.Path == "/_proxy/switch" && r.Method == http.MethodPost {
+	if r.URL.Path == constants.ProxySwitchPath && r.Method == http.MethodPost {
 		w.handleSwitch(rw, r)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/_proxy/modules/") {
+	if strings.HasPrefix(r.URL.Path, constants.ProxyModulesPrefix) {
 		w.handleModule(rw, r)
 		return
 	}
@@ -75,7 +76,7 @@ func (w *Worker) handleSwitch(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Worker) handleModule(rw http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/_proxy/modules/")
+	rest := strings.TrimPrefix(r.URL.Path, constants.ProxyModulesPrefix)
 	name, action, _ := strings.Cut(rest, "/")
 	if name == "" {
 		http.NotFound(rw, r)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/manager"
 )
 
@@ -85,7 +86,7 @@ var rootRunner = func(opts RootOptions) error {
 	}
 	stopHealthMonitor := mgr.StartHealthMonitor(0)
 	defer stopHealthMonitor()
-	addr := "127.0.0.1:" + strconv.Itoa(opts.ManagerPort)
+	addr := constants.LocalhostAddr + ":" + strconv.Itoa(opts.ManagerPort)
 	server := rootServerFactory(addr, mgr)
 	errCh := make(chan error, 1)
 	go func() {
