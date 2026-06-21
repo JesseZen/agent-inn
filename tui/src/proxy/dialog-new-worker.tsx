@@ -19,17 +19,17 @@ export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../u
   if (!name) return
 
   // Reuse the existing upstream picker dialog style.
-  dialog.replace(() => <ProviderStep name={name} port={port} />)
+  dialog.replace(() => <UpstreamStep name={name} port={port} />)
 }
 
-function ProviderStep(props: { name: string; port: number }) {
+function UpstreamStep(props: { name: string; port: number }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
 
   const options = createMemo<DialogSelectOption<string>[]>(() =>
-    sync.data.providers.map((p) => ({
+    sync.data.upstreams.map((p) => ({
       title: p.name,
       value: p.name,
       description: `${p.base_url}${p.has_api_key ? "" : " (no key)"}`,
@@ -43,7 +43,7 @@ function ProviderStep(props: { name: string; port: number }) {
       placeholder="Search upstreams..."
       onSelect={async (opt) => {
         try {
-          await sdk.client.createWorker({ name: props.name, port: props.port, provider: opt.value })
+          await sdk.client.createWorker({ name: props.name, port: props.port, upstream: opt.value })
           toast.show({ message: `Created worker ${props.name}`, variant: "success" })
         } catch (err) {
           toast.error(err)

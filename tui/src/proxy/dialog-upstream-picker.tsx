@@ -5,18 +5,18 @@ import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { createMemo } from "solid-js"
 
-export function DialogProviderPicker(props: { worker: WorkerSummary }) {
+export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
 
   const options = createMemo<DialogSelectOption<string>[]>(() =>
-    sync.data.providers.map((p) => ({
+    sync.data.upstreams.map((p) => ({
       title: p.name,
       value: p.name,
       description: `${p.base_url}${p.has_api_key ? "" : " (no key)"}`,
-      category: p.name === props.worker.provider.name ? "Current" : "Available",
+      category: p.name === props.worker.upstream.name ? "Current" : "Available",
     })),
   )
 
@@ -25,14 +25,14 @@ export function DialogProviderPicker(props: { worker: WorkerSummary }) {
       title={`Switch Upstream: ${props.worker.name}`}
       options={options()}
       placeholder="Search upstreams..."
-      current={props.worker.provider.name}
+      current={props.worker.upstream.name}
       onSelect={async (opt) => {
-        if (opt.value === props.worker.provider.name) {
+        if (opt.value === props.worker.upstream.name) {
           dialog.clear()
           return
         }
         try {
-          await sdk.client.patchWorker(props.worker.port, { provider: opt.value })
+          await sdk.client.patchWorker(props.worker.port, { upstream: opt.value })
           await sync.bootstrap({ fatal: false })
           toast.show({ message: `Switched ${props.worker.name} to ${opt.value}`, variant: "success" })
         } catch (err) {

@@ -3,13 +3,13 @@ import type { GlobalEvent } from "@codex-proxy/sdk/v2"
 import { Flag } from "@codex-proxy/core/flag/flag"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
-import type { ProxyConfigResponse, ProxyConfigStatus, RedactedProvider, WorkerDetail, WorkerSummary } from "../proxy/backend"
+import type { ProxyConfigResponse, ProxyConfigStatus, RedactedUpstream, WorkerDetail, WorkerSummary } from "../proxy/backend"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
 }
 
-export type { ProxyConfigStatus, RedactedProvider, WorkerDetail, WorkerSummary }
+export type { ProxyConfigStatus, RedactedUpstream, WorkerDetail, WorkerSummary }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
@@ -46,7 +46,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async getWorker(port: number) {
           return request<WorkerDetail>(`/api/workers/${port}`)
         },
-        async createWorker(input: { name: string; port: number; provider: string }) {
+        async createWorker(input: { name: string; port: number; upstream: string }) {
           return request<WorkerSummary>("/api/workers", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -57,7 +57,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           port: number,
           patch: Partial<{
             port: number
-            provider: string
+            upstream: string
             modules: WorkerDetail["modules"]
             log_level: string
           }>,
@@ -68,7 +68,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               port: patch.port ?? current.port,
-              provider: patch.provider ?? current.provider.name,
+              upstream: patch.upstream ?? current.upstream.name,
               modules: patch.modules ?? current.modules ?? {},
               log_level: patch.log_level ?? current.log_level,
             }),
@@ -95,13 +95,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         logsUrl(port: number) {
           return new URL(`/api/workers/${port}/stream`, props.url).toString()
         },
-        async getProviders() {
-          return request<{ providers: Record<string, RedactedProvider> }>("/api/providers").then((result) =>
-            Object.values(result.providers ?? {}),
+        async getUpstreams() {
+          return request<{ upstreams: Record<string, RedactedUpstream> }>("/api/upstreams").then((result) =>
+            Object.values(result.upstreams ?? {}),
           )
         },
-        async patchProvider(name: string, profile: { base_url?: string; api_key?: string; api_format?: string }) {
-          return request(`/api/providers/${name}`, {
+        async patchUpstream(name: string, profile: { base_url?: string; api_key?: string; api_format?: string }) {
+          return request(`/api/upstreams/${name}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(profile),

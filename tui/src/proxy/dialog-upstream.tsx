@@ -38,7 +38,7 @@ export function DialogUpstream() {
 
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
     { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
-    ...sync.data.providers.map((upstream) => ({
+    ...sync.data.upstreams.map((upstream) => ({
       title: upstream.name,
       value: { type: "edit" as const, name: upstream.name },
       description: `${upstream.base_url}${upstream.has_api_key ? "" : " (no key)"}`,
@@ -65,7 +65,7 @@ export function DialogUpstream() {
           return
         }
 
-        const upstream = sync.data.providers.find((item) => item.name === opt.value.name)
+        const upstream = sync.data.upstreams.find((item) => item.name === opt.value.name)
         if (!upstream) return
         dialog.replace(() => (
           <DialogUpstreamEditor
@@ -102,7 +102,7 @@ function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: "create
         if (!patch) return
         const updated = { ...draft(), ...patch, has_api_key: patch.api_key === undefined ? draft().has_api_key : patch.api_key !== "" }
         setDraft(updated)
-        await sdk.client.patchProvider(props.name, patch)
+        await sdk.client.patchUpstream(props.name, patch)
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${props.name}`, variant: "success" })
       },

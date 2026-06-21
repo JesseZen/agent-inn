@@ -14,7 +14,7 @@ export function DialogWorkerPicker(props: {
     sync.data.workers.map((worker) => ({
       title: worker.name,
       value: worker.port,
-      description: `:${worker.port} • ${worker.provider.name} • ${worker.status}`,
+      description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
       category: worker.status === "running" ? "Running" : "Stopped",
       onSelect: () => props.onSelect(worker),
     })),

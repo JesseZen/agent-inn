@@ -11,7 +11,7 @@ export function DialogWorkers() {
     sync.data.workers.map((w) => ({
       title: w.name,
       value: w.port,
-      description: `:${w.port} • ${w.provider.name} • ${w.status}`,
+      description: `:${w.port} • ${w.upstream.name} • ${w.status}`,
       category: w.status === "running" ? "Running" : "Stopped",
     })),
   )

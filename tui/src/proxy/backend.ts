@@ -1,7 +1,7 @@
 import type { Agent, Config, Model, Path, Project, Provider } from "@codex-proxy/sdk/v2"
 import type { EventSource } from "../context/sdk"
 
-export type RedactedProvider = {
+export type RedactedUpstream = {
   name: string
   base_url: string
   has_api_key: boolean
@@ -16,7 +16,7 @@ export type WorkerSummary = {
   name: string
   port: number
   role?: string
-  provider: RedactedProvider
+  upstream: RedactedUpstream
   status: string
   snapshot_generation: number
   log_level: string
@@ -111,19 +111,19 @@ function createModel(providerID: string): Model {
   }
 }
 
-export function toCodexProxyProviders(providers: RedactedProvider[]): Provider[] {
-  return providers.map((provider) => {
-    const model = createModel(provider.name)
+export function toCodexProxyUpstreams(upstreams: RedactedUpstream[]): Provider[] {
+  return upstreams.map((upstream) => {
+    const model = createModel(upstream.name)
     return {
-      id: provider.name,
-      name: provider.name,
+      id: upstream.name,
+      name: upstream.name,
       source: "config",
       env: [],
       key: "",
       options: {
-        base_url: provider.base_url,
-        api_format: provider.api_format,
-        has_api_key: provider.has_api_key,
+        base_url: upstream.base_url,
+        api_format: upstream.api_format,
+        has_api_key: upstream.has_api_key,
       },
       models: {
         [model.id]: model,
@@ -204,12 +204,12 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
     const request = requestInfo instanceof Request ? requestInfo : undefined
     const url = new URL(request ? request.url : String(requestInfo))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
-    const providers = toCodexProxyProviders(
-      await fetchManager<{ providers: Record<string, RedactedProvider> }>(input.baseUrl, "/api/providers").then((result) =>
-        Object.values(result.providers ?? {}),
+    const upstreams = toCodexProxyUpstreams(
+      await fetchManager<{ upstreams: Record<string, RedactedUpstream> }>(input.baseUrl, "/api/upstreams").then((result) =>
+        Object.values(result.upstreams ?? {}),
       ),
     )
-    const providerDefault = defaultModels(providers)
+    const providerDefault = defaultModels(upstreams)
     const location = createLocation(input.directory)
 
     if (url.pathname === "/path" && method === "GET") return json(createPath(input.directory))
@@ -220,10 +220,10 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
     if (url.pathname === "/experimental/workspace" && method === "GET") return json([])
     if (url.pathname === "/experimental/workspace/status" && method === "GET") return json([])
     if (url.pathname === "/config/providers" && method === "GET") {
-      return json({ providers, default: providerDefault })
+      return json({ providers: upstreams, default: providerDefault })
     }
     if (url.pathname === "/provider" && method === "GET") {
-      return json({ all: providers, default: providerDefault, connected: providers.map((provider) => provider.id) })
+      return json({ all: upstreams, default: providerDefault, connected: upstreams.map((upstream) => upstream.id) })
     }
     if (url.pathname === "/command" && method === "GET") return json([])
     if (url.pathname === "/config" && method === "GET") {
@@ -236,7 +236,7 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
     if (url.pathname === "/experimental/console" && method === "GET") {
       return json({ consoleManagedProviders: [], switchableOrgCount: 0 })
     }
-    if (url.pathname === "/agent" && method === "GET") return json(createAgent(providers))
+    if (url.pathname === "/agent" && method === "GET") return json(createAgent(upstreams))
     if (url.pathname === "/lsp" && method === "GET") return json([])
     if (url.pathname === "/mcp" && method === "GET") return json({})
     if (url.pathname === "/experimental/resource" && method === "GET") return json({})

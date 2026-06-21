@@ -20,7 +20,7 @@ export function DialogLaunch() {
       .map((worker) => ({
         title: worker.name,
         value: worker.name,
-        description: `:${worker.port} • ${worker.provider.name}`,
+        description: `:${worker.port} • ${worker.upstream.name}`,
         category: worker.status === "running" ? "Running cli workers" : "Stopped cli workers",
       })),
   )

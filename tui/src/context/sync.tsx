@@ -20,7 +20,7 @@ import type {
   SnapshotFileDiff,
   ConsoleState,
 } from "@codex-proxy/sdk/v2"
-import type { ProxyConfigStatus, RedactedProvider, WorkerSummary } from "./sdk"
+import type { ProxyConfigStatus, RedactedUpstream, WorkerSummary } from "./sdk"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "./project"
 import { useEvent } from "./event"
@@ -105,7 +105,7 @@ export const {
       formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
       workers: WorkerSummary[]
-      providers: RedactedProvider[]
+      upstreams: RedactedUpstream[]
       config_status: ProxyConfigStatus | undefined
       error?: string
     }>({
@@ -139,7 +139,7 @@ export const {
       formatter: [],
       vcs: undefined,
       workers: [],
-      providers: [],
+      upstreams: [],
       config_status: undefined,
       error: undefined,
     })
@@ -175,18 +175,18 @@ export const {
     }
 
     async function refreshManagerData() {
-      const [workers, providers, config] = await Promise.all([
+      const [workers, upstreams, config] = await Promise.all([
         sdk.client.listWorkers(),
-        sdk.client.getProviders(),
+        sdk.client.getUpstreams(),
         sdk.client.getConfig(),
       ])
       batch(() => {
         setStore("workers", reconcile(workers))
-        setStore("providers", reconcile(providers))
+        setStore("upstreams", reconcile(upstreams))
         setStore("config_status", reconcile(config.status))
         setStore("error", undefined)
       })
-      return { workers, providers, config }
+      return { workers, upstreams, config }
     }
 
     event.subscribe((event, { workspace }) => {
@@ -523,7 +523,7 @@ export const {
               setStore("agent", reconcile(agents))
               setStore("config", reconcile(config))
               setStore("workers", reconcile(manager.workers))
-              setStore("providers", reconcile(manager.providers))
+              setStore("upstreams", reconcile(manager.upstreams))
               setStore("config_status", reconcile(manager.config.status))
               setStore("error", undefined)
               if (sessions !== undefined) setStore("session", reconcile(sessions))

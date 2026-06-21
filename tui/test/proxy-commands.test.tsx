@@ -8,7 +8,7 @@ import path from "node:path"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
-import { toCodexProxyProviders, type ProxyConfigStatus, type RedactedProvider, type WorkerSummary } from "../src/proxy/backend"
+import { toCodexProxyUpstreams, type ProxyConfigStatus, type RedactedUpstream, type WorkerSummary } from "../src/proxy/backend"
 
 async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
@@ -26,7 +26,7 @@ function frameLines(frame: string) {
 }
 
 function createProxyHarness() {
-  const providers = new Map<string, RedactedProvider>([
+  const providers = new Map<string, RedactedUpstream>([
     [
       "openai",
       {
@@ -52,7 +52,7 @@ function createProxyHarness() {
         name: "app",
         port: 6767,
         role: "app",
-        provider: providers.get("openai")!,
+        upstream: providers.get("openai")!,
         status: "running",
         snapshot_generation: 3,
         log_level: "simple",
@@ -68,7 +68,7 @@ function createProxyHarness() {
         name: "cli-openrouter",
         port: 11199,
         role: "cli",
-        provider: providers.get("openai")!,
+        upstream: providers.get("openai")!,
         status: "running",
         snapshot_generation: 1,
         log_level: "simple",
@@ -85,8 +85,8 @@ function createProxyHarness() {
     } satisfies ProxyConfigStatus,
   }
   const calls = {
-    patchWorker: [] as Array<{ port: number; provider: string }>,
-    patchProvider: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
+    patchWorker: [] as Array<{ port: number; upstream: string }>,
+    patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     saveConfig: 0,
     getLogs: 0,
   }
@@ -94,12 +94,12 @@ function createProxyHarness() {
   const fetch = createFetch(async (url) => {
     if (url.pathname === "/config/providers")
       return json({
-        providers: toCodexProxyProviders([...providers.values()]),
+        providers: toCodexProxyUpstreams([...providers.values()]),
         default: Object.fromEntries([...providers.keys()].map((name) => [name, `${name}-proxy`])),
       })
     if (url.pathname === "/provider")
       return json({
-        all: toCodexProxyProviders([...providers.values()]),
+        all: toCodexProxyUpstreams([...providers.values()]),
         default: Object.fromEntries([...providers.keys()].map((name) => [name, `${name}-proxy`])),
         connected: [...providers.keys()],
       })
@@ -120,9 +120,9 @@ function createProxyHarness() {
       })
     if (url.pathname === "/api/workers/6767" && url.search === "")
       return json(workers.get(6767)!)
-    if (url.pathname === "/api/providers")
+    if (url.pathname === "/api/upstreams")
       return json({
-        providers: Object.fromEntries(providers.entries()),
+        upstreams: Object.fromEntries(providers.entries()),
       })
     if (url.pathname === "/api/config" && url.search === "") {
       if (url.href.includes("&__method=PUT")) return undefined
@@ -155,22 +155,22 @@ function createProxyHarness() {
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { provider: string }
-      calls.patchWorker.push({ port: 6767, provider: body.provider })
-      const nextProvider = providers.get(body.provider)
-      if (nextProvider) {
+      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string }
+      calls.patchWorker.push({ port: 6767, upstream: body.upstream })
+      const nextUpstream = providers.get(body.upstream)
+      if (nextUpstream) {
         workers.set(6767, {
           ...workers.get(6767)!,
-          provider: nextProvider,
+          upstream: nextUpstream,
         })
       }
       return json(workers.get(6767)!)
     }
 
-    if (url.pathname.startsWith("/api/providers/") && method === "PATCH") {
-      const name = url.pathname.slice("/api/providers/".length)
+    if (url.pathname.startsWith("/api/upstreams/") && method === "PATCH") {
+      const name = url.pathname.slice("/api/upstreams/".length)
       const body = JSON.parse(String(init?.body ?? "null")) as { base_url?: string; api_key?: string; api_format?: string }
-      calls.patchProvider.push({ name, body })
+      calls.patchUpstream.push({ name, body })
       providers.set(name, {
         name,
         base_url: body.base_url ?? providers.get(name)?.base_url ?? "",
@@ -178,10 +178,10 @@ function createProxyHarness() {
         has_api_key: body.api_key !== undefined ? Boolean(body.api_key) : providers.get(name)?.has_api_key ?? false,
       })
       for (const [port, worker] of workers.entries()) {
-        if (worker.provider.name !== name) continue
+        if (worker.upstream.name !== name) continue
         workers.set(port, {
           ...worker,
-          provider: providers.get(name)!,
+          upstream: providers.get(name)!,
         })
       }
       return json(providers.get(name)!)
@@ -387,9 +387,9 @@ test("proxy upstream selection opens field list and saves provider", async () =>
       return app.frame().includes("Base URL: https://api.openai.com/v1")
     })
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
-    await wait(() => app.calls.patchProvider.length === 1)
+    await wait(() => app.calls.patchUpstream.length === 1)
 
-    expect(app.calls.patchProvider).toEqual([
+    expect(app.calls.patchUpstream).toEqual([
       {
         name: "openai",
         body: { base_url: "https://api.openai.com/v1" },
@@ -428,9 +428,9 @@ test("proxy upstream creates a new upstream", async () => {
     })
     await app.mockInput.typeText("https://api.groq.com/openai/v1")
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
-    await wait(() => app.calls.patchProvider.length === 1)
+    await wait(() => app.calls.patchUpstream.length === 1)
 
-    expect(app.calls.patchProvider).toEqual([
+    expect(app.calls.patchUpstream).toEqual([
       {
         name: "groq",
         body: { base_url: "https://api.groq.com/openai/v1" },

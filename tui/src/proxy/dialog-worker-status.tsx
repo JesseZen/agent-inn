@@ -4,7 +4,7 @@ import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import type { WorkerSummary } from "../context/sdk"
-import { DialogProviderPicker } from "./dialog-provider-picker"
+import { DialogUpstreamPicker } from "./dialog-upstream-picker"
 import { DialogLogs } from "./dialog-logs"
 import { DialogModules } from "./dialog-modules"
 
@@ -16,9 +16,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary }) {
     {
       title: "Switch Upstream",
       value: "switch",
-      description: props.worker.provider.name,
+      description: props.worker.upstream.name,
       category: "Actions",
-      onSelect: () => dialog.replace(() => <DialogProviderPicker worker={props.worker} />),
+      onSelect: () => dialog.replace(() => <DialogUpstreamPicker worker={props.worker} />),
     },
     {
       title: "View Logs",
@@ -44,7 +44,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary }) {
       footer={
         <box flexDirection="column" gap={1}>
           <text fg={theme.textMuted}>status: {props.worker.status}</text>
-          <text fg={theme.textMuted}>upstream: {props.worker.provider.name}</text>
+          <text fg={theme.textMuted}>upstream: {props.worker.upstream.name}</text>
           <text fg={theme.textMuted}>snapshot: {props.worker.snapshot_generation}</text>
           <text fg={theme.textMuted}>log level: {props.worker.log_level}</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>

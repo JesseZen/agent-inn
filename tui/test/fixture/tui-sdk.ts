@@ -56,7 +56,7 @@ export function createFetch(override?: FetchHandler) {
       return json([])
     if (["/config", "/experimental/resource", "/mcp", "/provider/auth", "/session/status"].includes(url.pathname))
       return json({})
-    if (url.pathname === "/config/providers") return json({ providers: {}, default: {} })
+    if (url.pathname === "/config/providers") return json({ providers: [], default: {} })
     if (url.pathname === "/experimental/console") return json({ consoleManagedProviders: [], switchableOrgCount: 0 })
     if (url.pathname === "/experimental/capabilities") return json({ backgroundSubagents: false })
     if (url.pathname === "/path") return json({ home: "", state: "", config: "", worktree, directory })
@@ -72,7 +72,7 @@ export function createFetch(override?: FetchHandler) {
       })
     if (url.pathname === "/project/current") return json({ id: "proj_test" })
     if (url.pathname === "/api/workers") return json({ workers: [] })
-    if (url.pathname === "/api/providers") return json({ providers: {} })
+    if (url.pathname === "/api/upstreams") return json({ upstreams: {} })
     if (url.pathname === "/api/config")
       return json({
         config: {},

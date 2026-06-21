@@ -2,7 +2,7 @@ import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
 import { DialogConfig } from "./dialog-config"
 import { DialogLogs } from "./dialog-logs"
 import { DialogModules } from "./dialog-modules"
-import { DialogProviderPicker } from "./dialog-provider-picker"
+import { DialogUpstreamPicker } from "./dialog-upstream-picker"
 import { DialogStatus } from "./dialog-status"
 import { showNewWorkerDialog } from "./dialog-new-worker"
 import { DialogUpstream } from "./dialog-upstream"
@@ -11,7 +11,7 @@ import { DialogWorkers } from "./dialog-workers"
 import { DialogLaunch } from "./dialog-launch"
 
 type WorkerClient = {
-  createWorker(input: { name: string; port: number; provider: string }): Promise<unknown>
+  createWorker(input: { name: string; port: number; upstream: string }): Promise<unknown>
 }
 
 type DialogLike = {
@@ -69,7 +69,7 @@ export function registerProxyCommands(api: TuiPluginApi) {
               title="Switch Worker Upstream"
               placeholder="Search workers..."
               onSelect={(worker) => {
-                api.ui.dialog.replace(() => <DialogProviderPicker worker={worker} />)
+                api.ui.dialog.replace(() => <DialogUpstreamPicker worker={worker} />)
               }}
             />
           ))
