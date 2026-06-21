@@ -1344,6 +1344,9 @@ type recordingWorkerClient struct {
 	switchedPort     int
 	switchedProvider upstream.RuntimeUpstream
 	switchErr        error
+	appliedPort      int
+	appliedRuntime   appruntime.WorkerRuntime
+	applyErr         error
 	statusBody       string
 }
 
@@ -1364,6 +1367,15 @@ func (c *recordingWorkerClient) SwitchUpstream(port int, runtime upstream.Runtim
 	c.switchedPort = port
 	c.switchedProvider = runtime
 	return c.switchErr
+}
+
+func (c *recordingWorkerClient) ApplyRuntime(port int, runtime appruntime.WorkerRuntime) (ApplyRuntimeStatus, error) {
+	c.appliedPort = port
+	c.appliedRuntime = runtime
+	if c.applyErr != nil {
+		return ApplyRuntimeStatus{}, c.applyErr
+	}
+	return ApplyRuntimeStatus{AppliedGeneration: runtime.Generation}, nil
 }
 
 func (c *recordingWorkerClient) GetStatus(port int) (WorkerStatus, error) {

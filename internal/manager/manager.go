@@ -15,6 +15,7 @@ import (
 	"github.com/jesse/codex-app-proxy/internal/constants"
 	"github.com/jesse/codex-app-proxy/internal/logging"
 	"github.com/jesse/codex-app-proxy/internal/module"
+	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
 	"github.com/jesse/codex-app-proxy/internal/upstream"
 )
 
@@ -83,8 +84,14 @@ type HealthChecker interface {
 type WorkerClient interface {
 	ToggleModule(port int, moduleName string) error
 	PatchModule(port int, moduleName string, cfg config.ModuleConfig) error
+	ApplyRuntime(port int, runtime appruntime.WorkerRuntime) (ApplyRuntimeStatus, error)
 	SwitchUpstream(port int, runtime upstream.RuntimeUpstream) error
 	GetStatus(port int) (WorkerStatus, error)
+}
+
+type ApplyRuntimeStatus struct {
+	AppliedGeneration  appruntime.Generation `json:"applied_generation"`
+	SnapshotGeneration int                   `json:"snapshot_generation,omitempty"`
 }
 
 type WorkerStatus struct {
