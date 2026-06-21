@@ -169,9 +169,11 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
-		if err := m.CheckPortAvailable(workerName, next.Port); err != nil {
-			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
-			return
+		if next.Port != current.Port {
+			if err := m.CheckPortAvailable(workerName, next.Port); err != nil {
+				writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
 		}
 		if err := m.UpdateWorker(workerName, current, next); err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})

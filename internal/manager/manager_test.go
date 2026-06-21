@@ -3,11 +3,13 @@ package manager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -349,6 +351,60 @@ func TestManagerAPIUpdatesWorkerLogLevel(t *testing.T) {
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/11199", nil))
 	if !strings.Contains(res.Body.String(), `"log_level":"detail"`) {
 		t.Fatalf("worker detail did not persist log level: %s", res.Body.String())
+	}
+}
+
+func TestManagerAPIPatchesRunningWorkerLogLevelWithoutRecheckingCurrentPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	m := New(Config{
+		Config: config.Config{
+			Workers: map[string]config.WorkerConfig{
+				"cli": {
+					Port:     port,
+					Upstream: "openai",
+					Modules: map[string]config.ModuleConfig{
+						"api_translate": {Enabled: true},
+					},
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: fakeStarter{},
+	})
+	if err := m.StartWorker("cli"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := strings.NewReader(fmt.Sprintf(`{"port":%d,"upstream":"openai","log_level":"detail","modules":{"api_translate":{"enabled":true}}}`, port))
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, fmt.Sprintf("http://manager.local/api/workers/%d", port), body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected update status %d: %s", res.Code, res.Body.String())
+	}
+
+	got, ok := m.workerConfig("cli")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	want := config.WorkerConfig{
+		Role:     "cli",
+		Port:     port,
+		Upstream: "openai",
+		LogLevel: "detail",
+		Modules: map[string]config.ModuleConfig{
+			"api_translate": {Enabled: true},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected worker config %#v", got)
 	}
 }
 
