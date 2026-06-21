@@ -24,7 +24,7 @@
 11. 测试用整体对象相等比较，不要逐字段断言。
 12. 不为静态值加测试，不为已删除逻辑加负面测试。
 13. 改动核心逻辑优先写集成测试，而非单元测试。
-14. Go 测试用 `go test ./...`，TUI 测试用 `cd tui && bun test --timeout 30000 --only-failures`。
+14. Go 测试用 `go test ./...`，TUI 测试用 `cd tui && bun test --timeout 30000`。
 
 ## Git
 
