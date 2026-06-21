@@ -11,6 +11,7 @@ export type DialogPromptProps = {
   description?: () => JSX.Element
   placeholder?: string
   value?: string
+  selectAll?: boolean
   busy?: boolean
   busyText?: string
   onConfirm?: (value: string) => void
@@ -53,8 +54,12 @@ export function DialogPrompt(props: DialogPromptProps) {
       if (!textarea || textarea.isDestroyed) return
       if (props.busy) return
       textarea.focus()
+      if (props.selectAll) {
+        textarea.selectAll()
+        return
+      }
+      textarea.gotoLineEnd()
     }, 1)
-    textarea.gotoLineEnd()
   })
 
   createEffect(() => {
@@ -122,7 +127,15 @@ DialogPrompt.show = (dialog: DialogContext, title: string, options?: Omit<Dialog
   return new Promise<string | null>((resolve) => {
     dialog.push(
       () => (
-        <DialogPrompt title={title} {...options} onConfirm={(value) => resolve(value)} onCancel={() => resolve(null)} />
+        <DialogPrompt
+          title={title}
+          {...options}
+          onConfirm={(value) => {
+            resolve(value)
+            dialog.pop()
+          }}
+          onCancel={() => resolve(null)}
+        />
       ),
       () => resolve(null),
     )
