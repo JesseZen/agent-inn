@@ -160,6 +160,20 @@ function init() {
         },
       ])
     },
+    push(input: any, onClose?: () => void) {
+      if (store.stack.length === 0) {
+        focus = renderer.currentFocusedRenderable
+        focus?.blur()
+      }
+      setStore("size", "medium")
+      setStore("stack", [
+        ...store.stack,
+        {
+          element: input,
+          onClose,
+        },
+      ])
+    },
     get stack() {
       return store.stack
     },
@@ -225,4 +239,14 @@ export function useDialog() {
     throw new Error("useDialog must be used within a DialogProvider")
   }
   return value
+}
+
+export function EscHint(props: { dialog: DialogContext }) {
+  const { theme } = useTheme()
+  const label = () => (props.dialog.stack.length > 1 ? "back" : "close")
+  return (
+    <text fg={theme.textMuted}>
+      esc <span style={{ fg: theme.text }}>{label()}</span>
+    </text>
+  )
 }
