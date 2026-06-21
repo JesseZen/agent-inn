@@ -68,7 +68,7 @@ go build -o codex-proxy .
 mkdir -p ${HOME}/.codex-proxy
 
 cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
-# 编辑 ${HOME}/.codex-proxy/config.yaml 来设置 workers 和 providers
+# 编辑 ${HOME}/.codex-proxy/config.yaml 来设置 workers 和 upstreams
 ```
 
 ### 运行
@@ -131,7 +131,7 @@ defaults:
 workers:
   codex-app:              # Worker name
     port: 6767            # Local listen port
-    provider: joycode     # Bound Upstream
+    upstream: joycode     # Bound Upstream
     modules:
       config_patch:       # Auto-modify ~/.codex/config.toml
         enabled: true
@@ -142,7 +142,7 @@ workers:
         enabled: true
 
 # Upstream definitions
-providers:
+upstreams:
   joycode:
     base_url: https://api.joycode.dev/v1
     api_key: sk-...                   # Plain key in config is supported
