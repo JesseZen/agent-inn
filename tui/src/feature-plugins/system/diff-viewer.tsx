@@ -998,9 +998,9 @@ function DiffViewerHelpDialog() {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Diff shortcuts
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.pop()}>
-          esc
-        </text>
+        <box onMouseUp={() => dialog.pop()}>
+          <text fg={theme.textMuted}>esc</text>
+        </box>
       </box>
       <box flexDirection="row">
         <text fg={theme.textMuted} width={5} wrapMode="none">

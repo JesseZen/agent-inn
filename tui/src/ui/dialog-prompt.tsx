@@ -142,9 +142,9 @@ export function DialogPrompt(props: DialogPromptProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.pop()}>
-          esc
-        </text>
+        <box onMouseUp={() => dialog.pop()}>
+          <text fg={theme.textMuted}>esc</text>
+        </box>
       </box>
       <box gap={1}>
         {props.description}
@@ -183,9 +183,11 @@ export function DialogPrompt(props: DialogPromptProps) {
       <box paddingBottom={1} gap={1} flexDirection="row">
         <Show when={!props.busy} fallback={<text fg={theme.textMuted}>processing...</text>}>
           <Show when={submitShortcut()}>
-            <text fg={theme.text} onMouseUp={() => confirm()}>
-              {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
-            </text>
+            <box onMouseUp={() => confirm()}>
+              <text fg={theme.text}>
+                {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
+              </text>
+            </box>
           </Show>
         </Show>
       </box>
