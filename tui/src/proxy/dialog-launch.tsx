@@ -28,10 +28,16 @@ export function DialogLaunch() {
   async function launch(workerName: string) {
     const worker = sync.data.workers.find((item) => item.name === workerName)
     if (!worker) return
+    const basePath = project.instance.directory() || sync.path.directory
     const workspace = await DialogPrompt.show(dialog, "Launch Codex", {
       placeholder: "Workspace directory",
       description: () => <text>Launch Codex in this workspace.</text>,
-      value: project.instance.directory() || sync.path.directory,
+      value: basePath,
+      directoryCompletion: basePath
+        ? {
+            basePath,
+          }
+        : undefined,
     })
     if (workspace === null) return
     const command = createProxyLaunchCommand({
