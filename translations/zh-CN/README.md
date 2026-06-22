@@ -1,6 +1,6 @@
 # codex-app-proxy
 
-**English** | [中文](./README.md)
+**[English](../../README.md)** | 中文
 
 Codex App 的本地代理管理器。一个二进制文件即可启动管理器 + 工作进程 + TUI。
 
@@ -11,37 +11,48 @@ Codex App / CLI
       │
       ▼
 ┌──────────┐
-│  Worker  │  ← Listens on a local port, forwards requests to upstream
-│  (proxy) │  ← Filters image_generation, Chat Completions translation, etc.
+│  Worker  │  ← 监听本地端口，转发请求到上游
+│  (proxy) │  ← 过滤 image_generation、Chat Completions 翻译等
 └──────────┘
       │
       ▼
 ┌──────────┐
-│ Upstream │  ← Upstream API service (OpenAI, OpenRouter, Groq, etc.)
+│ Upstream │  ← 上游 API 服务（OpenAI、OpenRouter、Groq 等）
 └──────────┘
 
 ┌──────────┐
-│ Manager  │  ← Manages Worker lifecycle, exposes HTTP API + SSE event stream
-│          │  ← TUI communicates with Manager via API
+│ Manager  │  ← 管理 Worker 生命周期，提供 HTTP API + SSE 事件流
+│          │  ← TUI 通过 API 与 Manager 通信
 └──────────┘
       │
       ▼
 ┌──────────┐
-│   TUI    │  ← OpenTUI (SolidJS) terminal interface
-│(OpenTUI) │  ← Conversational interaction, type / to trigger commands
+│   TUI    │  ← OpenTUI (SolidJS) 终端界面
+│(OpenTUI) │  ← 对话式交互，输入 / 触发命令
 └──────────┘
 ```
 
 ### 核心概念
 
 | 概念 | 描述 |
-|---------|-------------|
-| <strong>管理器</strong> | 中心管理器 — 启动/停止工作进程，提供 HTTP API，TUI 连接至它 |
-| <strong>工作进程</strong> | 监听某个端口的本地代理进程，将请求转发到指定的上游服务 |
-| <strong>上游</strong> | 上游 API 服务配置（base_url, api_key, api_format） |
-| <strong>模块</strong> | 工作进程功能模块：`config_patch`（自动修改 Codex 配置）、`image_filter`（过滤图像生成）、`api_translate`（Chat Completions 翻译） |
+|------|------|
+| **Manager** | 中心管理器 — 启动/停止 Worker，提供 HTTP API，TUI 连接至它 |
+| **Worker** | 监听某个端口的本地代理进程，将请求转发到指定的上游服务 |
+| **Upstream** | 上游 API 服务配置（base_url, api_key, api_format） |
+| **Module** | Worker 功能模块（见下方 [模块](#模块) 表） |
 
-每个工作进程绑定一个上游。你可以同时在不同的端口上运行多个指向不同上游的工作进程。
+每个 Worker 绑定一个 Upstream。你可以同时在不同的端口上运行多个指向不同 Upstream 的 Worker。
+
+### 模块
+
+| 模块 | 描述 |
+|------|------|
+| `config_patch` | 自动修改 `~/.codex/config.toml`，将 Codex 指向该 Worker |
+| `image_filter` | 过滤 `image_generation` 工具调用 |
+| `api_translate` | Chat Completions ↔ Responses API 翻译 |
+| `model_override` | 通过 `params.model` 覆盖请求中的 `model` 字段 |
+| `request_log` | 将请求方法 + 路径记录到 stderr |
+| `debug_sse` | 将 SSE 分块统计信息记录到 stderr |
 
 ## 构建与运行
 
@@ -68,7 +79,7 @@ go build -o codex-proxy .
 mkdir -p ${HOME}/.codex-proxy
 
 cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
-# 编辑 ${HOME}/.codex-proxy/config.yaml 以设置工作进程和上游服务
+# 编辑 ${HOME}/.codex-proxy/config.yaml 以设置 workers 和 upstreams
 ```
 
 ### 运行
@@ -77,17 +88,17 @@ cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
 ./codex-proxy
 ```
 
-这条命令会启动管理器 → 启动所有工作进程 → 启动 TUI。
+这条命令会启动 Manager → 启动所有 Worker → 启动 TUI。
 
 ### 开发模式（前后端分离）
 
 ```bash
-# 终端 1：仅后端
-./codex-proxy --config config.yaml --manager-port 8080 &
+# 终端 1：仅后端（默认 manager-port 为 9090）
+./codex-proxy --config config.yaml --manager-port 9090 &
 
 # 终端 2：带热重载的 TUI
 bun install  # 从项目根目录安装依赖（首次需要）
-cd tui && CODEX_PROXY_URL=http://localhost:8080 bun run dev
+cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
 ```
 
 ## TUI 操作
@@ -97,22 +108,22 @@ cd tui && CODEX_PROXY_URL=http://localhost:8080 bun run dev
 ### 命令列表
 
 | 命令 | 别名 | 描述 |
-|---------|-------|-------------|
+|------|------|------|
 | `/help` | | 显示所有命令 |
-| `/status` | | 查看工作进程、上游和配置状态 |
-| `/config` | `/settings` | 修改配置（选择类别 → 对象 → 字段 → 更改值） |
-| `/new` | | 创建一个新工作进程 |
-| `/restart` | | 重启一个工作进程 |
-| `/stop` | | 停止一个工作进程 |
-| `/logs` | | 查看工作进程日志 |
-| `/stream` | | 切换 SSE 事件流面板 |
-| `/clear` | | 清屏 |
-| `/exit` | `/quit` `:q` `:wq` | 退出 |
+| `/status` | | 查看 Worker 状态详情 |
+| `/config` | | 查看配置状态（generation、dirty、保存到磁盘） |
+| `/workers` | | 管理 Worker（创建、编辑 log_level） |
+| `/upstream` | | 管理 Upstream（创建、编辑 base_url/api_key/api_format） |
+| `/modules` | | 管理 Worker 模块（按 Worker 启用/禁用） |
+| `/new-worker` | | 创建新 Worker |
+| `/logs` | | 查看 Worker 日志 |
+| `/launch` | | 通过 cli 角色 Worker 启动 Codex CLI |
+| `/exit` | `/quit` `/q` | 退出 |
 
 ### 键盘快捷键
 
 | 按键 | 操作 |
-|-----|--------|
+|------|------|
 | `Ctrl+C` | 清除输入；按两次退出 |
 | `Shift+Enter` | 输入中换行 |
 | `↑` `↓` | 列表导航 |
@@ -131,6 +142,8 @@ workers:
   codex-app:              # Worker name
     port: 6767            # Local listen port
     upstream: joycode     # Bound Upstream
+    role: cli             # "cli" (default) or "app"
+    log_level: simple     # "simple" or "detail"
     modules:
       config_patch:       # Auto-modify ~/.codex/config.toml
         enabled: true
@@ -153,13 +166,19 @@ upstreams:
     api_format: chat_completions
 
   openai:
-    base_url: https://openapi.com/v1
+    base_url: https://api.openai.com/v1
     api_key: sk-...                    # Plain key is supported
-    # OPENAI_API_KEY wins over config if exported
+    # <UPSTREAM_NAME>_API_KEY env var wins over config if set (e.g. OPENAI_API_KEY)
     # No api_format = native Responses API passthrough
 ```
 
 将 `api_format` 留空或不设置 = 原生透传，不进行翻译。
+
+`role` 默认为 `"cli"`；`role: app` 的 Worker 不会出现在 `/launch` 选择器中。`log_level` 默认为 `"simple"`。
+
+### API Key 解析
+
+对于名为 `<NAME>` 的每个 upstream，会先检查环境变量 `<NAME>_API_KEY`（例如 `JOYCODE_API_KEY`、`OPENAI_API_KEY`、`OPENROUTER_API_KEY`）。如果该环境变量已设置且非空，它将覆盖配置文件中的 `api_key`。
 
 ## 测试
 
@@ -167,26 +186,28 @@ upstreams:
 # Go 后端
 go test ./...
 
-# 终端用户界面
-cd tui && bun test
+# TUI
+cd tui && bun test --timeout 30000
 
 # 类型检查
 cd tui && bun run typecheck
 ```
 
-## 其他子命令
+## 子命令
 
 ```bash
 ./codex-proxy version           # 显示版本
-./codex-proxy worker ...        # 工作进程（由管理器自动启动，无需手动运行）
+./codex-proxy worker ...        # Worker 进程（由 Manager 自动启动，无需手动运行）
+./codex-proxy launch --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>]
+                                # 启动连接到 Worker 的 Codex CLI
 ```
 
 ## 待办事项
 
-- [ ] 托管终端：使用 `tmux` 或类似的多路复用器作为外部终端主机；CAP 处理 `create` / `list` / `attach` / `switch`
-- [ ] 嵌入式终端：在 CAP 内部内置 PTY 会话，支持直接会话切换
+- [ ] hosted-terminal: 使用 `tmux` 或类似多路复用器作为外部终端主机；CAP 处理 `create` / `list` / `attach` / `switch`
+- [ ] embedded-terminal: 在 CAP 内部内置 PTY 会话，支持直接会话切换
 
-计划顺序：先实现 `托管终端`，然后是 `嵌入式终端`。
+计划顺序：先实现 `hosted-terminal`，然后是 `embedded-terminal`。
 
 ## 许可证
 
@@ -194,9 +215,9 @@ cd tui && bun run typecheck
 
 ## 致谢
 
-本项目是 [anomalyco](https://github.com/anomalyco) 开发的 [opencode](https://github.com/anomalyco/opencode) 的一个定制分支，在 [MIT 许可证](https://github.com/anomalyco/opencode/blob/main/LICENSE) 下使用。
+本项目是 [anomalyco](https://github.com/anomalyco) 开发的 [opencode](https://github.com/anomalyco/opencode) 的定制分支，在 [MIT 许可证](https://github.com/anomalyco/opencode/blob/main/LICENSE) 下使用。
 
-原始的 opencode 源代码已被修改，以作为 Codex App 的本地代理管理器。
+原始 opencode 源代码已被修改，以作为 Codex App 的本地代理管理器。
 
 ---
 
