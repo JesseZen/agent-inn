@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/jesse/codex-app-proxy/internal/module"
 	"github.com/jesse/codex-app-proxy/internal/upstream"
@@ -140,6 +143,61 @@ func TestWorkerRunsModuleChain(t *testing.T) {
 
 	if strings.Contains(res.Body.String(), "image_generation") {
 		t.Fatalf("module chain did not filter body: %s", res.Body.String())
+	}
+}
+
+func TestWorkerClearsContentEncodingAfterBufferingCompressedRequest(t *testing.T) {
+	type upstreamRequest struct {
+		Body            string
+		ContentEncoding string
+	}
+	received := upstreamRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		received = upstreamRequest{
+			Body:            string(body),
+			ContentEncoding: r.Header.Get("Content-Encoding"),
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
+			Modules: []module.Middleware{
+				module.NewImageFilter(module.ModuleConfig{Enabled: true}),
+			},
+		},
+	})
+
+	var compressed bytes.Buffer
+	zw, err := zstd.NewWriter(&compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write([]byte(`{"input":"hello"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", &compressed)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "zstd")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if received != (upstreamRequest{Body: `{"input":"hello"}`}) {
+		t.Fatalf("unexpected upstream request %#v", received)
 	}
 }
 

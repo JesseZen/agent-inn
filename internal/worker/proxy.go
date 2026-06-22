@@ -107,6 +107,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		}
 		proxyReq.Body = body
 		proxyReq.ContentType = contentType
+		proxyReq.Headers.Del("Content-Encoding")
 	}
 	for _, middleware := range snapshot.Modules {
 		if err := middleware.ProcessRequest(ctx, proxyReq); err != nil {
