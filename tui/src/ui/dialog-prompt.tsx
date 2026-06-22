@@ -1,10 +1,11 @@
 import { TextareaRenderable, TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
-import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { Show, createEffect, createResource, createSignal, Index, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
 import { useTuiConfig } from "../config"
 import { useBindings, useCommandShortcut } from "../keymap"
+import { getDirectoryCompletions } from "../util/directory-completion"
 
 export type DialogPromptProps = {
   title: string
@@ -14,6 +15,10 @@ export type DialogPromptProps = {
   selectAll?: boolean
   busy?: boolean
   busyText?: string
+  directoryCompletion?: {
+    basePath: string
+    maxResults?: number
+  }
   onConfirm?: (value: string) => void
   onCancel?: () => void
   onInputChange?: (value: string) => void
@@ -26,6 +31,14 @@ export function DialogPrompt(props: DialogPromptProps) {
   const submitShortcut = useCommandShortcut("dialog.prompt.submit")
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   let textarea: TextareaRenderable
+
+  const [query, setQuery] = createSignal(props.value ?? "")
+  const [selected, setSelected] = createSignal(0)
+  const [suggestions] = createResource(
+    () => props.directoryCompletion ? { query: query(), basePath: props.directoryCompletion.basePath, maxResults: props.directoryCompletion.maxResults } : undefined,
+    (input) => input ? getDirectoryCompletions(input) : Promise.resolve([]),
+    { initialValue: [] },
+  )
 
   function confirm() {
     if (props.busy) return
@@ -44,8 +57,48 @@ export function DialogPrompt(props: DialogPromptProps) {
         category: "Dialog",
         run: confirm,
       },
+      ...(props.directoryCompletion
+        ? [
+            {
+              name: "dialog.select.prev",
+              title: "Previous dialog item",
+              category: "Dialog",
+              run() {
+                if (suggestions().length) setSelected((value) => value > 0 ? value - 1 : suggestions().length - 1)
+              },
+            },
+            {
+              name: "dialog.select.next",
+              title: "Next dialog item",
+              category: "Dialog",
+              run() {
+                if (suggestions().length) setSelected((value) => value + 1 < suggestions().length ? value + 1 : 0)
+              },
+            },
+            {
+              name: "prompt.autocomplete.complete",
+              title: "Complete dialog directory",
+              category: "Dialog",
+              run() {
+                const next = suggestions()[selected()] ?? suggestions()[0]
+                if (!next) return
+                textarea.setText(next.value)
+                textarea.gotoLineEnd()
+                setQuery(next.value)
+              },
+            },
+          ]
+        : []),
     ],
-    bindings: tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+    bindings: [
+      ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+      ...(props.directoryCompletion
+        ? [
+            ...tuiConfig.keybinds.gather("dialog.select", ["dialog.select.prev", "dialog.select.next"]),
+            ...tuiConfig.keybinds.gather("prompt.autocomplete", ["prompt.autocomplete.complete"]),
+          ]
+        : []),
+    ],
   }))
 
   onMount(() => {
@@ -78,13 +131,18 @@ export function DialogPrompt(props: DialogPromptProps) {
     textarea.focus()
   })
 
+  createEffect(() => {
+    suggestions()
+    setSelected(0)
+  })
+
   return (
     <box paddingLeft={2} paddingRight={2} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.pop()}>
           esc
         </text>
       </box>
@@ -103,11 +161,23 @@ export function DialogPrompt(props: DialogPromptProps) {
           focusedTextColor={props.busy ? theme.textMuted : theme.text}
           cursorColor={props.busy ? theme.backgroundElement : theme.text}
           onContentChange={() => {
+            setQuery(textarea.plainText)
             props.onInputChange?.(textarea.plainText)
           }}
         />
         <Show when={props.busy}>
           <Spinner color={theme.textMuted}>{props.busyText ?? "Working..."}</Spinner>
+        </Show>
+        <Show when={props.directoryCompletion}>
+          <box flexDirection="column">
+            <Index each={suggestions()} fallback={<text fg={theme.textMuted}>No matching directories</text>}>
+              {(item, index) => (
+                <box backgroundColor={index === selected() ? theme.primary : undefined}>
+                  <text fg={index === selected() ? theme.backgroundPanel : theme.text}>{item().display}</text>
+                </box>
+              )}
+            </Index>
+          </box>
         </Show>
       </box>
       <box paddingBottom={1} gap={1} flexDirection="row">
