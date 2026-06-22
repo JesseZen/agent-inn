@@ -3,38 +3,120 @@ import { For, Show, createMemo } from "solid-js"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
-import type { WorkerSummary } from "../context/sdk"
+import { useSDK, type WorkerSummary } from "../context/sdk"
+import { useSync } from "../context/sync"
+import { useToast } from "../ui/toast"
 import { DialogUpstreamPicker } from "./dialog-upstream-picker"
 import { DialogLogs } from "./dialog-logs"
 import { DialogModulePicker } from "./dialog-module"
 
-export function DialogWorkerStatus(props: { worker: WorkerSummary }) {
+const LOG_LEVELS = ["simple", "detail"] as const
+type LogLevel = (typeof LOG_LEVELS)[number]
+
+export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: boolean }) {
   const { theme } = useTheme()
   const dialog = useDialog()
+  const sdk = useSDK()
+  const sync = useSync()
+  const toast = useToast()
   const modules = createMemo(() => Object.entries(props.worker.modules ?? {}))
-  const actions = createMemo<DialogSelectOption<string>[]>(() => [
-    {
+
+  const logLevelAction: DialogSelectOption<string> = {
+    title: "Log Level",
+    value: "log_level",
+    description: props.worker.log_level || "—",
+    onSelect: async () => {
+      const next = await new Promise<LogLevel | null>((resolve) => {
+        dialog.replace(
+          () => (
+            <DialogSelect
+              title={`Log Level: ${props.worker.name}`}
+              options={LOG_LEVELS.map((level) => ({
+                title: level,
+                value: level,
+                category: level === props.worker.log_level ? "Current" : "Options",
+              }))}
+              placeholder="Select log level..."
+              current={props.worker.log_level}
+              onSelect={(opt) => resolve(opt.value as LogLevel)}
+            />
+          ),
+          () => resolve(null),
+        )
+      })
+      if (!next || next === props.worker.log_level) {
+        dialog.replace(() => <DialogWorkerStatus worker={props.worker} management />)
+        return
+      }
+      try {
+        await sdk.client.patchWorker(props.worker.port, { log_level: next })
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Saved ${props.worker.name} log_level: ${next}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
+    },
+  }
+
+  const switchAction: DialogSelectOption<string> = {
       title: "Switch Upstream",
       value: "switch",
       description: props.worker.upstream.name,
-      category: "Actions",
       onSelect: () => dialog.replace(() => <DialogUpstreamPicker worker={props.worker} />),
-    },
-    {
-      title: "View Logs",
-      value: "logs",
-      description: `:${props.worker.port}`,
-      category: "Actions",
-      onSelect: () => dialog.replace(() => <DialogLogs worker={props.worker} />),
-    },
-    {
+  }
+
+  const logsAction: DialogSelectOption<string> = {
+    title: "View Logs",
+    value: "logs",
+    description: `:${props.worker.port}`,
+    onSelect: () => dialog.replace(() => <DialogLogs worker={props.worker} />),
+  }
+
+  const modulesAction: DialogSelectOption<string> = {
       title: "Manage Modules",
       value: "modules",
       description: `${modules().length}`,
-      category: "Actions",
       onSelect: () => dialog.replace(() => <DialogModulePicker worker={props.worker} />),
+  }
+
+  const restartAction: DialogSelectOption<string> = {
+    title: "Restart Worker",
+    value: "restart",
+    description: `:${props.worker.port}`,
+    onSelect: async () => {
+      try {
+        await sdk.client.restartWorker(props.worker.port)
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Restarted ${props.worker.name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
     },
-  ])
+  }
+
+  const stopAction: DialogSelectOption<string> = {
+    title: "Stop Worker",
+    value: "stop",
+    description: `:${props.worker.port}`,
+    onSelect: async () => {
+      try {
+        await sdk.client.stopWorker(props.worker.port)
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Stopped ${props.worker.name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
+    },
+  }
+
+  const actions = createMemo<DialogSelectOption<string>[]>(() =>
+    props.management
+      ? [logLevelAction, switchAction, modulesAction, logsAction, restartAction, stopAction]
+      : [switchAction, logsAction, modulesAction],
+  )
 
   return (
     <DialogSelect
@@ -45,8 +127,8 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary }) {
         <box flexDirection="column" gap={1}>
           <text fg={theme.textMuted}>status: {props.worker.status}</text>
           <text fg={theme.textMuted}>upstream: {props.worker.upstream.name}</text>
+          <text fg={theme.textMuted}>log level: {props.worker.log_level} • modules: {modules().length}</text>
           <text fg={theme.textMuted}>snapshot: {props.worker.snapshot_generation}</text>
-          <text fg={theme.textMuted}>log level: {props.worker.log_level}</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>
             <box flexDirection="column">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>

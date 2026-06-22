@@ -110,11 +110,9 @@ cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
 | 命令 | 别名 | 描述 |
 |------|------|------|
 | `/help` | | 显示所有命令 |
-| `/status` | | 查看 Worker 状态详情 |
 | `/config` | | 查看配置状态（generation、dirty、保存到磁盘） |
-| `/workers` | | 管理 Worker（创建、编辑 log_level） |
+| `/workers` | | 管理 Worker（创建、查看详情、编辑字段/模块、查看日志、restart/stop） |
 | `/upstream` | | 管理 Upstream（创建、编辑 base_url/api_key/api_format） |
-| `/modules` | | 管理 Worker 模块（按 Worker 启用/禁用） |
 | `/logs` | | 查看 Worker 日志 |
 | `/launch` | | 通过 cli 角色 Worker 启动 Codex CLI |
 | `/exit` | `/quit` `/q` | 退出 |
@@ -203,6 +201,7 @@ cd tui && bun run typecheck
 
 ## 待办事项
 
+- [ ] `/status`：在 `/workers` 承接主要 Worker 管理流程后，重新加入独立 Worker 状态视图
 - [ ] hosted-terminal: 使用 `tmux` 或类似多路复用器作为外部终端主机；CAP 处理 `create` / `list` / `attach` / `switch`
 - [ ] embedded-terminal: 在 CAP 内部内置 PTY 会话，支持直接会话切换
 

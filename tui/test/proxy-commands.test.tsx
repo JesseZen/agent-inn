@@ -90,6 +90,8 @@ function createProxyHarness() {
     patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
+    restartWorker: [] as number[],
+    stopWorker: [] as number[],
     saveConfig: 0,
     getLogs: 0,
   }
@@ -195,6 +197,18 @@ function createProxyHarness() {
           params: body.params,
         },
       })
+    }
+
+    if (url.pathname === "/api/workers/6767/restart" && method === "POST") {
+      calls.restartWorker.push(6767)
+      workers.set(6767, { ...workers.get(6767)!, status: "running" })
+      return json({ worker: "app", status: "running" })
+    }
+
+    if (url.pathname === "/api/workers/6767" && method === "DELETE") {
+      calls.stopWorker.push(6767)
+      workers.set(6767, { ...workers.get(6767)!, status: "stopped" })
+      return json({ worker: "app", status: "stopped" })
     }
 
     if (url.pathname.startsWith("/api/upstreams/") && method === "PATCH") {
@@ -315,16 +329,20 @@ async function mountProxyApp() {
   }
 }
 
-test("proxy status switch upstream action updates worker provider and reflects the change", async () => {
+test("proxy workers switch upstream action updates worker provider and reflects the change", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.status")
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
     expect(app.frame()).toContain("Switch Upstream")
 
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
     expect(app.frame()).toContain("Switch Upstream: app")
@@ -335,7 +353,9 @@ test("proxy status switch upstream action updates worker provider and reflects t
     await wait(() => app.calls.patchWorker.length === 1)
     await app.render()
 
-    app.api.keymap.dispatchCommand("proxy.status")
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
@@ -388,31 +408,80 @@ test("proxy config save clears dirty state on reopen", async () => {
   }
 })
 
-test("proxy status detail exposes worker follow-up actions", async () => {
+test("proxy worker status commands are folded into workers", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.status")
+    const commands = app.api.keymap.getCommandEntries({
+      namespace: "palette",
+      visibility: "registered",
+    })
+    expect(commands.map((entry) => entry.command.name).includes("proxy.status")).toBe(false)
+    expect(commands.map((entry) => entry.command.name).includes("proxy.modules")).toBe(false)
+
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
 
     expect(app.frame()).toContain("Switch Upstream")
     expect(app.frame()).toContain("View Logs")
+    expect(app.frame()).toContain("Manage Modules")
   } finally {
     await app.cleanup()
   }
 })
 
-test("proxy modules editor patches module params through field flow", async () => {
+test("proxy workers detail exposes worker status and scoped actions", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.modules")
+    app.api.keymap.dispatchCommand("proxy.workers")
     await app.render()
-    expect(app.frame()).toContain("Worker Modules")
+    expect(app.frame()).toContain("Manage Workers")
+    expect(app.frame()).toContain("Create New Worker")
 
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("app (:6767)")
+    expect(app.frame()).toContain("status: running")
+    expect(app.frame()).toContain("upstream: openai")
+    expect(app.frame()).toContain("log level: simple")
+    expect(app.frame()).toContain("modules")
+    expect(app.frame()).toContain("Log Level")
+    expect(app.frame()).toContain("Switch Upstream")
+    expect(app.frame()).toContain("Manage Modules")
+    expect(app.frame()).toContain("View Logs")
+    expect(app.frame()).toContain("Restart Worker")
+    expect(app.frame()).toContain("Stop Worker")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers module action patches module through module API", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("Manage Modules")
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
     await wait(async () => {
       await app.render()
       return app.frame().includes("Modules: app")
@@ -424,16 +493,7 @@ test("proxy modules editor patches module params through field flow", async () =
       return app.frame().includes("Edit Module: app")
     })
 
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(async () => {
-      await app.render()
-      return app.frame().includes("Model: model_override")
-    })
-
-    await app.mockInput.typeText("gpt-live")
-    app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(() => app.calls.patchModule.length === 1)
 
     expect(app.calls.patchModule).toEqual([
@@ -441,21 +501,76 @@ test("proxy modules editor patches module params through field flow", async () =
         port: 6767,
         module: "model_override",
         body: {
-          enabled: false,
-          params: { model: "gpt-live" },
+          enabled: true,
+          params: { model: "gpt-old" },
         },
       },
     ])
+    expect(app.calls.patchWorker).toEqual([])
 
-    expect(app.frame()).toContain("Worker Modules")
     expect(app.frame()).not.toContain("Modules: app")
 
     app.mockInput.pressEscape()
     await wait(async () => {
       await app.render()
-      return !app.frame().includes("Worker Modules")
+      return !app.frame().includes("Saved model_override")
     })
-    expect(app.frame()).not.toContain("Worker Modules")
+    expect(app.frame()).not.toContain("Saved model_override")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers detail opens logs and controls worker lifecycle", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.getLogs === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Logs: app (:6767)") && app.frame().includes("booted")
+    })
+    expect(app.frame()).toContain("booted")
+
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.end")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.prev")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.restartWorker.length === 1)
+    expect(app.calls.restartWorker).toEqual([6767])
+
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.end")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.stopWorker.length === 1)
+    expect(app.calls.stopWorker).toEqual([6767])
   } finally {
     await app.cleanup()
   }
@@ -592,16 +707,23 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
   }
 })
 
-test("proxy status detail view logs action opens worker logs", async () => {
+test("proxy workers detail view logs action opens worker logs", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.status")
+    app.api.keymap.dispatchCommand("proxy.workers")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
 
     app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.getLogs === 1)
     await wait(async () => {
@@ -642,7 +764,7 @@ test("proxy workers editor patches log_level field", async () => {
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
-    expect(app.frame()).toContain("Edit Worker: app")
+    expect(app.frame()).toContain("app (:6767)")
 
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()

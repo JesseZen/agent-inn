@@ -1,8 +1,6 @@
 import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
 import { DialogConfig } from "./dialog-config"
 import { DialogLogs } from "./dialog-logs"
-import { DialogModulePicker } from "./dialog-module"
-import { DialogStatus } from "./dialog-status"
 import { DialogUpstream } from "./dialog-upstream"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogWorkers } from "./dialog-workers"
@@ -29,16 +27,6 @@ export function registerProxyCommands(api: TuiPluginApi) {
         slashName: "workers",
         run() {
           api.ui.dialog.replace(() => <DialogWorkers />)
-        },
-      },
-      {
-        namespace: "palette",
-        name: "proxy.status",
-        title: "Show worker status",
-        category: "Proxy",
-        slashName: "status",
-        run() {
-          api.ui.dialog.replace(() => <DialogStatus />)
         },
       },
       {
@@ -70,24 +58,6 @@ export function registerProxyCommands(api: TuiPluginApi) {
         slashName: "config",
         run() {
           api.ui.dialog.replace(() => <DialogConfig />)
-        },
-      },
-      {
-        namespace: "palette",
-        name: "proxy.modules",
-        title: "Manage worker modules",
-        category: "Proxy",
-        slashName: "modules",
-        run() {
-          api.ui.dialog.replace(() => (
-            <DialogWorkerPicker
-              title="Worker Modules"
-              placeholder="Search workers..."
-              onSelect={(worker) => {
-                api.ui.dialog.push(() => <DialogModulePicker worker={worker} />)
-              }}
-            />
-          ))
         },
       },
       {

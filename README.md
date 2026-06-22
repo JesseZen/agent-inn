@@ -110,11 +110,9 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `/help` | | Show all commands |
-| `/status` | | View worker status details |
 | `/config` | | View config status (generation, dirty, save to disk) |
-| `/workers` | | Manage workers (create, edit log_level) |
+| `/workers` | | Manage workers (create, inspect, edit fields/modules, view logs, restart/stop) |
 | `/upstream` | | Manage upstreams (create, edit base_url/api_key/api_format) |
-| `/modules` | | Manage worker modules (enable/disable per worker) |
 | `/logs` | | View Worker logs |
 | `/launch` | | Launch Codex CLI through a cli-role worker |
 | `/exit` | `/quit` `/q` | Exit |
@@ -203,6 +201,7 @@ cd tui && bun run typecheck
 
 ## TODO
 
+- [ ] `/status`: reintroduce a dedicated worker status view after `/workers` owns the main worker management flow
 - [ ] hosted-terminal: one external terminal host using `tmux` or a similar multiplexer; CAP handles `create` / `list` / `attach` / `switch`
 - [ ] embedded-terminal: built-in PTY sessions inside CAP with direct session switching
 
