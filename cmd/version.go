@@ -5,7 +5,6 @@ import (
 	"io"
 )
 
-<<<<<<< HEAD
 var version = "dev"
 
 func runVersion(stdout io.Writer) int {
