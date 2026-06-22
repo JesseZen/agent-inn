@@ -181,6 +181,13 @@ cd tui && bun run typecheck
 ./codex-proxy worker ...        # Worker process (auto-started by Manager, no need to run manually)
 ```
 
+## TODO
+
+- [ ] hosted-terminal: one external terminal host using `tmux` or a similar multiplexer; CAP handles `create` / `list` / `attach` / `switch`
+- [ ] embedded-terminal: built-in PTY sessions inside CAP with direct session switching
+
+Planned order: `hosted-terminal` first, then `embedded-terminal`.
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

@@ -10,7 +10,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-func TestWriteCodexProfileFileUsesResponsesWireAPIForWorkerProfiles(t *testing.T) {
+func TestWriteCodexProfileFileUsesOpenAIProviderForWorkerProfiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -32,10 +32,10 @@ func TestWriteCodexProfileFileUsesResponsesWireAPIForWorkerProfiles(t *testing.T
 	}
 
 	want := codexProfileFile{
-		ModelProvider: "cli-openai",
+		ModelProvider: "OpenAI",
 		ModelProviders: map[string]codexProfileEntry{
-			"cli-openai": {
-				Name:    "cli-openai",
+			"OpenAI": {
+				Name:    "OpenAI",
 				BaseURL: "http://127.0.0.1:6767",
 				WireAPI: "responses",
 			},

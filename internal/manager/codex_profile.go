@@ -10,6 +10,11 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+const (
+	codexLaunchProviderName = "OpenAI"
+	codexLaunchWireAPI      = "responses"
+)
+
 type codexProfileFile struct {
 	ModelProvider  string                       `toml:"model_provider"`
 	ModelProviders map[string]codexProfileEntry `toml:"model_providers"`
@@ -23,12 +28,12 @@ type codexProfileEntry struct {
 
 func writeCodexProfileFile(name string, profile config.UpstreamProfile) error {
 	encoded, err := toml.Marshal(codexProfileFile{
-		ModelProvider: name,
+		ModelProvider: codexLaunchProviderName,
 		ModelProviders: map[string]codexProfileEntry{
-			name: {
-				Name:    name,
+			codexLaunchProviderName: {
+				Name:    codexLaunchProviderName,
 				BaseURL: profile.BaseURL,
-				WireAPI: "responses",
+				WireAPI: codexLaunchWireAPI,
 			},
 		},
 	})

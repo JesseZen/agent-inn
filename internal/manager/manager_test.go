@@ -115,7 +115,10 @@ func TestManagerSyncsCodexProfilesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `model_provider = 'cli-openai'`) {
+	if !strings.Contains(string(data), `model_provider = 'OpenAI'`) {
+		t.Fatalf("unexpected profile file: %s", data)
+	}
+	if !strings.Contains(string(data), `[model_providers.OpenAI]`) {
 		t.Fatalf("unexpected profile file: %s", data)
 	}
 	if !strings.Contains(string(data), `base_url = 'http://127.0.0.1:11199'`) {
