@@ -183,7 +183,7 @@ export function DialogPrompt(props: DialogPromptProps) {
       <box paddingBottom={1} gap={1} flexDirection="row">
         <Show when={!props.busy} fallback={<text fg={theme.textMuted}>processing...</text>}>
           <Show when={submitShortcut()}>
-            <text fg={theme.text}>
+            <text fg={theme.text} onMouseUp={() => confirm()}>
               {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
             </text>
           </Show>

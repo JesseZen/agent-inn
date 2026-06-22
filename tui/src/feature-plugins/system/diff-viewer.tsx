@@ -17,6 +17,7 @@ import { createEffect, createMemo, createResource, createSignal, For, Match, onC
 import { DiffViewerFileTree } from "./diff-viewer-file-tree"
 import { Panel, PanelGroup, Separator } from "./diff-viewer-ui"
 import { DialogSelect } from "../../ui/dialog-select"
+import { useDialog } from "../../ui/dialog"
 import { getScrollAcceleration } from "../../util/scroll"
 import {
   allExpandedFileTreeDirectories,
@@ -927,6 +928,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
 
 function DiffViewerHelpDialog() {
   const { theme } = useTheme()
+  const dialog = useDialog()
   const rows = [
     {
       shortcut: () => "q",
@@ -996,7 +998,9 @@ function DiffViewerHelpDialog() {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Diff shortcuts
         </text>
-        <text fg={theme.textMuted}>esc</text>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.pop()}>
+          esc
+        </text>
       </box>
       <box flexDirection="row">
         <text fg={theme.textMuted} width={5} wrapMode="none">
