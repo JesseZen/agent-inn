@@ -254,7 +254,7 @@ export function EscHint(props: { dialog: DialogContext }) {
   const { theme } = useTheme()
   const label = () => (props.dialog.stack.length > 1 ? "back" : "close")
   return (
-    <text fg={theme.textMuted}>
+    <text fg={theme.textMuted} onMouseUp={() => props.dialog.pop()}>
       esc <span style={{ fg: theme.text }}>{label()}</span>
     </text>
   )
