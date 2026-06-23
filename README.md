@@ -195,17 +195,16 @@ cd tui && bun run typecheck
 ```bash
 ./codex-proxy version           # Show version
 ./codex-proxy worker ...        # Worker process (auto-started by Manager, no need to run manually)
-./codex-proxy launch --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>]
+./codex-proxy launch --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
                                 # Launch Codex CLI connected to a worker
+                                # --mode hosted-terminal runs Codex inside a CAP-owned tmux host (requires tmux)
 ```
 
 ## TODO
 
 - [ ] `/status`: reintroduce a dedicated worker status view after `/workers` owns the main worker management flow
-- [ ] hosted-terminal: one external terminal host using `tmux` or a similar multiplexer; CAP handles `create` / `list` / `attach` / `switch`
+- [x] hosted-terminal (experimental): `/launch` can run Codex CLI inside a CAP-owned `tmux -L cap` host; CAP handles `create` / `switch` / `attach`
 - [ ] embedded-terminal: built-in PTY sessions inside CAP with direct session switching
-
-Planned order: `hosted-terminal` first, then `embedded-terminal`.
 
 ## License
 

@@ -40,6 +40,22 @@ export type ProxyConfigResponse = {
   status: ProxyConfigStatus
 }
 
+export type HostedSessionRecord = {
+  session_id: string
+  session_label: string
+  worker_name: string
+  worker_port: number
+  workspace?: string
+  model?: string
+  add_dirs?: string[]
+  created_at: string
+  last_opened_at: string
+}
+
+export type HostedSessionSummary = HostedSessionRecord & {
+  status: "active" | "stale"
+}
+
 function json(value: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(value), {
     ...init,

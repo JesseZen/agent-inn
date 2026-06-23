@@ -54,6 +54,7 @@ type Manager struct {
 	logs               map[string]*logging.WorkerLogSink
 	configPatchStates  map[string]string
 	configPatchDetails map[string]map[string]string
+	hostedSessions     *HostedSessionRegistry
 }
 
 type WorkerSummary struct {
@@ -154,6 +155,7 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		configPatchStates:  map[string]string{},
 		configPatchDetails: map[string]map[string]string{},
+		hostedSessions:     NewHostedSessionRegistry(HostedSessionRegistryPath(cfg.ConfigPath)),
 	}
 	if cfg.ConfigPath != "" {
 		m.stopConfigWriter = store.StartAsyncWriter()
@@ -163,6 +165,14 @@ func New(cfg Config) *Manager {
 		m.configStatus.LastSaveError = err.Error()
 	}
 	return m
+}
+
+func hostedSessionRegistryPath(configPath string) string {
+	stateDir := filepath.Dir(expandHomePath(configPath))
+	if configPath == "" {
+		stateDir = expandHomePath("~/.codex-proxy")
+	}
+	return filepath.Join(stateDir, hostedSessionsFileName)
 }
 
 func (m *Manager) CheckPortAvailable(workerName string, port int) error {
