@@ -3,7 +3,15 @@ import type { GlobalEvent } from "@codex-proxy/sdk/v2"
 import { Flag } from "@codex-proxy/core/flag/flag"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
-import type { ProxyConfigResponse, ProxyConfigStatus, RedactedUpstream, WorkerDetail, WorkerSummary } from "../proxy/backend"
+import type {
+  HostedSessionRecord,
+  HostedSessionSummary,
+  ProxyConfigResponse,
+  ProxyConfigStatus,
+  RedactedUpstream,
+  WorkerDetail,
+  WorkerSummary,
+} from "../proxy/backend"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
@@ -126,6 +134,24 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
         async getConfig() {
           return request<ProxyConfigResponse>("/api/config")
+        },
+        async listHostedSessions() {
+          return request<{ sessions: HostedSessionSummary[] }>("/api/hosted-sessions").then((result) => result.sessions)
+        },
+        async createHostedSession(input: HostedSessionRecord) {
+          return request<HostedSessionRecord>("/api/hosted-sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          })
+        },
+        async getHostedSession(sessionID: string) {
+          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`)
+        },
+        async deleteHostedSession(sessionID: string) {
+          return request<{ session_id: string }>(`/api/hosted-sessions/${sessionID}`, {
+            method: "DELETE",
+          })
         },
         async saveConfig() {
           return request<{ status: ProxyConfigStatus }>("/api/config", { method: "PUT" })

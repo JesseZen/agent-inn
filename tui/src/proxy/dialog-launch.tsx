@@ -6,9 +6,43 @@ import { DialogPrompt } from "../ui/dialog-prompt"
 import { useClipboard } from "../context/clipboard"
 import { DialogAlert } from "../ui/dialog-alert"
 import { useProject } from "../context/project"
-import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand } from "./launch"
+import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand, type LaunchMode } from "./launch"
+import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 
 export function DialogLaunch() {
+  const dialog = useDialog()
+
+  const options: DialogSelectOption<LaunchMode>[] = [
+    {
+      title: "External window",
+      value: "external-window",
+      description: "Open Codex CLI in a new terminal window",
+    },
+    {
+      title: "Hosted terminal",
+      value: "hosted-terminal",
+      description: "Run Codex CLI inside a CAP-managed tmux session",
+    },
+  ]
+
+  return (
+    <DialogSelect
+      title="Launch Codex CLI"
+      flat
+      options={options}
+      placeholder="Select launch mode..."
+      onSelect={(option) => {
+        if (option.value === "hosted-terminal") {
+          dialog.replace(() => <DialogHostedTerminal />)
+          return
+        }
+        dialog.replace(() => <DialogExternalWindowLaunch />)
+      }}
+    />
+  )
+}
+
+function DialogExternalWindowLaunch() {
   const sync = useSync()
   const project = useProject()
   const dialog = useDialog()
@@ -40,6 +74,7 @@ export function DialogLaunch() {
         : undefined,
     })
     if (workspace === null) return
+
     dialog.clear()
     const command = createProxyLaunchCommand({
       workerPort: worker.port,
@@ -48,17 +83,21 @@ export function DialogLaunch() {
     })
     const rendered = renderProxyLaunchCommand(command)
     await clipboard.write?.(rendered).catch(() => undefined)
-    const launched = await launchProxySession({
-      executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
-      workerPort: worker.port,
-      profile: worker.name,
-      workspace: workspace || undefined,
-    })
-    if (!launched) {
-      await DialogAlert.show(dialog, "Launch Command", rendered)
-      return
+    try {
+      const launched = await launchProxySession({
+        executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
+        workerPort: worker.port,
+        profile: worker.name,
+        workspace: workspace || undefined,
+      })
+      if (!launched) {
+        await DialogAlert.show(dialog, "Launch Command", rendered)
+        return
+      }
+      await DialogAlert.show(dialog, "Launch", "Opened a new Codex session.")
+    } catch (err) {
+      await DialogAlert.show(dialog, "Launch failed", String(err instanceof Error ? err.message : err))
     }
-    await DialogAlert.show(dialog, "Launch", "Opened a new Codex session.")
   }
 
   return (

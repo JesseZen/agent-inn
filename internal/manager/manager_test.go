@@ -96,6 +96,60 @@ func TestManagerAPIListsWorkersAndProvidersWithoutSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	m := New(Config{Config: config.Config{}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	active, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "codex:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 2",
+		WorkerName:   "worker",
+		WorkerPort:   11200,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			if strings.Join(args, " ") == strings.Join(TmuxListWindowsCommand(), " ") {
+				return "codex:worker-1\n", nil
+			}
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/hosted-sessions", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"session_id":"`+active.SessionID+`"`) {
+		t.Fatalf("missing active session: %s", res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"session_id":"`+stale.SessionID+`"`) {
+		t.Fatalf("missing stale session: %s", res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"status":"active"`) {
+		t.Fatalf("missing active status: %s", res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"status":"stale"`) {
+		t.Fatalf("missing stale status: %s", res.Body.String())
+	}
+}
+
 func TestManagerSyncsCodexProfilesOnStartup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

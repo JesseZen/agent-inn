@@ -33,14 +33,15 @@ export function createEventSource() {
   }
 }
 
-export type FetchHandler = (url: URL) => Response | Promise<Response> | undefined
+export type FetchHandler = (url: URL, request: Request) => Response | Promise<Response> | undefined
 
 export function createFetch(override?: FetchHandler) {
   const session = [] as URL[]
-  const fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(input instanceof Request ? input.url : String(input))
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const url = new URL(request.url)
     if (url.pathname === "/session") session.push(url)
-    const overridden = await override?.(url)
+    const overridden = await override?.(url, request)
     if (overridden) return overridden
 
     if (
@@ -72,6 +73,20 @@ export function createFetch(override?: FetchHandler) {
       })
     if (url.pathname === "/project/current") return json({ id: "proj_test" })
     if (url.pathname === "/api/workers") return json({ workers: [] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [] })
+    if (url.pathname.startsWith("/api/hosted-sessions/")) {
+      const sessionID = url.pathname.split("/").at(-1) ?? ""
+      if (request.method === "DELETE") return json({ session_id: sessionID })
+      return json({
+        session_id: sessionID,
+        session_label: "worker 1",
+        worker_name: "worker",
+        worker_port: 1234,
+        created_at: new Date().toISOString(),
+        last_opened_at: new Date().toISOString(),
+        status: "active",
+      })
+    }
     if (url.pathname === "/api/upstreams") return json({ upstreams: {} })
     if (url.pathname === "/api/config")
       return json({

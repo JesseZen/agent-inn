@@ -14,6 +14,8 @@ func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/events", m.handleEvents)
 	mux.HandleFunc("/api/workers", m.handleWorkers)
 	mux.HandleFunc("/api/workers/", m.handleWorkerByPort)
+	mux.HandleFunc("/api/hosted-sessions", m.handleHostedSessions)
+	mux.HandleFunc("/api/hosted-sessions/", m.handleHostedSessionByID)
 	mux.HandleFunc("/api/upstreams", m.handleUpstreams)
 	mux.HandleFunc("/api/upstreams/", m.handleUpstreamByName)
 	mux.HandleFunc("/api/config", m.handleConfig)
@@ -93,6 +95,63 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(rw, http.StatusCreated, map[string]any{"name": payload.Name, "port": payload.Port, "status": string(m.workerStatus(payload.Name))})
+}
+
+func (m *Manager) handleHostedSessions(rw http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		sessions, err := m.hostedSessions.Summaries()
+		if err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		writeJSON(rw, http.StatusOK, map[string]any{"sessions": sessions})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var payload HostedSessionRecord
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+			return
+		}
+		session, err := m.hostedSessions.Create(payload)
+		if err != nil {
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(rw, http.StatusCreated, session)
+		return
+	}
+	http.NotFound(rw, r)
+}
+
+func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/hosted-sessions/")
+	if id == "" {
+		http.NotFound(rw, r)
+		return
+	}
+	session, ok, err := m.hostedSessions.Get(id)
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		return
+	}
+	if !ok {
+		http.NotFound(rw, r)
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeJSON(rw, http.StatusOK, session)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := m.hostedSessions.Remove(id, hostedTMuxRunnerFactory()); err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		writeJSON(rw, http.StatusOK, map[string]any{"session_id": id})
+		return
+	}
+	http.NotFound(rw, r)
 }
 
 func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {

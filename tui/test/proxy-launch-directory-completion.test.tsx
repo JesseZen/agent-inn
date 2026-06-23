@@ -81,6 +81,12 @@ test("launch dialog enables directory completion with current project directory"
     api.keymap.dispatchCommand("proxy.launch")
     await wait(async () => {
       await setup.renderOnce()
+      return setup.captureCharFrame().includes("External window")
+    })
+
+    api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await setup.renderOnce()
       return setup.captureCharFrame().includes("test-cli")
     })
 
@@ -160,6 +166,12 @@ test("launch directory prompt ESC returns to worker picker", async () => {
     await setup.renderOnce()
 
     api.keymap.dispatchCommand("proxy.launch")
+    await wait(async () => {
+      await setup.renderOnce()
+      return setup.captureCharFrame().includes("External window")
+    })
+
+    api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await setup.renderOnce()
       return setup.captureCharFrame().includes("test-cli")
