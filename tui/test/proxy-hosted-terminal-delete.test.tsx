@@ -15,24 +15,43 @@ async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   }
 }
 
-const hostedSessions = [
-  {
-    session_id: "hs_1",
-    session_label: "solve problem A",
-    worker_name: "test-cli",
-    worker_port: 1234,
-    created_at: "2026-06-23T00:00:00Z",
-    last_opened_at: "2026-06-23T00:00:00Z",
-    status: "active",
-  },
-] as const
+const activeSession = {
+  session_id: "hs_1",
+  session_label: "solve problem A",
+  worker_name: "test-cli",
+  worker_port: 1234,
+  created_at: "2026-06-23T00:00:00Z",
+  last_opened_at: "2026-06-23T00:00:00Z",
+  status: "active",
+} as const
 
-async function setupHostedTerminal() {
+const staleSession1 = {
+  session_id: "hs_2",
+  session_label: "stale problem A",
+  worker_name: "test-cli",
+  worker_port: 1234,
+  created_at: "2026-06-23T00:00:00Z",
+  last_opened_at: "2026-06-23T00:00:00Z",
+  status: "stale",
+} as const
+
+const staleSession2 = {
+  session_id: "hs_3",
+  session_label: "stale problem B",
+  worker_name: "test-cli",
+  worker_port: 1234,
+  created_at: "2026-06-23T00:00:00Z",
+  last_opened_at: "2026-06-23T00:00:00Z",
+  status: "stale",
+} as const
+
+async function setupHostedTerminal(initialHostedSessions = [activeSession]) {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
 
   const deleteRequests: string[] = []
+  let currentHostedSessions = initialHostedSessions.map((session) => ({ ...session }))
   const events = createEventSource()
   const calls = createFetch((url, request) => {
     if (url.pathname === "/api/workers")
@@ -51,11 +70,13 @@ async function setupHostedTerminal() {
       })
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
-        sessions: hostedSessions,
+        sessions: currentHostedSessions,
       })
-    if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "DELETE") {
-      deleteRequests.push("hs_1")
-      return json({ session_id: "hs_1" })
+    if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "DELETE") {
+      const sessionID = url.pathname.split("/").at(-1) ?? ""
+      deleteRequests.push(sessionID)
+      currentHostedSessions = currentHostedSessions.filter((session) => session.session_id !== sessionID)
+      return json({ session_id: sessionID })
     }
     return undefined
   })
@@ -216,6 +237,77 @@ test("hosted terminal delete page does not show ctrl d delete hint", async () =>
 
     const frame = app.setup.captureCharFrame()
     expect(frame.includes("ctrl+d")).toBe(false)
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("hosted terminal delete page shows GC stale sessions when stale sessions exist", async () => {
+  const app = await setupHostedTerminal([activeSession, staleSession1, staleSession2])
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete Hosted Session") && frame.includes("GC stale sessions")
+    })
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame.includes("Delete Hosted Session")).toBe(true)
+    expect(frame.includes("GC stale sessions")).toBe(true)
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("hosted terminal delete page GC deletes all stale sessions after confirmation", async () => {
+  const app = await setupHostedTerminal([activeSession, staleSession1, staleSession2])
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete Hosted Session") && frame.includes("GC stale sessions")
+    })
+
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete hosted sessions") && frame.includes("Delete all stale sessions?")
+    })
+
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.deleteRequests.length === 2
+    })
+
+    expect(app.deleteRequests).toEqual(["hs_2", "hs_3"])
+
+    await app.openHostedTerminal()
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete Hosted Session") && !frame.includes("GC stale sessions") && !frame.includes("stale problem A")
+    })
 
     await app.close()
   } finally {

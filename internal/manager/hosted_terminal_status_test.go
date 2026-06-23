@@ -4,7 +4,7 @@ import "testing"
 
 func TestTmuxListWindowsCommand(t *testing.T) {
 	got := TmuxListWindowsCommand()
-	want := []string{"tmux", "-L", "cap", "list-windows", "-t", "cap-host", "-F", "#{window_name}"}
+	want := []string{"tmux", "-L", "cap", "list-windows", "-t", "cap-host", "-F", "#{window_id}"}
 	if len(got) != len(want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}

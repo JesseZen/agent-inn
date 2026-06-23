@@ -28,7 +28,7 @@ func (f hostedTMuxRunnerFunc) Run(args []string) (string, error) {
 }
 
 func TmuxListWindowsCommand() []string {
-	return append(tmuxPrefix(), "list-windows", "-t", tmuxHostSession, "-F", "#{window_name}")
+	return append(tmuxPrefix(), "list-windows", "-t", tmuxHostSession, "-F", "#{window_id}")
 }
 
 func TmuxKillWindowCommand(windowID string) []string {
