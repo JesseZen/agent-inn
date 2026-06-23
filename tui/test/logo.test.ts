@@ -42,14 +42,14 @@ describe("logo styles", () => {
           width: 36,
           fullWidth: 37,
           anchors: {
-            c: [1, 2],
-            a: [10, 2],
-            p: [19, 2],
+            c: [2, 2],
+            p: [9, 2],
+            t: [20, 2],
           },
           anchorText: {
             c: "█",
-            a: "█",
             p: "█",
+            t: "█",
           },
         },
         terrace: {
@@ -58,13 +58,13 @@ describe("logo styles", () => {
           fullWidth: 37,
           anchors: {
             c: [1, 2],
-            a: [13, 2],
-            p: [23, 2],
+            p: [12, 2],
+            t: [28, 2],
           },
           anchorText: {
             c: "░",
-            a: "░",
             p: "░",
+            t: "░",
           },
         },
       },
