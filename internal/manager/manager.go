@@ -155,7 +155,7 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		configPatchStates:  map[string]string{},
 		configPatchDetails: map[string]map[string]string{},
-		hostedSessions:     NewHostedSessionRegistry(HostedSessionRegistryPath(cfg.ConfigPath)),
+		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 	}
 	if cfg.ConfigPath != "" {
 		m.stopConfigWriter = store.StartAsyncWriter()
@@ -167,12 +167,11 @@ func New(cfg Config) *Manager {
 	return m
 }
 
-func hostedSessionRegistryPath(configPath string) string {
-	stateDir := filepath.Dir(expandHomePath(configPath))
-	if configPath == "" {
-		stateDir = expandHomePath("~/.codex-proxy")
+func hostedSessionRegistryPath(stateDir string) string {
+	if stateDir == "" {
+		stateDir = "~/.codex-proxy"
 	}
-	return filepath.Join(stateDir, hostedSessionsFileName)
+	return filepath.Join(expandHomePath(stateDir), hostedSessionsFileName)
 }
 
 func (m *Manager) CheckPortAvailable(workerName string, port int) error {
@@ -571,7 +570,7 @@ func (m *Manager) LogSink(name string) *logging.WorkerLogSink {
 		return sink
 	}
 	worker := m.config.Workers[name]
-	logDir := m.config.Defaults.LogDir
+	logDir := m.config.Settings.LogDir
 	m.mu.RUnlock()
 
 	if logDir == "" {
@@ -1019,7 +1018,7 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 func cloneConfig(cfg config.Config) config.Config {
 	out := config.Config{
-		Defaults:  cfg.Defaults,
+		Settings:  cfg.Settings,
 		Workers:   make(map[string]config.WorkerConfig, len(cfg.Workers)),
 		Upstreams: make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
 	}

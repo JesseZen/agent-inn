@@ -1,6 +1,10 @@
 package manager
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/jesse/codex-app-proxy/internal/config"
+)
 
 // CAP-owned tmux namespace. All hosted-terminal commands use `tmux -L cap` to
 // isolate CAP-managed sessions from user tmux sessions.
@@ -10,8 +14,26 @@ const (
 	tmuxWindowPrefix = "codex"
 )
 
+func defaultTmuxSettings() config.Settings {
+	var cfg config.Config
+	cfg.ApplyDefaults()
+	return cfg.Settings
+}
+
+func tmuxPrefixForSettings(settings config.Settings) []string {
+	settingsConfig := config.Config{Settings: settings}
+	settingsConfig.ApplyDefaults()
+	return []string{"tmux", "-L", settingsConfig.Settings.Terminal.Tmux.SocketName}
+}
+
+func tmuxHostSessionForSettings(settings config.Settings) string {
+	settingsConfig := config.Config{Settings: settings}
+	settingsConfig.ApplyDefaults()
+	return settingsConfig.Settings.Terminal.Tmux.HostSession
+}
+
 func tmuxPrefix() []string {
-	return []string{"tmux", "-L", tmuxSocketName}
+	return tmuxPrefixForSettings(defaultTmuxSettings())
 }
 
 // TmuxDetectCommand returns the argv used to verify tmux is installed.
@@ -21,30 +43,50 @@ func TmuxDetectCommand() []string {
 
 // TmuxHasSessionCommand returns the argv that checks whether the CAP host session exists.
 func TmuxHasSessionCommand() []string {
-	return append(tmuxPrefix(), "has-session", "-t", tmuxHostSession)
+	return TmuxHasSessionCommandForSettings(defaultTmuxSettings())
+}
+
+func TmuxHasSessionCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "has-session", "-t", tmuxHostSessionForSettings(settings))
 }
 
 // TmuxStartHostCommand returns the argv that starts the detached CAP host session.
 func TmuxStartHostCommand() []string {
-	return append(tmuxPrefix(), "new-session", "-d", "-s", tmuxHostSession)
+	return TmuxStartHostCommandForSettings(defaultTmuxSettings())
+}
+
+func TmuxStartHostCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "new-session", "-d", "-s", tmuxHostSessionForSettings(settings))
 }
 
 // TmuxCreateWindowCommand returns the argv that creates a new window in the CAP host
 // running the given command.
 func TmuxCreateWindowCommand(windowName string, command []string) []string {
-	args := append(tmuxPrefix(), "new-window", "-t", tmuxHostSession, "-n", windowName)
+	return TmuxCreateWindowCommandForSettings(defaultTmuxSettings(), windowName, command)
+}
+
+func TmuxCreateWindowCommandForSettings(settings config.Settings, windowName string, command []string) []string {
+	args := append(tmuxPrefixForSettings(settings), "new-window", "-t", tmuxHostSessionForSettings(settings), "-n", windowName, "-P", "-F", "#{window_id}")
 	return append(args, command...)
 }
 
 // TmuxSelectWindowCommand returns the argv that switches to a window in the CAP host.
 func TmuxSelectWindowCommand(windowID string) []string {
-	target := tmuxHostSession + ":" + windowID
-	return append(tmuxPrefix(), "select-window", "-t", target)
+	return TmuxSelectWindowCommandForSettings(defaultTmuxSettings(), windowID)
+}
+
+func TmuxSelectWindowCommandForSettings(settings config.Settings, windowID string) []string {
+	target := tmuxHostSessionForSettings(settings) + ":" + windowID
+	return append(tmuxPrefixForSettings(settings), "select-window", "-t", target)
 }
 
 // TmuxAttachCommand returns the argv that attaches to the CAP host session.
 func TmuxAttachCommand() []string {
-	return append(tmuxPrefix(), "attach-session", "-t", tmuxHostSession)
+	return TmuxAttachCommandForSettings(defaultTmuxSettings())
+}
+
+func TmuxAttachCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "attach-session", "-t", tmuxHostSessionForSettings(settings))
 }
 
 // SafeWindowName generates a tmux-safe window name from a session identifier.

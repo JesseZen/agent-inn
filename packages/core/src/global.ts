@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { xdgCache, xdgConfig, xdgData, xdgState } from "xdg-basedir"
+import { xdgCache, xdgData, xdgState } from "xdg-basedir"
 import { Context, Effect, Layer } from "effect"
 import { Flag } from "./flag/flag"
 import { Flock } from "./util/flock"
@@ -14,7 +14,9 @@ export const Path = {
   },
   data: path.join(xdgData ?? path.join(os.homedir(), ".local", "share"), app),
   cache: path.join(xdgCache ?? path.join(os.homedir(), ".cache"), app),
-  config: path.join(xdgConfig ?? path.join(os.homedir(), ".config"), app),
+  get config() {
+    return Flag.CODEX_PROXY_CONFIG_DIR ?? path.join(this.home, ".codex-proxy")
+  },
   state: path.join(xdgState ?? path.join(os.homedir(), ".local", "state"), app),
   tmp: path.join(os.tmpdir(), app),
   get bin() {
@@ -59,7 +61,7 @@ export function make(input: Partial<Interface> = {}): Interface {
     home: Path.home,
     data: Path.data,
     cache: Path.cache,
-    config: Flag.CODEX_PROXY_CONFIG_DIR ?? Path.config,
+    config: Path.config,
     state: Path.state,
     tmp: Path.tmp,
     bin: Path.bin,

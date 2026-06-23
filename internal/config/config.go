@@ -2,16 +2,37 @@ package config
 
 import "os"
 
-const defaultLogDir = "~/.codex-proxy/logs"
+const (
+	DefaultConfigDir = "~/.codex-proxy"
+	ConfigFileName   = "config.yaml"
+)
 
 type Config struct {
-	Defaults  Defaults                   `yaml:"defaults"`
+	Settings  Settings                   `yaml:"settings"`
 	Workers   map[string]WorkerConfig    `yaml:"workers"`
 	Upstreams map[string]UpstreamProfile `yaml:"upstreams"`
 }
 
-type Defaults struct {
-	LogDir string `yaml:"log_dir"`
+type Settings struct {
+	StateDir string           `yaml:"state_dir" json:"state_dir"`
+	LogDir   string           `yaml:"log_dir" json:"log_dir"`
+	Launch   LaunchSettings   `yaml:"launch" json:"launch"`
+	Terminal TerminalSettings `yaml:"terminal" json:"terminal"`
+}
+
+type LaunchSettings struct {
+	DefaultMode string `yaml:"default_mode" json:"default_mode"`
+}
+
+type TerminalSettings struct {
+	Host   string       `yaml:"host" json:"host"`
+	Opener string       `yaml:"opener" json:"opener"`
+	Tmux   TmuxSettings `yaml:"tmux" json:"tmux"`
+}
+
+type TmuxSettings struct {
+	SocketName  string `yaml:"socket_name" json:"socket_name"`
+	HostSession string `yaml:"host_session" json:"host_session"`
 }
 
 type WorkerConfig struct {
@@ -34,8 +55,26 @@ type UpstreamProfile struct {
 }
 
 func (c *Config) ApplyDefaults() {
-	if c.Defaults.LogDir == "" {
-		c.Defaults.LogDir = defaultLogDir
+	if c.Settings.StateDir == "" {
+		c.Settings.StateDir = DefaultConfigDir
+	}
+	if c.Settings.LogDir == "" {
+		c.Settings.LogDir = DefaultConfigDir + "/logs"
+	}
+	if c.Settings.Launch.DefaultMode == "" {
+		c.Settings.Launch.DefaultMode = "hosted-terminal"
+	}
+	if c.Settings.Terminal.Host == "" {
+		c.Settings.Terminal.Host = "tmux"
+	}
+	if c.Settings.Terminal.Opener == "" {
+		c.Settings.Terminal.Opener = "terminal_app"
+	}
+	if c.Settings.Terminal.Tmux.SocketName == "" {
+		c.Settings.Terminal.Tmux.SocketName = "cap"
+	}
+	if c.Settings.Terminal.Tmux.HostSession == "" {
+		c.Settings.Terminal.Tmux.HostSession = "cap-host"
 	}
 	if c.Workers == nil {
 		c.Workers = map[string]WorkerConfig{}

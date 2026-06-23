@@ -51,11 +51,11 @@ type hostedSessionFile struct {
 	Sessions       map[string]HostedSessionRecord `json:"sessions"`
 }
 
-func HostedSessionRegistryPath(configPath string) string {
-	if configPath == "" {
-		return filepath.Join(expandHomePath("~/.codex-proxy"), hostedSessionsFileName)
+func HostedSessionRegistryPath(stateDir string) string {
+	if stateDir == "" {
+		stateDir = "~/.codex-proxy"
 	}
-	return filepath.Join(filepath.Dir(expandHomePath(configPath)), hostedSessionsFileName)
+	return filepath.Join(expandHomePath(stateDir), hostedSessionsFileName)
 }
 
 func NewHostedSessionRegistry(path string) *HostedSessionRegistry {

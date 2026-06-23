@@ -1,5 +1,6 @@
 import { expect, mock, test } from "bun:test"
 import { createTestRenderer } from "@opentui/core/testing"
+import { TextareaRenderable } from "@opentui/core"
 import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
 import { Effect } from "effect"
 import { Global } from "@codex-proxy/core/global"
@@ -9,7 +10,14 @@ import { tmpdir } from "./fixture/fixture"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
-import { toCodexProxyUpstreams, type ProxyConfigStatus, type RedactedUpstream, type WorkerSummary } from "../src/proxy/backend"
+import {
+  toCodexProxyUpstreams,
+  type ProxyConfigStatus,
+  type ProxySettings,
+  type RedactedUpstream,
+  type WorkerSummary,
+} from "../src/proxy/backend"
+import { resolveSlashCommand } from "../src/keymap"
 
 async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
@@ -85,11 +93,25 @@ function createProxyHarness() {
       dirty: true,
       last_save_error: "",
     } satisfies ProxyConfigStatus,
+    settings: {
+      state_dir: "~/.codex-proxy",
+      log_dir: "~/.codex-proxy/logs",
+      launch: { default_mode: "hosted-terminal" },
+      terminal: {
+        host: "tmux",
+        opener: "terminal_app",
+        tmux: {
+          socket_name: "cap",
+          host_session: "cap-host",
+        },
+      },
+    } satisfies ProxySettings,
   }
   const calls = {
     patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
+    patchSettings: [] as Array<Partial<ProxySettings>>,
     restartWorker: [] as number[],
     stopWorker: [] as number[],
     saveConfig: 0,
@@ -144,6 +166,12 @@ function createProxyHarness() {
         config: {},
         status: config.status,
       })
+    if (url.pathname === "/api/settings") {
+      return json({
+        settings: config.settings,
+        status: config.status,
+      })
+    }
     if (url.pathname === "/api/workers/6767/logs") {
       calls.getLogs += 1
       return json({ lines: logs.get(6767) ?? [] })
@@ -237,6 +265,23 @@ function createProxyHarness() {
       return json({ status: config.status })
     }
 
+    if (url.pathname === "/api/settings" && method === "PATCH") {
+      const body = JSON.parse(String(init?.body ?? "null")) as Partial<ProxySettings>
+      calls.patchSettings.push(body)
+      config.settings = {
+        ...config.settings,
+        ...body,
+        launch: { ...config.settings.launch, ...body.launch },
+        terminal: {
+          ...config.settings.terminal,
+          ...body.terminal,
+          tmux: { ...config.settings.terminal.tmux, ...body.terminal?.tmux },
+        },
+      }
+      config.status = { ...config.status, dirty: false, generation: config.status.generation + 1 }
+      return json({ settings: config.settings, status: config.status })
+    }
+
     if (url.pathname === "/api/events") {
       return new Response("", {
         headers: { "content-type": "text/event-stream" },
@@ -310,6 +355,7 @@ async function mountProxyApp() {
   return {
     api,
     calls: proxy.calls,
+    setup,
     frame() {
       return setup.captureCharFrame()
     },
@@ -391,18 +437,67 @@ test("proxy config save clears dirty state on reopen", async () => {
   const app = await mountProxyApp()
 
   try {
-    app.api.keymap.dispatchCommand("proxy.config")
+    app.api.keymap.dispatchCommand("proxy.settings")
     await app.render()
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.end")
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.saveConfig === 1)
     await app.render()
 
-    app.api.keymap.dispatchCommand("proxy.config")
+    app.api.keymap.dispatchCommand("proxy.settings")
     await app.render()
     expect(app.frame().includes("Save Config to Disk")).toBe(false)
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy settings editor patches settings through manager API", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Settings") && frame.includes("State Dir") && frame.includes("~/.codex-proxy")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("/tmp/cap-state")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchSettings.length === 1
+    })
+
+    expect(app.calls.patchSettings).toEqual([{ state_dir: "/tmp/cap-state" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy settings command is registered and config command is removed", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    const commands = app.api.keymap.getCommandEntries({
+      namespace: "palette",
+      visibility: "registered",
+    })
+    const names = commands.map((entry) => entry.command.name)
+    expect(names.includes("proxy.settings")).toBe(true)
+
+    expect(resolveSlashCommand(app.api.keymap, "/settings")).toBe("proxy.settings")
+    expect(resolveSlashCommand(app.api.keymap, "/config")).toBe("proxy.settings")
   } finally {
     await app.cleanup()
   }

@@ -3,6 +3,8 @@ import { createTestRenderer } from "@opentui/core/testing"
 import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
 import { Effect } from "effect"
 import { Global } from "@codex-proxy/core/global"
+import { homedir } from "node:os"
+import path from "node:path"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
@@ -16,6 +18,10 @@ async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   }
 }
 
+test("Global.Path.config defaults to ~/.codex-proxy", () => {
+  expect(Global.Path.config).toBe(path.join(homedir(), ".codex-proxy"))
+})
+
 test("createProxyLaunchCommand omits --mode for external-window", () => {
   const cmd = createProxyLaunchCommand({ workerPort: 1234, profile: "cli", mode: "external-window" })
   expect(cmd).toEqual(["codex-proxy", "launch", "--worker", "1234", "--profile", "cli"])
@@ -24,6 +30,27 @@ test("createProxyLaunchCommand omits --mode for external-window", () => {
 test("createProxyLaunchCommand includes --mode hosted-terminal when selected", () => {
   const cmd = createProxyLaunchCommand({ workerPort: 1234, profile: "cli", mode: "hosted-terminal" })
   expect(cmd).toEqual(["codex-proxy", "launch", "--worker", "1234", "--profile", "cli", "--mode", "hosted-terminal"])
+})
+
+test("createProxyLaunchCommand includes --config-dir for hosted terminal launches", () => {
+  const cmd = createProxyLaunchCommand({
+    workerPort: 1234,
+    profile: "cli",
+    mode: "hosted-terminal",
+    configDir: "/tmp/codex-config",
+  })
+  expect(cmd).toEqual([
+    "codex-proxy",
+    "launch",
+    "--worker",
+    "1234",
+    "--profile",
+    "cli",
+    "--config-dir",
+    "/tmp/codex-config",
+    "--mode",
+    "hosted-terminal",
+  ])
 })
 
 test("createProxyLaunchCommand omits --mode by default", () => {

@@ -1,5 +1,5 @@
 import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
-import { DialogConfig } from "./dialog-config"
+import { DialogSettings } from "./dialog-settings"
 import { DialogLogs } from "./dialog-logs"
 import { DialogUpstream } from "./dialog-upstream"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
@@ -52,12 +52,13 @@ export function registerProxyCommands(api: TuiPluginApi) {
       },
       {
         namespace: "palette",
-        name: "proxy.config",
-        title: "View proxy config status",
+        name: "proxy.settings",
+        title: "View proxy settings",
         category: "Proxy",
-        slashName: "config",
+        slashName: "settings",
+        slashAliases: ["config"],
         run() {
-          api.ui.dialog.replace(() => <DialogConfig />)
+          api.ui.dialog.replace(() => <DialogSettings />)
         },
       },
       {

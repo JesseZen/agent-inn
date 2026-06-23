@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/jesse/codex-app-proxy/internal/config"
 	"github.com/jesse/codex-app-proxy/internal/manager"
 )
 
@@ -18,12 +21,12 @@ const (
 )
 
 type launchRunner interface {
-	Run(args []string) error
+	Run(args []string) (string, error)
 }
 
-type launchRunnerFunc func([]string) error
+type launchRunnerFunc func([]string) (string, error)
 
-func (f launchRunnerFunc) Run(args []string) error {
+func (f launchRunnerFunc) Run(args []string) (string, error) {
 	return f(args)
 }
 
@@ -45,18 +48,21 @@ func (m *multiString) Set(value string) error {
 }
 
 var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-	return launchRunnerFunc(func(args []string) error {
+	return launchRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Stdout = stdout
+		var stdoutBuf bytes.Buffer
+		cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
 		cmd.Stderr = stderr
 		cmd.Stdin = os.Stdin
-		return cmd.Run()
+		err := cmd.Run()
+		return stdoutBuf.String(), err
 	})
 }
 
 func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags := flag.NewFlagSet("launch", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	configDir := flags.String("config-dir", expandHome(config.DefaultConfigDir), "config directory")
 	worker := flags.String("worker", "", "worker port")
 	profile := flags.String("profile", "", "codex profile")
 	workspace := flags.String("cd", "", "workspace directory")
@@ -99,11 +105,16 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	cmd := manager.BuildCodexLaunchCommand(opts)
 
 	if *mode == modeHostedTerminal {
-		return runHostedTerminalLaunch(opts, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
+		cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to load config: %v\n", err)
+			return 1
+		}
+		return runHostedTerminalLaunch(cfg.Settings, opts, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
 	}
 
 	runner := launchRunnerFactory(stdout, stderr)
-	if err := runner.Run(cmd); err != nil {
+	if _, err := runner.Run(cmd); err != nil {
 		fmt.Fprintf(stderr, "failed to launch: %v\n", err)
 		return 1
 	}
@@ -116,22 +127,22 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 // name so re-launching the same session switches to the existing window.
 // When noAttach is true, the setup runs but the attach step is skipped so the
 // caller (TUI) can decide whether to open a new terminal.
-func runHostedTerminalLaunch(opts manager.CodexLaunchOptions, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
+func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchOptions, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
 	runner := launchRunnerFactory(stdout, stderr)
 
-	if err := runner.Run(manager.TmuxDetectCommand()); err != nil {
+	if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
 		fmt.Fprintf(stderr, "tmux is required for hosted-terminal mode: %v\n", err)
 		return 1
 	}
 
-	if err := runner.Run(manager.TmuxHasSessionCommand()); err != nil {
-		if err := runner.Run(manager.TmuxStartHostCommand()); err != nil {
+	if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(settings)); err != nil {
+		if _, err := runner.Run(manager.TmuxStartHostCommandForSettings(settings)); err != nil {
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 			return 1
 		}
 	}
 
-	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(""))
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(settings.StateDir))
 	if sessionID != "" {
 		session, ok, err := registry.Get(sessionID)
 		if err != nil {
@@ -146,14 +157,14 @@ func runHostedTerminalLaunch(opts manager.CodexLaunchOptions, workerName string,
 			fmt.Fprintf(stderr, "hosted session %q is stale\n", sessionID)
 			return 1
 		}
-		if err := runner.Run(manager.TmuxSelectWindowCommand(session.TmuxWindowID)); err != nil {
+		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
 			fmt.Fprintf(stderr, "failed to select tmux window: %v\n", err)
 			return 1
 		}
 		if noAttach {
 			return 0
 		}
-		if err := runner.Run(manager.TmuxAttachCommand()); err != nil {
+		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
 			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
 			return 1
 		}
@@ -172,13 +183,15 @@ func runHostedTerminalLaunch(opts manager.CodexLaunchOptions, workerName string,
 		fmt.Fprintf(stderr, "failed to create hosted session: %v\n", err)
 		return 1
 	}
-	windowName := manager.SafeWindowName(session.SessionLabel)
+	windowName := session.SessionLabel
 	codexCmd := manager.BuildCodexLaunchCommand(opts)
-	if err := runner.Run(manager.TmuxSelectWindowCommand(windowName)); err != nil {
-		if err := runner.Run(manager.TmuxCreateWindowCommand(windowName, codexCmd)); err != nil {
+	if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
+		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, codexCmd))
+		if err != nil {
 			fmt.Fprintf(stderr, "failed to create tmux window: %v\n", err)
 			return 1
 		}
+		windowName = strings.TrimSpace(windowID)
 	}
 	if err := registry.UpdateWindowID(session.SessionID, windowName); err != nil {
 		fmt.Fprintf(stderr, "failed to persist hosted session: %v\n", err)
@@ -187,7 +200,7 @@ func runHostedTerminalLaunch(opts manager.CodexLaunchOptions, workerName string,
 	if noAttach {
 		return 0
 	}
-	if err := runner.Run(manager.TmuxAttachCommand()); err != nil {
+	if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
 		fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
 		return 1
 	}

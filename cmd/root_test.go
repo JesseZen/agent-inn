@@ -58,6 +58,9 @@ providers:
 		if opts.ConfigPath != configPath {
 			t.Fatalf("unexpected config path %s", opts.ConfigPath)
 		}
+		if opts.ConfigDir != dir {
+			t.Fatalf("unexpected config dir %s", opts.ConfigDir)
+		}
 		if len(opts.Config.Workers) != 1 {
 			t.Fatalf("config was not loaded: %#v", opts.Config)
 		}
@@ -68,12 +71,24 @@ providers:
 	defer restoreLocker()
 
 	var stderr bytes.Buffer
-	code := Run([]string{"--config", configPath, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
 	if !called {
 		t.Fatal("root runner was not called")
+	}
+}
+
+func TestRunDefaultRejectsLegacyConfigFlag(t *testing.T) {
+	var stderr bytes.Buffer
+	code := Run([]string{"--config", "config.yaml"}, &bytes.Buffer{}, &stderr)
+
+	if code == 0 {
+		t.Fatal("expected legacy --config to fail")
+	}
+	if !strings.Contains(stderr.String(), "--config") {
+		t.Fatalf("expected --config flag error, got %q", stderr.String())
 	}
 }
 
@@ -105,7 +120,7 @@ providers:
 	defer restoreLocker()
 
 	var stderr bytes.Buffer
-	code := Run([]string{"--config", configPath, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0 despite failed worker config, got %d: %s", code, stderr.String())
 	}
@@ -139,7 +154,7 @@ providers:
 	defer restore()
 
 	var stderr bytes.Buffer
-	code := Run([]string{"--config", configPath, "--manager-port", "19091"}, &bytes.Buffer{}, &stderr)
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19091"}, &bytes.Buffer{}, &stderr)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit when lock held, got 0: %s", stderr.String())
 	}
@@ -169,9 +184,10 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 	defer restoreServer()
 	restoreProgram := func() func() {
 		previous := rootProgramFactory
-		rootProgramFactory = func(addr string, startupStatus string) rootProgram {
+		rootProgramFactory = func(addr string, startupStatus string, configDir string) rootProgram {
 			program.addr = addr
 			program.startupStatus = startupStatus
+			program.configDir = configDir
 			return program
 		}
 		return func() { rootProgramFactory = previous }
@@ -206,7 +222,7 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 }
 
 func TestRootProgramFactoryBuildsTypeScriptTUICommand(t *testing.T) {
-	program := rootProgramFactory("127.0.0.1:8787", "")
+	program := rootProgramFactory("127.0.0.1:8787", "", "/tmp/cap-config")
 	cmd := program.CommandLine()
 	if cmd[len(cmd)-2] != "run" || cmd[len(cmd)-1] != "src/cli.ts" {
 		t.Fatalf("expected bun run src/cli.ts command, got %#v", cmd)
@@ -219,6 +235,17 @@ func TestRootProgramFactoryBuildsTypeScriptTUICommand(t *testing.T) {
 	}
 	if program.Env()["CODEX_PROXY_PROJECT_DIR"] == "" {
 		t.Fatalf("expected CODEX_PROXY_PROJECT_DIR to be set, got %#v", program.Env())
+	}
+	if program.Env()["CODEX_PROXY_CONFIG_DIR"] != "/tmp/cap-config" {
+		t.Fatalf("expected CODEX_PROXY_CONFIG_DIR for TUI, got %#v", program.Env())
+	}
+}
+
+func TestRootProgramEnvIncludesConfigDir(t *testing.T) {
+	program := newTUIProgram("127.0.0.1:8787", "", "/tmp/cap-config")
+
+	if program.Env()["CODEX_PROXY_CONFIG_DIR"] != "/tmp/cap-config" {
+		t.Fatalf("expected CODEX_PROXY_CONFIG_DIR, got %#v", program.Env())
 	}
 }
 
@@ -244,9 +271,10 @@ func TestRootRunnerDoesNotWriteConfiguredWorkerStartupFailureToTerminal(t *testi
 	defer restoreServer()
 	restoreProgram := func() func() {
 		previous := rootProgramFactory
-		rootProgramFactory = func(addr string, startupStatus string) rootProgram {
+		rootProgramFactory = func(addr string, startupStatus string, configDir string) rootProgram {
 			program.addr = addr
 			program.startupStatus = startupStatus
+			program.configDir = configDir
 			return program
 		}
 		return func() { rootProgramFactory = previous }
@@ -354,6 +382,7 @@ type fakeRootProgram struct {
 	waitForListen <-chan struct{}
 	runCalled     bool
 	startupStatus string
+	configDir     string
 }
 
 func (p *fakeRootProgram) Run() error {

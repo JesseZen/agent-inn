@@ -47,7 +47,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 	}
 
-	if len(args) > 0 && args[0] != "--config" && args[0] != "--manager-port" {
+	if len(args) > 0 && args[0] != "--config-dir" && args[0] != "--manager-port" {
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		return 2
 	}
@@ -55,6 +55,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 type RootOptions struct {
+	ConfigDir   string
 	ConfigPath  string
 	ManagerPort int
 	Config      config.Config
@@ -72,8 +73,8 @@ var rootServerFactory = func(addr string, handler http.Handler) rootServer {
 	return &http.Server{Addr: addr, Handler: handler}
 }
 
-var rootProgramFactory = func(addr string, startupStatus string) rootProgram {
-	return newTUIProgram(addr, startupStatus)
+var rootProgramFactory = func(addr string, startupStatus string, configDir string) rootProgram {
+	return newTUIProgram(addr, startupStatus, configDir)
 }
 
 var rootLogWriter io.Writer = os.Stderr
@@ -139,7 +140,7 @@ var rootRunner = func(opts RootOptions) error {
 		}
 	}()
 
-	program := rootProgramFactory(addr, startupStatus)
+	program := rootProgramFactory(addr, startupStatus, opts.ConfigDir)
 	if err := program.Run(); err != nil {
 		_ = server.Close()
 		return err
@@ -173,7 +174,7 @@ func setRootServerFactoryForTest(factory func(string, http.Handler) rootServer) 
 
 func setRootProgramFactoryForTest(factory func(string) rootProgram) func() {
 	previous := rootProgramFactory
-	rootProgramFactory = func(addr string, _ string) rootProgram {
+	rootProgramFactory = func(addr string, _ string, _ string) rootProgram {
 		return factory(addr)
 	}
 	return func() { rootProgramFactory = previous }
@@ -182,10 +183,11 @@ func setRootProgramFactoryForTest(factory func(string) rootProgram) func() {
 type tuiProgram struct {
 	addr          string
 	startupStatus string
+	configDir     string
 }
 
-func newTUIProgram(addr string, startupStatus string) *tuiProgram {
-	return &tuiProgram{addr: addr, startupStatus: startupStatus}
+func newTUIProgram(addr string, startupStatus string, configDir string) *tuiProgram {
+	return &tuiProgram{addr: addr, startupStatus: startupStatus, configDir: configDir}
 }
 
 func (p *tuiProgram) CommandLine() []string {
@@ -212,6 +214,9 @@ func (p *tuiProgram) WorkingDir() string {
 func (p *tuiProgram) Env() map[string]string {
 	env := map[string]string{
 		"CODEX_PROXY_URL": "http://" + p.addr,
+	}
+	if p.configDir != "" {
+		env["CODEX_PROXY_CONFIG_DIR"] = p.configDir
 	}
 	if exe, err := os.Executable(); err == nil {
 		env["CODEX_PROXY_EXECUTABLE"] = exe
@@ -248,11 +253,12 @@ func setRootLogWriterForTest(writer io.Writer) func() {
 func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags := flag.NewFlagSet("codex-proxy", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	configPath := flags.String("config", expandHome("~/.codex-proxy/config.yaml"), "config path")
+	configDir := flags.String("config-dir", expandHome(config.DefaultConfigDir), "config directory")
 	managerPort := flags.Int("manager-port", 9090, "manager API port")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	configPath := filepath.Join(*configDir, config.ConfigFileName)
 
 	release, err := rootLockerFactory().Acquire()
 	if err != nil {
@@ -261,12 +267,12 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	defer release()
 
-	cfg, err := config.LoadFile(*configPath)
+	cfg, err := config.LoadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
 		return 1
 	}
-	if err := rootRunner(RootOptions{ConfigPath: *configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
+	if err := rootRunner(RootOptions{ConfigDir: *configDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}

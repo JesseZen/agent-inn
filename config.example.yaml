@@ -1,5 +1,14 @@
-defaults:
+settings:
+    state_dir: ~/.codex-proxy
     log_dir: ~/.codex-proxy/logs
+    launch:
+        default_mode: hosted-terminal
+    terminal:
+        host: tmux
+        opener: terminal_app
+        tmux:
+            socket_name: cap
+            host_session: cap-host
 workers:
     cli-groq:
         port: 11200

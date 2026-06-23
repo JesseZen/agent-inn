@@ -18,6 +18,7 @@ func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/hosted-sessions/", m.handleHostedSessionByID)
 	mux.HandleFunc("/api/upstreams", m.handleUpstreams)
 	mux.HandleFunc("/api/upstreams/", m.handleUpstreamByName)
+	mux.HandleFunc("/api/settings", m.handleSettings)
 	mux.HandleFunc("/api/config", m.handleConfig)
 }
 
@@ -609,6 +610,92 @@ func (m *Manager) handleConfig(rw http.ResponseWriter, r *http.Request) {
 	cfg, status := m.syncConfigFromStore()
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"config": sanitizeConfig(cfg),
+		"status": map[string]any{
+			"generation":      status.Generation,
+			"dirty":           status.Dirty,
+			"last_save_error": status.LastSaveError,
+		},
+	})
+}
+
+func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		cfg, status := m.syncConfigFromStore()
+		writeJSON(rw, http.StatusOK, map[string]any{
+			"settings": cfg.Settings,
+			"status": map[string]any{
+				"generation":      status.Generation,
+				"dirty":           status.Dirty,
+				"last_save_error": status.LastSaveError,
+			},
+		})
+		return
+	}
+	if r.Method != http.MethodPatch {
+		http.NotFound(rw, r)
+		return
+	}
+	type launchPatch struct {
+		DefaultMode *string `json:"default_mode"`
+	}
+	type tmuxPatch struct {
+		SocketName  *string `json:"socket_name"`
+		HostSession *string `json:"host_session"`
+	}
+	type terminalPatch struct {
+		Host   *string    `json:"host"`
+		Opener *string    `json:"opener"`
+		Tmux   *tmuxPatch `json:"tmux"`
+	}
+	var patch struct {
+		StateDir *string        `json:"state_dir"`
+		LogDir   *string        `json:"log_dir"`
+		Launch   *launchPatch   `json:"launch"`
+		Terminal *terminalPatch `json:"terminal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if m.configuredConfigPath() == "" {
+		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "config path is required"})
+		return
+	}
+	m.updateConfig(func(cfgRoot *config.Config) {
+		if patch.StateDir != nil {
+			cfgRoot.Settings.StateDir = *patch.StateDir
+		}
+		if patch.LogDir != nil {
+			cfgRoot.Settings.LogDir = *patch.LogDir
+		}
+		if patch.Launch != nil && patch.Launch.DefaultMode != nil {
+			cfgRoot.Settings.Launch.DefaultMode = *patch.Launch.DefaultMode
+		}
+		if patch.Terminal != nil {
+			if patch.Terminal.Host != nil {
+				cfgRoot.Settings.Terminal.Host = *patch.Terminal.Host
+			}
+			if patch.Terminal.Opener != nil {
+				cfgRoot.Settings.Terminal.Opener = *patch.Terminal.Opener
+			}
+			if patch.Terminal.Tmux != nil {
+				if patch.Terminal.Tmux.SocketName != nil {
+					cfgRoot.Settings.Terminal.Tmux.SocketName = *patch.Terminal.Tmux.SocketName
+				}
+				if patch.Terminal.Tmux.HostSession != nil {
+					cfgRoot.Settings.Terminal.Tmux.HostSession = *patch.Terminal.Tmux.HostSession
+				}
+			}
+		}
+	})
+	if err := m.store.Save(); err != nil {
+		status := m.syncConfigStatusFromStore()
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err), "status": status})
+		return
+	}
+	cfg, status := m.syncConfigFromStore()
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"settings": cfg.Settings,
 		"status": map[string]any{
 			"generation":      status.Generation,
 			"dirty":           status.Dirty,

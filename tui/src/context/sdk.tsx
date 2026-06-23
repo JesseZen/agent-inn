@@ -8,6 +8,8 @@ import type {
   HostedSessionSummary,
   ProxyConfigResponse,
   ProxyConfigStatus,
+  ProxySettings,
+  ProxySettingsResponse,
   RedactedUpstream,
   WorkerDetail,
   WorkerSummary,
@@ -17,7 +19,7 @@ export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
 }
 
-export type { ProxyConfigStatus, RedactedUpstream, WorkerDetail, WorkerSummary }
+export type { ProxyConfigStatus, ProxySettings, ProxySettingsResponse, RedactedUpstream, WorkerDetail, WorkerSummary }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
@@ -134,6 +136,16 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
         async getConfig() {
           return request<ProxyConfigResponse>("/api/config")
+        },
+        async getSettings() {
+          return request<ProxySettingsResponse>("/api/settings")
+        },
+        async patchSettings(patch: Partial<ProxySettings>) {
+          return request<ProxySettingsResponse>("/api/settings", {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(patch),
+          })
         },
         async listHostedSessions() {
           return request<{ sessions: HostedSessionSummary[] }>("/api/hosted-sessions").then((result) => result.sessions)

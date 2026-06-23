@@ -12,6 +12,17 @@ func TestLoadAppliesDefaultsAndKeepsSecretRefs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	err := os.WriteFile(path, []byte(`
+settings:
+  state_dir: ~/.cap-state
+  log_dir: ~/.cap-logs
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: terminal_app
+    tmux:
+      socket_name: cap-test
+      host_session: cap-test-host
 workers:
   codex-app:
     port: 6767
@@ -33,8 +44,17 @@ upstreams:
 		t.Fatal(err)
 	}
 
-	if cfg.Defaults.LogDir == "" {
-		t.Fatal("expected default log_dir")
+	if cfg.Settings.StateDir != "~/.cap-state" || cfg.Settings.LogDir != "~/.cap-logs" {
+		t.Fatalf("expected settings paths to load, got %#v", cfg.Settings)
+	}
+	if cfg.Settings.Launch.DefaultMode != "hosted-terminal" {
+		t.Fatalf("expected launch default mode to load, got %#v", cfg.Settings.Launch)
+	}
+	if cfg.Settings.Terminal.Host != "tmux" || cfg.Settings.Terminal.Opener != "terminal_app" {
+		t.Fatalf("expected terminal settings to load, got %#v", cfg.Settings.Terminal)
+	}
+	if cfg.Settings.Terminal.Tmux.SocketName != "cap-test" || cfg.Settings.Terminal.Tmux.HostSession != "cap-test-host" {
+		t.Fatalf("expected tmux settings to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
@@ -44,6 +64,46 @@ upstreams:
 	}
 	if cfg.Workers["codex-app"].Role != "cli" {
 		t.Fatalf("expected default cli role, got %q", cfg.Workers["codex-app"].Role)
+	}
+}
+
+func TestLoadAppliesSettingsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+workers:
+  app:
+    port: 6767
+    upstream: openai
+upstreams:
+  openai:
+    base_url: https://api.openai.com/v1
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := Settings{
+		StateDir: "~/.codex-proxy",
+		LogDir:  "~/.codex-proxy/logs",
+		Launch: LaunchSettings{
+			DefaultMode: "hosted-terminal",
+		},
+		Terminal: TerminalSettings{
+			Host:   "tmux",
+			Opener: "terminal_app",
+			Tmux: TmuxSettings{
+				SocketName:  "cap",
+				HostSession: "cap-host",
+			},
+		},
+	}
+	if cfg.Settings != want {
+		t.Fatalf("unexpected settings defaults:\n got %#v\nwant %#v", cfg.Settings, want)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,9 +28,9 @@ func TestRunLaunchRunsBuiltCommand(t *testing.T) {
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
+			return launchRunnerFunc(func(args []string) (string, error) {
 				got = append([]string{}, args...)
-				return nil
+				return "", nil
 			})
 		}
 		return func() { launchRunnerFactory = previous }
@@ -52,9 +54,9 @@ func TestRunLaunchExplicitExternalWindowMode(t *testing.T) {
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
+			return launchRunnerFunc(func(args []string) (string, error) {
 				got = append([]string{}, args...)
-				return nil
+				return "", nil
 			})
 		}
 		return func() { launchRunnerFactory = previous }
@@ -82,43 +84,47 @@ func TestRunLaunchRejectsInvalidMode(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "cap-test", "cap-test-host")
 
 	var got [][]string
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
+			return launchRunnerFunc(func(args []string) (string, error) {
 				got = append(got, append([]string{}, args...))
 				// Simulate fresh tmux host: has-session and select-window fail.
 				// tmux subcommand sits at args[3] after `tmux -L cap`.
 				if len(args) > 3 && args[3] == "has-session" {
-					return errors.New("can't find session")
+					return "", errors.New("can't find session")
 				}
 				if len(args) > 3 && args[3] == "select-window" {
-					return errors.New("can't find window")
+					return "", errors.New("can't find window")
 				}
-				return nil
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
 			})
 		}
 		return func() { launchRunnerFactory = previous }
 	}()
 	defer restore()
 
-	code := runLaunch([]string{"--worker", "11199", "--profile", "cli-openai", "--cd", "/tmp/work", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &bytes.Buffer{})
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--cd", "/tmp/work", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("expected success, got %d", code)
 	}
 
-	windowName := manager.SafeWindowName("solve problem A")
-	codexCmd := []string{"codex", "--profile", "cli-openai", "--cd", "/tmp/work"}
 	want := [][]string{
 		manager.TmuxDetectCommand(),
-		manager.TmuxHasSessionCommand(),
-		manager.TmuxStartHostCommand(),
-		manager.TmuxSelectWindowCommand(windowName),
-		manager.TmuxCreateWindowCommand(windowName, codexCmd),
-		manager.TmuxAttachCommand(),
+		{"tmux", "-L", "cap-test", "has-session", "-t", "cap-test-host"},
+		{"tmux", "-L", "cap-test", "new-session", "-d", "-s", "cap-test-host"},
+		{"tmux", "-L", "cap-test", "select-window", "-t", "cap-test-host:solve problem A"},
+		{"tmux", "-L", "cap-test", "new-window", "-t", "cap-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"},
+		{"tmux", "-L", "cap-test", "attach-session", "-t", "cap-test-host"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
@@ -128,26 +134,41 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
 		}
 	}
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one hosted session, got %#v", records)
+	}
+	if records[0].SessionLabel != "solve problem A" || records[0].TmuxWindowID != "@12" {
+		t.Fatalf("expected label and real window id in registry, got %#v", records[0])
+	}
 }
 
 func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "cap", "cap-host")
 
 	var got [][]string
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
+			return launchRunnerFunc(func(args []string) (string, error) {
 				got = append(got, append([]string{}, args...))
 				// Simulate existing host and window: has-session and select-window succeed.
-				return nil
+				return "", nil
 			})
 		}
 		return func() { launchRunnerFactory = previous }
 	}()
 	defer restore()
 
-	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(""))
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel: "solve problem A",
 		WorkerName:   "cli-openai",
@@ -156,11 +177,11 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.UpdateWindowID(created.SessionID, manager.SafeWindowName("solve problem A")); err != nil {
+	if err := registry.UpdateWindowID(created.SessionID, "@12"); err != nil {
 		t.Fatal(err)
 	}
 
-	code := runLaunch([]string{"--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &bytes.Buffer{})
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("expected success, got %d", code)
 	}
@@ -168,7 +189,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
-		manager.TmuxSelectWindowCommand(manager.SafeWindowName("solve problem A")),
+		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
 	}
 	if len(got) != len(want) {
@@ -182,21 +203,23 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalMissingTmux(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeLaunchConfig(t, configDir, filepath.Join(dir, "state"), "cap", "cap-host")
 
 	var stderr bytes.Buffer
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
-				return errors.New("exec: \"tmux\": executable file not found")
+			return launchRunnerFunc(func(args []string) (string, error) {
+				return "", errors.New("exec: \"tmux\": executable file not found")
 			})
 		}
 		return func() { launchRunnerFactory = previous }
 	}()
 	defer restore()
 
-	code := runLaunch([]string{"--worker", "11199", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
 	if code == 0 {
 		t.Fatal("expected failure when tmux is missing")
 	}
@@ -206,22 +229,25 @@ func TestRunLaunchHostedTerminalMissingTmux(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "cap", "cap-host")
 
 	var got [][]string
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) error {
+			return launchRunnerFunc(func(args []string) (string, error) {
 				got = append(got, append([]string{}, args...))
-				return nil
+				return "", nil
 			})
 		}
 		return func() { launchRunnerFactory = previous }
 	}()
 	defer restore()
 
-	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(""))
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel: "solve problem A",
 		WorkerName:   "cli-openai",
@@ -230,20 +256,19 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.UpdateWindowID(created.SessionID, manager.SafeWindowName("solve problem A")); err != nil {
+	if err := registry.UpdateWindowID(created.SessionID, "@12"); err != nil {
 		t.Fatal(err)
 	}
 
-	code := runLaunch([]string{"--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID, "--no-attach"}, &bytes.Buffer{}, &bytes.Buffer{})
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID, "--no-attach"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("expected success, got %d", code)
 	}
 
-	windowName := manager.SafeWindowName("solve problem A")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
-		manager.TmuxSelectWindowCommand(windowName),
+		manager.TmuxSelectWindowCommand("@12"),
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands (no attach), got %d: %#v", len(want), len(got), got)
@@ -252,6 +277,36 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 		if strings.Join(got[i], " ") != strings.Join(w, " ") {
 			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
 		}
+	}
+}
+
+func writeLaunchConfig(t *testing.T, configDir string, stateDir string, socketName string, hostSession string) {
+	t.Helper()
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+settings:
+  state_dir: ` + stateDir + `
+  log_dir: ` + filepath.Join(configDir, "logs") + `
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: terminal_app
+    tmux:
+      socket_name: ` + socketName + `
+      host_session: ` + hostSession + `
+workers:
+  cli-openrouter:
+    port: 11199
+    upstream: openrouter
+upstreams:
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

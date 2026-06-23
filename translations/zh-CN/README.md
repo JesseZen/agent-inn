@@ -94,7 +94,7 @@ cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
 
 ```bash
 # 终端 1：仅后端（默认 manager-port 为 9090）
-./codex-proxy --config config.yaml --manager-port 9090 &
+./codex-proxy --config-dir ${HOME}/.codex-proxy --manager-port 9090 &
 
 # 终端 2：带热重载的 TUI
 bun install  # 从项目根目录安装依赖（首次需要）
@@ -110,7 +110,7 @@ cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
 | 命令 | 别名 | 描述 |
 |------|------|------|
 | `/help` | | 显示所有命令 |
-| `/config` | | 查看配置状态（generation、dirty、保存到磁盘） |
+| `/settings` | `/config` | 编辑运行时设置并查看配置保存状态 |
 | `/workers` | | 管理 Worker（创建、查看详情、编辑字段/模块、查看日志、restart/stop） |
 | `/upstream` | | 管理 Upstream（创建、编辑 base_url/api_key/api_format） |
 | `/logs` | | 查看 Worker 日志 |
@@ -130,9 +130,18 @@ cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
 ## 配置文件格式
 
 ```yaml
-# Log directory
-defaults:
+# 运行时设置
+settings:
+  state_dir: ~/.codex-proxy
   log_dir: ~/.codex-proxy/logs
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: terminal_app
+    tmux:
+      socket_name: cap
+      host_session: cap-host
 
 # Worker definitions
 workers:
@@ -173,6 +182,8 @@ upstreams:
 
 `role` 默认为 `"cli"`；`role: app` 的 Worker 不会出现在 `/launch` 选择器中。`log_level` 默认为 `"simple"`。
 
+`settings.state_dir` 用于存放 CAP 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
+
 ### API Key 解析
 
 对于名为 `<NAME>` 的每个 upstream，会先检查环境变量 `<NAME>_API_KEY`（例如 `JOYCODE_API_KEY`、`OPENAI_API_KEY`、`OPENROUTER_API_KEY`）。如果该环境变量已设置且非空，它将覆盖配置文件中的 `api_key`。
@@ -195,8 +206,9 @@ cd tui && bun run typecheck
 ```bash
 ./codex-proxy version           # 显示版本
 ./codex-proxy worker ...        # Worker 进程（由 Manager 自动启动，无需手动运行）
-./codex-proxy launch --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>]
+./codex-proxy launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
                                 # 启动连接到 Worker 的 Codex CLI
+                                # --mode hosted-terminal 会在 CAP 管理的 tmux host 内运行 Codex（需要 tmux）
 ```
 
 ## 待办事项

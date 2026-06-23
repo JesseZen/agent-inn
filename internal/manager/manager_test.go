@@ -150,6 +150,40 @@ func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
 	}
 }
 
+func TestManagerHostedSessionsUseSettingsStateDir(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	configPath := filepath.Join(dir, "config-dir", "config.yaml")
+	m := New(Config{
+		ConfigPath: configPath,
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Workers: map[string]config.WorkerConfig{
+				"cli": {Port: 11199, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"session_label":"solve problem A","worker_name":"cli","worker_port":11199}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions", body))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+
+	wantPath := filepath.Join(stateDir, hostedSessionsFileName)
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected hosted registry at settings.state_dir %s: %v", wantPath, err)
+	}
+	oldPath := filepath.Join(filepath.Dir(configPath), hostedSessionsFileName)
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("hosted registry should not use config file dir %s: %v", oldPath, err)
+	}
+}
+
 func TestManagerSyncsCodexProfilesOnStartup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -210,6 +244,42 @@ func TestManagerLogSinkWritesToDefaultHomeLogDir(t *testing.T) {
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("expected default log file at %s: %v", logPath, err)
+	}
+	if !strings.Contains(string(data), "WARN upstream closed early") {
+		t.Fatalf("unexpected log file content: %s", data)
+	}
+}
+
+func TestManagerLogSinkWritesToSettingsLogDir(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "logs")
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{LogDir: logDir},
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	sink := m.LogSink("app")
+	if sink == nil {
+		t.Fatal("expected log sink")
+	}
+	if _, err := sink.Write([]byte("WARN upstream closed early\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	logPath := filepath.Join(logDir, "worker-6767.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected settings log file at %s: %v", logPath, err)
 	}
 	if !strings.Contains(string(data), "WARN upstream closed early") {
 		t.Fatalf("unexpected log file content: %s", data)
@@ -1103,6 +1173,69 @@ func TestManagerConfigAndProviderPersistenceAPI(t *testing.T) {
 	}
 	if client.appliedRuntimes[6767].Upstream.ID != "openai" || client.appliedRuntimes[6767].Upstream.BaseURL != "https://relay.example/v1" || client.appliedRuntimes[6767].Upstream.APIFormat != "chat_completions" {
 		t.Fatalf("live runtime apply was not called: %#v", client.appliedRuntimes)
+	}
+}
+
+func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	m := New(Config{
+		ConfigPath: configPath,
+		Config: config.Config{
+			Settings: config.Settings{
+				StateDir: filepath.Join(dir, "state"),
+				LogDir:   filepath.Join(dir, "logs"),
+				Terminal: config.TerminalSettings{
+					Tmux: config.TmuxSettings{
+						SocketName:  "custom-socket",
+						HostSession: "custom-host",
+					},
+				},
+			},
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	defer m.Close()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/settings", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected settings get status %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"state_dir"`) || !strings.Contains(res.Body.String(), `"log_dir"`) {
+		t.Fatalf("unexpected settings response: %s", res.Body.String())
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(
+		res,
+		httptest.NewRequest(
+			http.MethodPatch,
+			"http://manager.local/api/settings",
+			strings.NewReader(`{"state_dir":"`+filepath.Join(dir, "next-state")+`","log_dir":"`+filepath.Join(dir, "next-logs")+`"}`),
+		),
+	)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"state_dir"`) || !strings.Contains(res.Body.String(), `"log_dir"`) {
+		t.Fatalf("unexpected settings patch response: %s", res.Body.String())
+	}
+
+	loaded, err := config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Settings.StateDir != filepath.Join(dir, "next-state") || loaded.Settings.LogDir != filepath.Join(dir, "next-logs") {
+		t.Fatalf("settings were not persisted: %#v", loaded.Settings)
+	}
+	if loaded.Settings.Terminal.Tmux.SocketName != "custom-socket" || loaded.Settings.Terminal.Tmux.HostSession != "custom-host" {
+		t.Fatalf("settings patch should preserve omitted terminal settings: %#v", loaded.Settings.Terminal.Tmux)
 	}
 }
 

@@ -94,7 +94,7 @@ This single command starts the Manager → starts all Workers → starts the TUI
 
 ```bash
 # Terminal 1: Backend only (default manager-port is 9090)
-./codex-proxy --config config.yaml --manager-port 9090 &
+./codex-proxy --config-dir ${HOME}/.codex-proxy --manager-port 9090 &
 
 # Terminal 2: TUI with hot reload
 bun install  # Install dependencies from project root (required first time)
@@ -110,7 +110,7 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `/help` | | Show all commands |
-| `/config` | | View config status (generation, dirty, save to disk) |
+| `/settings` | `/config` | Edit runtime settings and view config save status |
 | `/workers` | | Manage workers (create, inspect, edit fields/modules, view logs, restart/stop) |
 | `/upstream` | | Manage upstreams (create, edit base_url/api_key/api_format) |
 | `/logs` | | View Worker logs |
@@ -130,9 +130,18 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 ## Configuration File Format
 
 ```yaml
-# Log directory
-defaults:
+# Runtime settings
+settings:
+  state_dir: ~/.codex-proxy
   log_dir: ~/.codex-proxy/logs
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: terminal_app
+    tmux:
+      socket_name: cap
+      host_session: cap-host
 
 # Worker definitions
 workers:
@@ -173,6 +182,8 @@ Leaving `api_format` empty or unset = native passthrough, no translation.
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `log_level` defaults to `"simple"`;
 
+`settings.state_dir` stores CAP runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
+
 ### API Key Resolution
 
 For each upstream named `<NAME>`, the environment variable `<NAME>_API_KEY` is checked first (e.g. `JOYCODE_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`). If the env var is set and non-empty, it overrides the `api_key` in the config file.
@@ -195,7 +206,7 @@ cd tui && bun run typecheck
 ```bash
 ./codex-proxy version           # Show version
 ./codex-proxy worker ...        # Worker process (auto-started by Manager, no need to run manually)
-./codex-proxy launch --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
+./codex-proxy launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
                                 # Launch Codex CLI connected to a worker
                                 # --mode hosted-terminal runs Codex inside a CAP-owned tmux host (requires tmux)
 ```

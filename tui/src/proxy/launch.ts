@@ -6,6 +6,7 @@ export type LaunchMode = "external-window" | "hosted-terminal"
 export type ProxyLaunchOptions = {
   executable?: string
   workerPort: number
+  configDir?: string
   profile?: string
   workspace?: string
   addDirs?: string[]
@@ -27,6 +28,9 @@ export function createProxyLaunchCommand(opts: ProxyLaunchOptions) {
   const cmd = [opts.executable || "codex-proxy", "launch", "--worker", String(opts.workerPort)]
   if (opts.profile) {
     cmd.push("--profile", opts.profile)
+  }
+  if (opts.configDir) {
+    cmd.push("--config-dir", opts.configDir)
   }
   if (opts.workspace) {
     cmd.push("--cd", opts.workspace)
@@ -85,6 +89,9 @@ async function launchExternalWindow(opts: ProxyLaunchOptions) {
   if (opts.profile) {
     args.push("--profile", opts.profile)
   }
+  if (opts.configDir) {
+    args.push("--config-dir", opts.configDir)
+  }
   if (opts.workspace) {
     args.push("--cd", opts.workspace)
   }
@@ -120,6 +127,9 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
   const setupArgs = ["launch", "--worker", String(opts.workerPort), "--mode", "hosted-terminal", "--no-attach"]
   if (opts.profile) {
     setupArgs.push("--profile", opts.profile)
+  }
+  if (opts.configDir) {
+    setupArgs.push("--config-dir", opts.configDir)
   }
   if (opts.sessionLabel) {
     setupArgs.push("--session-label", opts.sessionLabel)

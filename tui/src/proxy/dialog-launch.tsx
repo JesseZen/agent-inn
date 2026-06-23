@@ -8,6 +8,7 @@ import { DialogAlert } from "../ui/dialog-alert"
 import { useProject } from "../context/project"
 import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand, type LaunchMode } from "./launch"
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
+import { Global } from "@codex-proxy/core/global"
 
 export function DialogLaunch() {
   const dialog = useDialog()
@@ -79,6 +80,7 @@ function DialogExternalWindowLaunch() {
     const command = createProxyLaunchCommand({
       workerPort: worker.port,
       profile: worker.name,
+      configDir: Global.Path.config,
       workspace: workspace || undefined,
     })
     const rendered = renderProxyLaunchCommand(command)
@@ -88,6 +90,7 @@ function DialogExternalWindowLaunch() {
         executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
         workerPort: worker.port,
         profile: worker.name,
+        configDir: Global.Path.config,
         workspace: workspace || undefined,
       })
       if (!launched) {

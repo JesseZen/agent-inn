@@ -40,6 +40,27 @@ export type ProxyConfigResponse = {
   status: ProxyConfigStatus
 }
 
+export type ProxySettings = {
+  state_dir: string
+  log_dir: string
+  launch: {
+    default_mode: string
+  }
+  terminal: {
+    host: string
+    opener: string
+    tmux: {
+      socket_name: string
+      host_session: string
+    }
+  }
+}
+
+export type ProxySettingsResponse = {
+  settings: ProxySettings
+  status: ProxyConfigStatus
+}
+
 export type HostedSessionRecord = {
   session_id: string
   session_label: string

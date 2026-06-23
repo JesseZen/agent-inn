@@ -31,7 +31,7 @@ func TestTmuxStartHostCommand(t *testing.T) {
 
 func TestTmuxCreateWindowCommand(t *testing.T) {
 	got := TmuxCreateWindowCommand("codex:cli-openai", []string{"codex", "--profile", "cli-openai", "--cd", "/tmp/work"})
-	want := []string{"tmux", "-L", "cap", "new-window", "-t", "cap-host", "-n", "codex:cli-openai", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"}
+	want := []string{"tmux", "-L", "cap", "new-window", "-t", "cap-host", "-n", "codex:cli-openai", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}

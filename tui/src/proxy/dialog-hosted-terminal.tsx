@@ -10,6 +10,7 @@ import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
 import type { HostedSessionSummary } from "./backend"
+import { Global } from "@codex-proxy/core/global"
 
 type HostedTerminalOption =
   | {
@@ -98,13 +99,14 @@ export function DialogHostedTerminal() {
             return
           }
           try {
-            await launchProxySession({
-              executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
-              workerPort: worker.port,
-              profile: worker.name,
-              workspace: workspace || undefined,
-              mode: "hosted-terminal",
-              sessionLabel,
+          await launchProxySession({
+            executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
+            workerPort: worker.port,
+            profile: worker.name,
+            configDir: Global.Path.config,
+            workspace: workspace || undefined,
+            mode: "hosted-terminal",
+            sessionLabel,
             })
             await refreshSessions()
             dialog.clear()
@@ -150,6 +152,7 @@ export function DialogHostedTerminal() {
           executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
           workerPort: session.worker_port,
           profile: session.worker_name,
+          configDir: Global.Path.config,
           mode: "hosted-terminal",
           sessionID: session.session_id,
         }).catch(async (err) => {
