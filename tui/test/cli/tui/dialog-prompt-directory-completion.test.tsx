@@ -48,7 +48,7 @@ test("tab expands the selected directory and enter still submits raw text", asyn
       <TestTuiContexts directory={tmp.path} paths={{ home: tmp.path, state, worktree: tmp.path }}>
         <CodexProxyKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={resolvedConfig}>
-            <KVProvider>
+            <KVProvider persist={false}>
               <ThemeProvider mode="dark">
                 <ToastProvider>
                   <DialogProvider>

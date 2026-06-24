@@ -72,7 +72,7 @@ async function mountPrompt(input: {
       >
         <CodexProxyKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={resolvedConfig}>
-            <KVProvider>
+            <KVProvider persist={false}>
               <ThemeProvider mode="dark">
                 <ToastProvider>
                   <DialogProvider>

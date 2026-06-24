@@ -47,7 +47,7 @@ export async function mount(override?: FetchHandler, state?: string) {
     <TestTuiContexts paths={state ? { state } : undefined}>
       <ArgsProvider>
         <ExitProvider exit={() => {}}>
-          <KVProvider>
+          <KVProvider persist={false}>
             <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
               <ProjectProvider>
                 <SyncProvider>

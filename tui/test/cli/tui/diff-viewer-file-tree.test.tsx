@@ -182,7 +182,7 @@ function withTheme(component: () => JSX.Element) {
   return (
     <TestTuiContexts>
       <TuiConfigProvider config={createTuiResolvedConfig()}>
-        <KVProvider>
+        <KVProvider persist={false}>
           <ThemeProvider mode="dark">{component()}</ThemeProvider>
         </KVProvider>
       </TuiConfigProvider>

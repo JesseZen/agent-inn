@@ -9,24 +9,29 @@ import path from "path"
 
 export const { use: useKV, provider: KVProvider } = createSimpleContext({
   name: "KV",
-  init: () => {
+  init: (props: { persist?: boolean }) => {
     const paths = useTuiPaths()
     void Global.Path.state
     const file = path.join(paths.state, "kv.json")
     const lock = `tui-kv:${file}`
+    const persist = props.persist ?? true
     const [ready, setReady] = createSignal(false)
     const [store, setStore] = createStore<Record<string, any>>()
 
-    Flock.withLock(lock, () => readJson<Record<string, unknown>>(file))
-      .then((x) => {
-        setStore(x)
-      })
-      .catch((error) => {
-        console.error("Failed to read KV state", { error })
-      })
-      .finally(() => {
-        setReady(true)
-      })
+    if (!persist) {
+      setReady(true)
+    } else {
+      Flock.withLock(lock, () => readJson<Record<string, unknown>>(file))
+        .then((x) => {
+          setStore(x)
+        })
+        .catch((error) => {
+          console.error("Failed to read KV state", { error })
+        })
+        .finally(() => {
+          setReady(true)
+        })
+    }
 
     // Queue same-process writes so rapid updates persist in order.
     let write = Promise.resolve()
@@ -40,6 +45,7 @@ export const { use: useKV, provider: KVProvider } = createSimpleContext({
 
     function flush() {
       flushTimer = undefined
+      if (!persist) return
       const snapshot = structuredClone(unwrap(store))
       write = write
         .then(() => Flock.withLock(lock, () => writeJsonAtomic(file, snapshot)))

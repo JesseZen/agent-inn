@@ -155,7 +155,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20) {
       <TestTuiContexts>
         <CodexProxyKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={config}>
-            <KVProvider>
+            <KVProvider persist={false}>
               <ThemeProvider mode="dark">
                 {renderDiff?.({ params: "params" in current ? current.params : undefined })}
               </ThemeProvider>

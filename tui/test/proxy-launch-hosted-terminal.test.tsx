@@ -1,22 +1,9 @@
-import { expect, mock, test } from "bun:test"
-import { createTestRenderer } from "@opentui/core/testing"
-import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
-import { Effect } from "effect"
+import { expect, test } from "bun:test"
 import { Global } from "@codex-proxy/core/global"
 import { homedir } from "node:os"
 import path from "node:path"
-import { createTuiResolvedConfig } from "./fixture/tui-runtime"
-import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
-import { registerProxyCommands } from "../src/proxy/commands"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
-
-async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
-  const start = Date.now()
-  while (!(await fn())) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
-}
+import { defaultWorker, directory, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
 
 test("Global.Path.config defaults to ~/.codex-proxy", () => {
   expect(Global.Path.config).toBe(path.join(homedir(), ".codex-proxy"))
@@ -65,100 +52,31 @@ test("renderProxyLaunchCommand quotes hosted-terminal mode", () => {
 })
 
 test("launch dialog prompts for mode before worker selection", async () => {
-  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
-  const core = await import("@opentui/core")
-  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
-
-  const events = createEventSource()
-  const calls = createFetch((url) => {
+  const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
-        workers: [
-          {
-            name: "test-cli",
-            port: 1234,
-            role: "cli",
-            upstream: { name: "test", base_url: "", has_api_key: false },
-            status: "running",
-            snapshot_generation: 0,
-            log_level: "info",
-          },
-        ],
+        workers: [defaultWorker],
       })
     return undefined
   })
 
-  let api!: TuiPluginApi
-  let started!: () => void
-  const ready = new Promise<void>((resolve) => {
-    started = resolve
-  })
-
   try {
-    const { run } = await import("../src/app")
-    const task = Effect.runPromise(
-      run({
-        url: "http://test",
-        directory,
-        config: createTuiResolvedConfig({ plugin_enabled: {} }),
-        fetch: calls.fetch,
-        events: events.source,
-        args: {},
-        pluginHost: {
-          async start(input) {
-            api = input.api
-            registerProxyCommands(input.api)
-            started()
-          },
-          async dispose() {},
-        },
-      }).pipe(Effect.provide(Global.defaultLayer)),
-    )
-
-    await ready
-    await setup.renderOnce()
-    await setup.renderOnce()
-
-    api.keymap.dispatchCommand("proxy.launch")
-    await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
-      return frame.includes("External window") && frame.includes("Hosted terminal")
-    })
-
-    const frame = setup.captureCharFrame()
+    await app.openLaunchDialog()
+    const frame = app.setup.captureCharFrame()
     expect(frame.includes("Launch Codex CLI")).toBe(true)
     expect(frame.includes("External window")).toBe(true)
     expect(frame.includes("Hosted terminal")).toBe(true)
-
-    setup.renderer.destroy()
-    await task
   } finally {
-    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
-    mock.restore()
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
   }
 })
 
 test("launch dialog opens hosted terminal session menu", async () => {
-  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
-  const core = await import("@opentui/core")
-  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
-
-  const events = createEventSource()
-  const calls = createFetch((url) => {
+  const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
-        workers: [
-          {
-            name: "test-cli",
-            port: 1234,
-            role: "cli",
-            upstream: { name: "test", base_url: "", has_api_key: false },
-            status: "running",
-            snapshot_generation: 0,
-            log_level: "info",
-          },
-        ],
+        workers: [defaultWorker],
       })
     if (url.pathname === "/api/hosted-sessions")
       return json({
@@ -177,80 +95,24 @@ test("launch dialog opens hosted terminal session menu", async () => {
     return undefined
   })
 
-  let api!: TuiPluginApi
-  let started!: () => void
-  const ready = new Promise<void>((resolve) => {
-    started = resolve
-  })
-
   try {
-    const { run } = await import("../src/app")
-    const task = Effect.runPromise(
-      run({
-        url: "http://test",
-        directory,
-        config: createTuiResolvedConfig({ plugin_enabled: {} }),
-        fetch: calls.fetch,
-        events: events.source,
-        args: {},
-        pluginHost: {
-          async start(input) {
-            api = input.api
-            registerProxyCommands(input.api)
-            started()
-          },
-          async dispose() {},
-        },
-      }).pipe(Effect.provide(Global.defaultLayer)),
-    )
-
-    await ready
-    await setup.renderOnce()
-    await setup.renderOnce()
-
-    api.keymap.dispatchCommand("proxy.launch")
+    await app.openHostedTerminalPicker()
     await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
-      return frame.includes("Hosted terminal")
-    })
-
-    api.keymap.dispatchCommand("dialog.select.next")
-    api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
       return frame.includes("Hosted Terminal") && frame.includes("Create new session") && frame.includes("solve problem A")
     })
-
-    setup.renderer.destroy()
-    await task
   } finally {
-    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
-    mock.restore()
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
   }
 })
 
 test("stale hosted session cannot be opened", async () => {
-  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
-  const core = await import("@opentui/core")
-  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
-
-  const events = createEventSource()
-  const calls = createFetch((url) => {
+  const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
-        workers: [
-          {
-            name: "test-cli",
-            port: 1234,
-            role: "cli",
-            upstream: { name: "test", base_url: "", has_api_key: false },
-            status: "running",
-            snapshot_generation: 0,
-            log_level: "info",
-          },
-        ],
+        workers: [defaultWorker],
       })
     if (url.pathname === "/api/hosted-sessions")
       return json({
@@ -269,56 +131,15 @@ test("stale hosted session cannot be opened", async () => {
     return undefined
   })
 
-  let api!: TuiPluginApi
-  let started!: () => void
-  const ready = new Promise<void>((resolve) => {
-    started = resolve
-  })
-
   try {
-    const { run } = await import("../src/app")
-    const task = Effect.runPromise(
-      run({
-        url: "http://test",
-        directory,
-        config: createTuiResolvedConfig({ plugin_enabled: {} }),
-        fetch: calls.fetch,
-        events: events.source,
-        args: {},
-        pluginHost: {
-          async start(input) {
-            api = input.api
-            registerProxyCommands(input.api)
-            started()
-          },
-          async dispose() {},
-        },
-      }).pipe(Effect.provide(Global.defaultLayer)),
-    )
-
-    await ready
-    await setup.renderOnce()
-    await setup.renderOnce()
-
-    api.keymap.dispatchCommand("proxy.launch")
+    await app.openHostedTerminalPicker()
     await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
-      return frame.includes("External window") && frame.includes("Hosted terminal")
-    })
-
-    api.keymap.dispatchCommand("dialog.select.next")
-    api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
       return frame.includes("Hosted Terminal") && frame.includes("solve problem A")
     })
-
-    setup.renderer.destroy()
-    await task
   } finally {
-    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
-    mock.restore()
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
   }
 })
