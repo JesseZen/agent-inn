@@ -69,11 +69,11 @@ describe("diff viewer file tree utilities", () => {
 
   test("collapses unary directory chains while flattening", () => {
     const rows = flattenFileTree(
-      buildFileTree([{ file: "packages/codex-proxy/src/cli/app.ts" }, { file: "packages/codex-proxy/src/server/server.ts" }]),
+      buildFileTree([{ file: "packages/ainn/src/cli/app.ts" }, { file: "packages/ainn/src/server/server.ts" }]),
     )
 
     expect(rows.map((row) => `${"  ".repeat(row.depth)}${row.kind}:${row.name}`)).toEqual([
-      "directory:packages/codex-proxy/src",
+      "directory:packages/ainn/src",
       "  directory:cli",
       "    file:app.ts",
       "  directory:server",
@@ -82,10 +82,10 @@ describe("diff viewer file tree utilities", () => {
   })
 
   test("does not collapse a directory into a file row", () => {
-    const rows = flattenFileTree(buildFileTree([{ file: "packages/codex-proxy/src/app.ts" }]))
+    const rows = flattenFileTree(buildFileTree([{ file: "packages/ainn/src/app.ts" }]))
 
     expect(rows.map((row) => `${"  ".repeat(row.depth)}${row.kind}:${row.name}`)).toEqual([
-      "directory:packages/codex-proxy/src",
+      "directory:packages/ainn/src",
       "  file:app.ts",
     ])
   })
@@ -93,15 +93,15 @@ describe("diff viewer file tree utilities", () => {
   test("stops collapsing at branches", () => {
     const rows = flattenFileTree(
       buildFileTree([
-        { file: "packages/codex-proxy/src/cli/app.ts" },
-        { file: "packages/codex-proxy/src/server/server.ts" },
+        { file: "packages/ainn/src/cli/app.ts" },
+        { file: "packages/ainn/src/server/server.ts" },
         { file: "packages/readme.md" },
       ]),
     )
 
     expect(rows.map((row) => `${"  ".repeat(row.depth)}${row.kind}:${row.name}`)).toEqual([
       "directory:packages",
-      "  directory:codex-proxy/src",
+      "  directory:ainn/src",
       "    directory:cli",
       "      file:app.ts",
       "    directory:server",
@@ -140,14 +140,14 @@ describe("diff viewer file tree utilities", () => {
 
   test("collapses expanded unary children under the first visible directory id", () => {
     const tree = buildFileTree([
-      { file: "packages/codex-proxy/src/cli/app.ts" },
-      { file: "packages/codex-proxy/src/server/server.ts" },
+      { file: "packages/ainn/src/cli/app.ts" },
+      { file: "packages/ainn/src/server/server.ts" },
     ])
     const packages = tree.nodes.find((node) => node.kind === "directory" && node.name === "packages")!
 
-    expect(flattenFileTree(tree, new Set()).map((row) => row.name)).toEqual(["packages/codex-proxy/src"])
+    expect(flattenFileTree(tree, new Set()).map((row) => row.name)).toEqual(["packages/ainn/src"])
     expect(flattenFileTree(tree, new Set([packages.id])).map((row) => row.name)).toEqual([
-      "packages/codex-proxy/src",
+      "packages/ainn/src",
       "cli",
       "server",
     ])
@@ -197,9 +197,9 @@ describe("diff viewer file tree utilities", () => {
 
   test("moves collapsed chain selection to first visible child", () => {
     const rows = flattenFileTree(
-      buildFileTree([{ file: "packages/codex-proxy/src/cli/app.ts" }, { file: "packages/codex-proxy/src/server/server.ts" }]),
+      buildFileTree([{ file: "packages/ainn/src/cli/app.ts" }, { file: "packages/ainn/src/server/server.ts" }]),
     )
-    const packages = rows.find((row) => row.kind === "directory" && row.name === "packages/codex-proxy/src")!
+    const packages = rows.find((row) => row.kind === "directory" && row.name === "packages/ainn/src")!
     const cli = rows.find((row) => row.kind === "directory" && row.name === "cli")!
 
     expect(moveFileTreeSelectionToFirstChild(rows, packages.id)).toBe(cli.id)
@@ -207,9 +207,9 @@ describe("diff viewer file tree utilities", () => {
 
   test("moves file and collapsed directory selection to visible parent", () => {
     const rows = flattenFileTree(
-      buildFileTree([{ file: "packages/codex-proxy/src/cli/app.ts" }, { file: "packages/codex-proxy/src/server/server.ts" }]),
+      buildFileTree([{ file: "packages/ainn/src/cli/app.ts" }, { file: "packages/ainn/src/server/server.ts" }]),
     )
-    const root = rows.find((row) => row.kind === "directory" && row.name === "packages/codex-proxy/src")!
+    const root = rows.find((row) => row.kind === "directory" && row.name === "packages/ainn/src")!
     const cli = rows.find((row) => row.kind === "directory" && row.name === "cli")!
     const app = rows.find((row) => row.name === "app.ts")!
 

@@ -1,5 +1,5 @@
 import { batch } from "solid-js"
-import type { Path, Workspace } from "@codex-proxy/sdk/v2"
+import type { Path, Workspace } from "@agent-inn/sdk/v2"
 import { createStore, reconcile } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useSDK } from "./sdk"

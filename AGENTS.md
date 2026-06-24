@@ -43,4 +43,4 @@
 
 ## 调试
 
-21. Worker 日志默认在 `~/.codex-proxy/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置
+21. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置

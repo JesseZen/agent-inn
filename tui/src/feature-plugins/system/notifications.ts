@@ -1,5 +1,5 @@
-import type { Event } from "@codex-proxy/sdk/v2"
-import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { Event } from "@agent-inn/sdk/v2"
+import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@agent-inn/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 
 const id = "internal:notifications"

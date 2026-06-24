@@ -6,10 +6,10 @@ import { expect, test } from "bun:test"
 import { onCleanup } from "solid-js"
 import { TuiKeybind } from "../src/config/keybind"
 import {
-  getCodexProxyModeStack,
-  CODEX_PROXY_BASE_MODE,
-  CodexProxyKeymapProvider,
-  registerCodexProxyKeymap,
+  getAinnModeStack,
+  AINN_BASE_MODE,
+  AinnKeymapProvider,
+  registerAinnKeymap,
   resolvePromptSubmitKind,
 } from "../src/keymap"
 
@@ -34,7 +34,7 @@ test("legacy page key aliases compile as page keys", async () => {
       messages_page_up: "pgup",
       messages_page_down: "pgdown",
     })
-    const offKeymap = registerCodexProxyKeymap(keymap, renderer, config)
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
     const offLayer = keymap.registerLayer({
       bindings: config.keybinds.gather("session", ["session.page.up", "session.page.down"]),
     })
@@ -52,9 +52,9 @@ test("legacy page key aliases compile as page keys", async () => {
     })
 
     return (
-      <CodexProxyKeymapProvider keymap={keymap}>
+      <AinnKeymapProvider keymap={keymap}>
         <box />
-      </CodexProxyKeymapProvider>
+      </AinnKeymapProvider>
     )
   }
 
@@ -69,14 +69,14 @@ test("legacy page key aliases compile as page keys", async () => {
   }
 })
 
-test("mode-less bindings stay active when codex-proxy mode changes", async () => {
+test("mode-less bindings stay active when ainn mode changes", async () => {
   const counts: Record<string, Record<string, number>> = {}
 
   function Harness() {
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
     const config = createResolvedKeymapConfig()
-    const offKeymap = registerCodexProxyKeymap(keymap, renderer, config)
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
     const offGlobal = keymap.registerLayer({
       commands: [
         { name: "session.list", run() {} },
@@ -92,7 +92,7 @@ test("mode-less bindings stay active when codex-proxy mode changes", async () =>
       ]),
     })
     const offBase = keymap.registerLayer({
-      mode: CODEX_PROXY_BASE_MODE,
+      mode: AINN_BASE_MODE,
       commands: [{ name: "model.list", run() {} }],
       bindings: config.keybinds.gather("test.base", ["model.list"]),
     })
@@ -108,10 +108,10 @@ test("mode-less bindings stay active when codex-proxy mode changes", async () =>
       )
 
     counts.base = activeCounts()
-    const popQuestion = getCodexProxyModeStack(keymap).push("question")
+    const popQuestion = getAinnModeStack(keymap).push("question")
     counts.question = activeCounts()
     popQuestion()
-    const popAutocomplete = getCodexProxyModeStack(keymap).push("autocomplete")
+    const popAutocomplete = getAinnModeStack(keymap).push("autocomplete")
     counts.autocomplete = activeCounts()
     popAutocomplete()
 
@@ -122,9 +122,9 @@ test("mode-less bindings stay active when codex-proxy mode changes", async () =>
     })
 
     return (
-      <CodexProxyKeymapProvider keymap={keymap}>
+      <AinnKeymapProvider keymap={keymap}>
         <box />
-      </CodexProxyKeymapProvider>
+      </AinnKeymapProvider>
     )
   }
 
@@ -153,7 +153,7 @@ test("prompt submit prefers a reachable local slash command over a remote comman
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
     const config = createResolvedKeymapConfig()
-    const offKeymap = registerCodexProxyKeymap(keymap, renderer, config)
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
     const offLayer = keymap.registerLayer({
       commands: [
         {
@@ -174,9 +174,9 @@ test("prompt submit prefers a reachable local slash command over a remote comman
     })
 
     return (
-      <CodexProxyKeymapProvider keymap={keymap}>
+      <AinnKeymapProvider keymap={keymap}>
         <box />
-      </CodexProxyKeymapProvider>
+      </AinnKeymapProvider>
     )
   }
 
@@ -195,7 +195,7 @@ test("prompt submit falls back to remote slash commands when no local slash exis
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
     const config = createResolvedKeymapConfig()
-    const offKeymap = registerCodexProxyKeymap(keymap, renderer, config)
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
 
     result = resolvePromptSubmitKind(keymap, "/deploy now", [{ name: "deploy" }])
 
@@ -204,9 +204,9 @@ test("prompt submit falls back to remote slash commands when no local slash exis
     })
 
     return (
-      <CodexProxyKeymapProvider keymap={keymap}>
+      <AinnKeymapProvider keymap={keymap}>
         <box />
-      </CodexProxyKeymapProvider>
+      </AinnKeymapProvider>
     )
   }
 

@@ -1,4 +1,4 @@
-module github.com/jesse/codex-app-proxy
+module github.com/jesse/agent-inn
 
 go 1.26
 

@@ -2,7 +2,7 @@ import { BoxRenderable, MouseButton, MouseEvent, RGBA, TextAttributes } from "@o
 import { useRenderer } from "@opentui/solid"
 import { For, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { useTheme, tint } from "../context/theme"
-import { cpt, go, logoStyles, defaultLogoStyleID, type LogoShape, type LogoStyle } from "../logo"
+import { ainn, go, logoStyles, defaultLogoStyleID, type LogoShape, type LogoStyle } from "../logo"
 
 type ShimmerConfig = {
   period: number
@@ -83,9 +83,9 @@ const TRACE_IN = 200
 const GLOW_OUT = 1600
 const PEAK = RGBA.fromInts(255, 255, 255)
 
-const CPT_CYAN = RGBA.fromInts(34, 211, 238)
-const CPT_BLUE = RGBA.fromInts(59, 130, 246)
-const CPT_VIOLET = RGBA.fromInts(139, 92, 246)
+const AINN_CYAN = RGBA.fromInts(34, 211, 238)
+const AINN_BLUE = RGBA.fromInts(59, 130, 246)
+const AINN_VIOLET = RGBA.fromInts(139, 92, 246)
 
 const SWEEP_INTERVAL = 10000
 const SWEEP_DURATION = 1900
@@ -316,13 +316,13 @@ const GO = build(go)
 function logoGlyphColors(ctx: LogoContext, style: LogoStyle | undefined) {
   if (!style) return undefined
   const result = new Map<number, RGBA>()
-  const cGlyph = ctx.MAP.glyph.get(key(...style.anchors.c))
-  const pGlyph = ctx.MAP.glyph.get(key(...style.anchors.p))
-  const tGlyph = ctx.MAP.glyph.get(key(...style.anchors.t))
+  const aGlyph = ctx.MAP.glyph.get(key(...style.anchors.a))
+  const iGlyph = ctx.MAP.glyph.get(key(...style.anchors.i))
+  const nGlyph = ctx.MAP.glyph.get(key(...style.anchors.n))
 
-  if (cGlyph !== undefined) result.set(cGlyph, CPT_CYAN)
-  if (pGlyph !== undefined) result.set(pGlyph, CPT_BLUE)
-  if (tGlyph !== undefined) result.set(tGlyph, CPT_VIOLET)
+  if (aGlyph !== undefined) result.set(aGlyph, AINN_CYAN)
+  if (iGlyph !== undefined) result.set(iGlyph, AINN_BLUE)
+  if (nGlyph !== undefined) result.set(nGlyph, AINN_VIOLET)
   return result
 }
 
@@ -590,7 +590,7 @@ function buildIdleState(t: number, ctx: LogoContext): IdleState {
 
 export function Logo(props: { shape?: LogoShape; style?: LogoStyle; ink?: RGBA; idle?: boolean; sweep?: boolean } = {}) {
   const style = createMemo(() => (props.shape ? undefined : props.style ?? logoStyles[defaultLogoStyleID]))
-  const ctx = createMemo(() => build(props.shape ?? style()?.shape ?? cpt))
+  const ctx = createMemo(() => build(props.shape ?? style()?.shape ?? ainn))
   const glyphColors = createMemo(() => logoGlyphColors(ctx(), style()))
   const { theme } = useTheme()
   const renderer = useRenderer()
@@ -928,7 +928,7 @@ export function Logo(props: { shape?: LogoShape; style?: LogoStyle; ink?: RGBA; 
       />
       <For each={ctx().shape.left}>
         {(line, index) => {
-          const ink = props.ink ?? CPT_CYAN
+          const ink = props.ink ?? AINN_CYAN
           return (
             <box flexDirection="row" gap={1}>
               <box flexDirection="row">

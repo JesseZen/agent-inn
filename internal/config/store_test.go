@@ -13,16 +13,16 @@ func TestLoadAppliesDefaultsAndKeepsSecretRefs(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	err := os.WriteFile(path, []byte(`
 settings:
-  state_dir: ~/.cap-state
-  log_dir: ~/.cap-logs
+  state_dir: ~/.ainn-state
+  log_dir: ~/.ainn-logs
   launch:
     default_mode: hosted-terminal
   terminal:
     host: tmux
     opener: default
     tmux:
-      socket_name: cap-test
-      host_session: cap-test-host
+      socket_name: ainn-test
+      host_session: ainn-test-host
 workers:
   codex-app:
     port: 6767
@@ -44,7 +44,7 @@ upstreams:
 		t.Fatal(err)
 	}
 
-	if cfg.Settings.StateDir != "~/.cap-state" || cfg.Settings.LogDir != "~/.cap-logs" {
+	if cfg.Settings.StateDir != "~/.ainn-state" || cfg.Settings.LogDir != "~/.ainn-logs" {
 		t.Fatalf("expected settings paths to load, got %#v", cfg.Settings)
 	}
 	if cfg.Settings.Launch.DefaultMode != "hosted-terminal" {
@@ -53,7 +53,7 @@ upstreams:
 	if cfg.Settings.Terminal.Host != "tmux" || cfg.Settings.Terminal.Opener != "default" {
 		t.Fatalf("expected terminal settings to load, got %#v", cfg.Settings.Terminal)
 	}
-	if cfg.Settings.Terminal.Tmux.SocketName != "cap-test" || cfg.Settings.Terminal.Tmux.HostSession != "cap-test-host" {
+	if cfg.Settings.Terminal.Tmux.SocketName != "ainn-test" || cfg.Settings.Terminal.Tmux.HostSession != "ainn-test-host" {
 		t.Fatalf("expected tmux settings to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
@@ -88,8 +88,8 @@ upstreams:
 	}
 
 	want := Settings{
-		StateDir: "~/.codex-proxy",
-		LogDir:  "~/.codex-proxy/logs",
+		StateDir: "~/.ainn",
+		LogDir:  "~/.ainn/logs",
 		Launch: LaunchSettings{
 			DefaultMode: "hosted-terminal",
 		},
@@ -97,8 +97,8 @@ upstreams:
 			Host:   "tmux",
 			Opener: "default",
 			Tmux: TmuxSettings{
-				SocketName:  "cap",
-				HostSession: "cap-host",
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
 			},
 		},
 	}

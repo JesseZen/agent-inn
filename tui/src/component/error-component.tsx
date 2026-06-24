@@ -3,7 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import { getScrollAcceleration } from "../util/scroll"
 import { useClipboard } from "../context/clipboard"
-import { InstallationVersion } from "@codex-proxy/core/installation/version"
+import { InstallationVersion } from "@agent-inn/core/installation/version"
 import { useExit } from "../context/exit"
 
 export function ErrorComponent(props: { error: Error; reset: () => void; mode?: "dark" | "light" }) {
@@ -40,7 +40,7 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
     )
   }
 
-  issueURL.searchParams.set("codex-proxy-version", InstallationVersion)
+  issueURL.searchParams.set("ainn-version", InstallationVersion)
 
   const copyIssueURL = () => {
     void clipboard.write?.(issueURL.toString()).then(() => {

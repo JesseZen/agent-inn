@@ -21,7 +21,7 @@ test("KVProvider persist=false keeps test state in memory without touching kv.js
   const state = path.join(tmp.path, "state")
   await mkdir(state, { recursive: true })
   const file = path.join(state, "kv.json")
-  await Bun.write(file, JSON.stringify({ theme: "codex-proxy" }))
+  await Bun.write(file, JSON.stringify({ theme: "ainn" }))
 
   let ready = false
   let snapshot: Record<string, unknown> | undefined
@@ -48,7 +48,7 @@ test("KVProvider persist=false keeps test state in memory without touching kv.js
     await wait(() => ready)
     await Bun.sleep(250)
     expect(snapshot).toEqual({ theme: undefined, sidebar: undefined })
-    expect(await readFile(file, "utf8")).toBe(JSON.stringify({ theme: "codex-proxy" }))
+    expect(await readFile(file, "utf8")).toBe(JSON.stringify({ theme: "ainn" }))
   } finally {
     app.renderer.destroy()
   }
@@ -65,7 +65,7 @@ test("KVProvider persists to kv.json by default", async () => {
   function Probe() {
     const kv = useKV()
     onMount(() => {
-      kv.set("theme", "codex-proxy")
+      kv.set("theme", "ainn")
       ready = true
     })
     return <box />
@@ -87,10 +87,10 @@ test("KVProvider persists to kv.json by default", async () => {
 
   await wait(async () => {
     try {
-      return JSON.parse(await readFile(file, "utf8")).theme === "codex-proxy"
+      return JSON.parse(await readFile(file, "utf8")).theme === "ainn"
     } catch {
       return false
     }
   })
-  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ theme: "codex-proxy" })
+  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ theme: "ainn" })
 })

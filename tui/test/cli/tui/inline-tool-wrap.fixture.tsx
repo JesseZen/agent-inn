@@ -17,25 +17,25 @@ const tools: readonly ToolFixture[] = [
   {
     icon: "✱",
     label:
-      'Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.*dir|xdg|APPDATA" in packages/codex-proxy/src (151 matches)',
+      'Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.*dir|xdg|APPDATA" in packages/ainn/src (151 matches)',
   },
   {
     icon: "✱",
-    label: 'Glob "**/*db*" in packages/codex-proxy (6 matches)',
+    label: 'Glob "**/*db*" in packages/ainn (6 matches)',
   },
   {
     icon: "→",
-    label: "Read packages/codex-proxy/src/storage/db.ts [offset=1, limit=130]",
+    label: "Read packages/ainn/src/storage/db.ts [offset=1, limit=130]",
   },
   {
     icon: "→",
-    label: "Read packages/codex-proxy/src/index.ts [offset=1, limit=100]",
+    label: "Read packages/ainn/src/index.ts [offset=1, limit=100]",
     error: "No LSP server available for this file type.",
   },
   {
     icon: "✱",
     label:
-      'Grep "export const CODEX_PROXY_DB|CODEX_PROXY_DB|CODEX_PROXY_DEV|Global\\.Path\\.data|data =" in packages/codex-proxy/src (115 matches)',
+      'Grep "export const AINN_DB|AINN_DB|AINN_DEV|Global\\.Path\\.data|data =" in packages/ainn/src (115 matches)',
   },
 ] as const
 

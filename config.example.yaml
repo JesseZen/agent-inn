@@ -1,14 +1,14 @@
 settings:
-    state_dir: ~/.codex-proxy
-    log_dir: ~/.codex-proxy/logs
+    state_dir: ~/.ainn
+    log_dir: ~/.ainn/logs
     launch:
         default_mode: hosted-terminal
     terminal:
         host: tmux
         opener: default
         tmux:
-            socket_name: cap
-            host_session: cap-host
+            socket_name: ainn
+            host_session: ainn-host
 workers:
     cli-groq:
         port: 11200

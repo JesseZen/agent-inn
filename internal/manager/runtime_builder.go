@@ -3,9 +3,9 @@ package manager
 import (
 	"fmt"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/config"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 type RuntimeBuilder struct{}

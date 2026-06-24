@@ -1,4 +1,4 @@
-import type { Agent, Config, Model, Path, Project, Provider } from "@codex-proxy/sdk/v2"
+import type { Agent, Config, Model, Path, Project, Provider } from "@agent-inn/sdk/v2"
 import type { EventSource } from "../context/sdk"
 
 export type RedactedUpstream = {
@@ -149,7 +149,7 @@ function createModel(providerID: string): Model {
   }
 }
 
-export function toCodexProxyUpstreams(upstreams: RedactedUpstream[]): Provider[] {
+export function toAinnUpstreams(upstreams: RedactedUpstream[]): Provider[] {
   return upstreams.map((upstream) => {
     const model = createModel(upstream.name)
     return {
@@ -187,8 +187,8 @@ function createPath(directory: string): Path {
 function createProject(directory: string): Project {
   const now = Date.now()
   return {
-    id: "codex-proxy",
-    name: "codex-proxy",
+    id: "ainn",
+    name: "ainn",
     worktree: directory,
     vcs: "git",
     time: {
@@ -225,7 +225,7 @@ function createLocation(directory: string) {
   return {
     directory,
     project: {
-      id: "codex-proxy",
+      id: "ainn",
       directory,
     },
   }
@@ -242,7 +242,7 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
     const request = requestInfo instanceof Request ? requestInfo : undefined
     const url = new URL(request ? request.url : String(requestInfo))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
-    const upstreams = toCodexProxyUpstreams(
+    const upstreams = toAinnUpstreams(
       await fetchManager<{ upstreams: Record<string, RedactedUpstream> }>(input.baseUrl, "/api/upstreams").then((result) =>
         Object.values(result.upstreams ?? {}),
       ),
@@ -252,7 +252,7 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
 
     if (url.pathname === "/path" && method === "GET") return json(createPath(input.directory))
     if (url.pathname === "/project/current" && method === "GET") return json(createProject(input.directory))
-    if (url.pathname === "/project/codex-proxy/directories" && method === "GET") {
+    if (url.pathname === "/project/ainn/directories" && method === "GET") {
       return json([{ directory: input.directory }])
     }
     if (url.pathname === "/experimental/workspace" && method === "GET") return json([])

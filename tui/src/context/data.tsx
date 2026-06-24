@@ -18,7 +18,7 @@ import type {
   SessionMessageAssistantTool,
   SessionV2Info,
   SkillV2Info,
-} from "@codex-proxy/sdk/v2"
+} from "@agent-inn/sdk/v2"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useSDK } from "./sdk"

@@ -19,7 +19,7 @@ import type {
   VcsInfo,
   SnapshotFileDiff,
   ConsoleState,
-} from "@codex-proxy/sdk/v2"
+} from "@agent-inn/sdk/v2"
 import type { ProxyConfigStatus, RedactedUpstream, WorkerSummary } from "./sdk"
 import { produce, reconcile } from "solid-js/store"
 import { batch } from "solid-js"

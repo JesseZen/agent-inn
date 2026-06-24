@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/constants"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
 	"github.com/pelletier/go-toml/v2"
 )
 

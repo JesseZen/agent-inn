@@ -1,5 +1,5 @@
 {
-  "name": "@codex-proxy/tui",
+  "name": "@agent-inn/tui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@codex-proxy/core": "workspace:*",
-    "@codex-proxy/plugin": "workspace:*",
-    "@codex-proxy/sdk": "workspace:*",
-    "@codex-proxy/ui": "workspace:*",
+    "@agent-inn/core": "workspace:*",
+    "@agent-inn/plugin": "workspace:*",
+    "@agent-inn/sdk": "workspace:*",
+    "@agent-inn/ui": "workspace:*",
     "@opentui/core": "0.3.4",
     "@opentui/keymap": "0.3.4",
     "@opentui/solid": "0.3.4",

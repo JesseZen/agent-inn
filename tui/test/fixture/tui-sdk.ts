@@ -1,7 +1,7 @@
-import type { GlobalEvent } from "@codex-proxy/sdk/v2"
+import type { GlobalEvent } from "@agent-inn/sdk/v2"
 import type { EventSource } from "../../src/context/sdk"
 
-export const worktree = "/tmp/codex-proxy"
+export const worktree = "/tmp/ainn"
 export const directory = `${worktree}/packages/tui`
 
 export function json(data: unknown, init?: ResponseInit) {

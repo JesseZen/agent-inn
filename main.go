@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/jesse/codex-app-proxy/cmd"
+	"github.com/jesse/agent-inn/cmd"
 )
 
 func main() {

@@ -18,18 +18,18 @@ import { useTuiConfig } from "./config"
 import { TuiKeybind } from "./config/keybind"
 
 export const LEADER_TOKEN = "leader"
-export const CODEX_PROXY_BASE_MODE = "base"
+export const AINN_BASE_MODE = "base"
 export const COMMAND_PALETTE_COMMAND = "command.palette.show"
 
-const CODEX_PROXY_MODE_KEY = "codex-proxy.mode"
+const AINN_MODE_KEY = "ainn.mode"
 
-export const CodexProxyKeymapProvider = KeymapProvider
-export const useCodexProxyKeymap = useKeymap
+export const AinnKeymapProvider = KeymapProvider
+export const useAinnKeymap = useKeymap
 
 export { useBindings, useKeymapSelector }
 
 export type OpenTuiKeymap = ReturnType<typeof useKeymap>
-type CodexProxyModeStack = ReturnType<typeof createCodexProxyModeStack>
+type AinnModeStack = ReturnType<typeof createAinnModeStack>
 type CommandSlashEntry = {
   commandName: string
   display: string
@@ -49,18 +49,18 @@ type BindingLookup = {
 type FormatConfig = { keybinds: BindingLookup }
 type ResolvedKeymapConfig = FormatConfig & { leader_timeout: number }
 
-const modeStacks = new WeakMap<OpenTuiKeymap, CodexProxyModeStack>()
+const modeStacks = new WeakMap<OpenTuiKeymap, AinnModeStack>()
 
 function isVisiblePaletteCommand(command: Command) {
   return command.hidden !== true && command.name !== COMMAND_PALETTE_COMMAND
 }
 
-export function createCodexProxyModeStack(keymap: OpenTuiKeymap) {
-  keymap.setData(CODEX_PROXY_MODE_KEY, CODEX_PROXY_BASE_MODE)
+export function createAinnModeStack(keymap: OpenTuiKeymap) {
+  keymap.setData(AINN_MODE_KEY, AINN_BASE_MODE)
 
   const offFields = keymap.registerLayerFields({
     mode(value, ctx) {
-      ctx.require(CODEX_PROXY_MODE_KEY, value)
+      ctx.require(AINN_MODE_KEY, value)
     },
   })
 
@@ -68,12 +68,12 @@ export function createCodexProxyModeStack(keymap: OpenTuiKeymap) {
   let disposed = false
 
   const update = () => {
-    keymap.setData(CODEX_PROXY_MODE_KEY, stack.at(-1)?.mode ?? CODEX_PROXY_BASE_MODE)
+    keymap.setData(AINN_MODE_KEY, stack.at(-1)?.mode ?? AINN_BASE_MODE)
   }
 
   const stackApi = {
     current() {
-      return stack.at(-1)?.mode ?? CODEX_PROXY_BASE_MODE
+      return stack.at(-1)?.mode ?? AINN_BASE_MODE
     },
     push(mode: string) {
       if (disposed) return () => {}
@@ -95,7 +95,7 @@ export function createCodexProxyModeStack(keymap: OpenTuiKeymap) {
       disposed = true
       stack.length = 0
       offFields()
-      keymap.setData(CODEX_PROXY_MODE_KEY, undefined)
+      keymap.setData(AINN_MODE_KEY, undefined)
       modeStacks.delete(keymap)
     },
   }
@@ -104,13 +104,13 @@ export function createCodexProxyModeStack(keymap: OpenTuiKeymap) {
   return stackApi
 }
 
-export function useCodexProxyModeStack() {
-  return getCodexProxyModeStack(useCodexProxyKeymap())
+export function useAinnModeStack() {
+  return getAinnModeStack(useAinnKeymap())
 }
 
-export function getCodexProxyModeStack(keymap: OpenTuiKeymap) {
+export function getAinnModeStack(keymap: OpenTuiKeymap) {
   const value = modeStacks.get(keymap)
-  if (!value) throw new Error("CodexProxy mode stack is not registered for this keymap")
+  if (!value) throw new Error("Ainn mode stack is not registered for this keymap")
   return value
 }
 
@@ -216,8 +216,8 @@ export function formatKeyBindings(bindings: Parameters<typeof formatCommandBindi
   return formatCommandBindingsExtra(bindings, formatOptions(config))
 }
 
-export function registerCodexProxyKeymap(keymap: OpenTuiKeymap, renderer: CliRenderer, config: ResolvedKeymapConfig) {
-  const modeStack = createCodexProxyModeStack(keymap)
+export function registerAinnKeymap(keymap: OpenTuiKeymap, renderer: CliRenderer, config: ResolvedKeymapConfig) {
+  const modeStack = createAinnModeStack(keymap)
   const offCommaBindings = registerCommaBindings(keymap)
   const offAliasExpander = registerKeyAliases(keymap)
   const offBaseLayout = registerBaseLayoutFallback(keymap)
@@ -263,7 +263,7 @@ export function useCommandShortcut(command: string): Accessor<string> {
 }
 
 export function useCommandSlashes(): Accessor<readonly CommandSlashEntry[]> {
-  const keymap = useCodexProxyKeymap()
+  const keymap = useAinnKeymap()
   useKeymapSelector((keymap: OpenTuiKeymap) =>
     keymap.getCommandEntries({
       visibility: "reachable",

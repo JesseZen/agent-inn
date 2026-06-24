@@ -19,7 +19,7 @@ export type TuiOptions = {
   config?: Config
 }
 
-export async function createCodexProxyServer(options?: ServerOptions) {
+export async function createAinnServer(options?: ServerOptions) {
   options = Object.assign(
     {
       hostname: "127.0.0.1",
@@ -32,10 +32,10 @@ export async function createCodexProxyServer(options?: ServerOptions) {
   const args = [`serve`, `--hostname=${options.hostname}`, `--port=${options.port}`]
   if (options.config?.logLevel) args.push(`--log-level=${options.config.logLevel}`)
 
-  const proc = launch(`codex-proxy`, args, {
+  const proc = launch(`ainn`, args, {
     env: {
       ...process.env,
-      CODEX_PROXY_CONFIG_CONTENT: JSON.stringify(options.config ?? {}),
+      AINN_CONFIG_CONTENT: JSON.stringify(options.config ?? {}),
     },
   })
   let clear = () => {}
@@ -53,7 +53,7 @@ export async function createCodexProxyServer(options?: ServerOptions) {
       output += chunk.toString()
       const lines = output.split("\n")
       for (const line of lines) {
-        if (line.startsWith("codex-proxy server listening")) {
+        if (line.startsWith("ainn server listening")) {
           const match = line.match(/on\s+(https?:\/\/[^\s]+)/)
           if (!match) {
             clear()
@@ -99,7 +99,7 @@ export async function createCodexProxyServer(options?: ServerOptions) {
   }
 }
 
-export function createCodexProxyTui(options?: TuiOptions) {
+export function createAinnTui(options?: TuiOptions) {
   const args = []
 
   if (options?.project) {
@@ -115,11 +115,11 @@ export function createCodexProxyTui(options?: TuiOptions) {
     args.push(`--agent=${options.agent}`)
   }
 
-  const proc = launch(`codex-proxy`, args, {
+  const proc = launch(`ainn`, args, {
     stdio: "inherit",
     env: {
       ...process.env,
-      CODEX_PROXY_CONFIG_CONTENT: JSON.stringify(options?.config ?? {}),
+      AINN_CONFIG_CONTENT: JSON.stringify(options?.config ?? {}),
     },
   })
 

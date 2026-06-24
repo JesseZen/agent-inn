@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test"
-import { Global } from "@codex-proxy/core/global"
+import { Global } from "@agent-inn/core/global"
 import { homedir } from "node:os"
 import path from "node:path"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
@@ -9,18 +9,18 @@ afterEach(() => {
   mock.restore()
 })
 
-test("Global.Path.config defaults to ~/.codex-proxy", () => {
-  expect(Global.Path.config).toBe(path.join(homedir(), ".codex-proxy"))
+test("Global.Path.config defaults to ~/.ainn", () => {
+  expect(Global.Path.config).toBe(path.join(homedir(), ".ainn"))
 })
 
 test("createProxyLaunchCommand omits --mode for external-window", () => {
   const cmd = createProxyLaunchCommand({ workerPort: 1234, profile: "cli", mode: "external-window" })
-  expect(cmd).toEqual(["codex-proxy", "launch", "--worker", "1234", "--profile", "cli"])
+  expect(cmd).toEqual(["ainn", "launch", "--worker", "1234", "--profile", "cli"])
 })
 
 test("createProxyLaunchCommand includes --mode hosted-terminal when selected", () => {
   const cmd = createProxyLaunchCommand({ workerPort: 1234, profile: "cli", mode: "hosted-terminal" })
-  expect(cmd).toEqual(["codex-proxy", "launch", "--worker", "1234", "--profile", "cli", "--mode", "hosted-terminal"])
+  expect(cmd).toEqual(["ainn", "launch", "--worker", "1234", "--profile", "cli", "--mode", "hosted-terminal"])
 })
 
 test("createProxyLaunchCommand includes --config-dir for hosted terminal launches", () => {
@@ -31,7 +31,7 @@ test("createProxyLaunchCommand includes --config-dir for hosted terminal launche
     configDir: "/tmp/codex-config",
   })
   expect(cmd).toEqual([
-    "codex-proxy",
+    "ainn",
     "launch",
     "--worker",
     "1234",
@@ -46,7 +46,7 @@ test("createProxyLaunchCommand includes --config-dir for hosted terminal launche
 
 test("createProxyLaunchCommand omits --mode by default", () => {
   const cmd = createProxyLaunchCommand({ workerPort: 1234, profile: "cli" })
-  expect(cmd).toEqual(["codex-proxy", "launch", "--worker", "1234", "--profile", "cli"])
+  expect(cmd).toEqual(["ainn", "launch", "--worker", "1234", "--profile", "cli"])
 })
 
 test("renderProxyLaunchCommand quotes hosted-terminal mode", () => {
@@ -75,7 +75,7 @@ test("launchHostedTerminal reuses existing macOS terminal window when tmux alrea
         on(event: string, handler: (code?: number) => void) {
           if (event === "exit") {
             queueMicrotask(() => {
-              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: cap-host\n"))
+              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
               handler(0)
             })
           }
@@ -89,26 +89,26 @@ test("launchHostedTerminal reuses existing macOS terminal window when tmux alrea
 
   const launchModule = await import(`../src/proxy/launch?reuse-existing-client=${Date.now()}`)
   const launched = await launchModule.launchProxySession({
-    executable: "codex-proxy",
+    executable: "ainn",
     workerPort: 1234,
     profile: "cli",
     configDir: "/tmp/codex-config",
     mode: "hosted-terminal",
     sessionID: "hs_1",
     opener: "default",
-    tmuxSocketName: "cap",
-    tmuxHostSession: "cap-host",
+    tmuxSocketName: "ainn",
+    tmuxHostSession: "ainn-host",
   })
 
   expect(launched).toBe(true)
   expect(spawns).toEqual([
     {
-      cmd: "codex-proxy",
+      cmd: "ainn",
       args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "cli", "--config-dir", "/tmp/codex-config", "--session-id", "hs_1"],
     },
     {
       cmd: "tmux",
-      args: ["-L", "cap", "list-clients", "-t", "cap-host"],
+      args: ["-L", "ainn", "list-clients", "-t", "ainn-host"],
     },
     {
       cmd: "osascript",

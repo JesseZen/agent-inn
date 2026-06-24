@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 type Compiled struct {

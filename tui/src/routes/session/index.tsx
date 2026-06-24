@@ -36,7 +36,7 @@ import type {
   TextPart,
   ReasoningPart,
   SessionStatus,
-} from "@codex-proxy/sdk/v2"
+} from "@agent-inn/sdk/v2"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
 import { webSearchProviderLabel } from "../../util/tool-display"
@@ -79,7 +79,7 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { CODEX_PROXY_BASE_MODE, useBindings, useCommandShortcut, useCodexProxyKeymap } from "../../keymap"
+import { AINN_BASE_MODE, useBindings, useCommandShortcut, useAinnKeymap } from "../../keymap"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
 
 addDefaultParsers(parsers.parsers)
@@ -345,7 +345,7 @@ export function Session() {
     seeded = true
     r.set(route.prompt)
   }
-  const keymap = useCodexProxyKeymap()
+  const keymap = useAinnKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
 
@@ -1107,12 +1107,12 @@ export function Session() {
   }))
 
   useBindings(() => ({
-    mode: CODEX_PROXY_BASE_MODE,
+    mode: AINN_BASE_MODE,
     bindings: tuiConfig.keybinds.gather("session", sessionBindingCommands),
   }))
 
   useBindings(() => ({
-    mode: CODEX_PROXY_BASE_MODE,
+    mode: AINN_BASE_MODE,
     enabled: foregroundTasks().length > 0,
     priority: 1,
     bindings: tuiConfig.keybinds.get("session.background"),

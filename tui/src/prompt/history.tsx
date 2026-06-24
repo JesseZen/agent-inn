@@ -1,7 +1,7 @@
 import path from "path"
 import { onMount } from "solid-js"
 import { createStore, produce, unwrap } from "solid-js/store"
-import type { AgentPart, FilePart, TextPart } from "@codex-proxy/sdk/v2"
+import type { AgentPart, FilePart, TextPart } from "@agent-inn/sdk/v2"
 import { createSimpleContext } from "../context/helper"
 import { useTuiPaths } from "../context/runtime"
 import { appendText, readText, writeText } from "../util/persistence"

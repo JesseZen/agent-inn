@@ -1,4 +1,4 @@
-import type { AssistantMessage, Part, Provider, UserMessage } from "@codex-proxy/sdk/v2"
+import type { AssistantMessage, Part, Provider, UserMessage } from "@agent-inn/sdk/v2"
 import { Locale } from "./locale"
 import * as Model from "./model"
 

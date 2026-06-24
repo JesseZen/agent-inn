@@ -27,7 +27,7 @@ test("tab expands the selected directory and enter still submits raw text", asyn
   await Bun.write(path.join(state, "kv.json"), "{}")
 
   const confirmed: string[] = []
-  const [{ DialogProvider }, { DialogPrompt }, { KVProvider }, { ThemeProvider }, { TuiConfigProvider }, { ToastProvider }, { CodexProxyKeymapProvider, registerCodexProxyKeymap }] = await Promise.all([
+  const [{ DialogProvider }, { DialogPrompt }, { KVProvider }, { ThemeProvider }, { TuiConfigProvider }, { ToastProvider }, { AinnKeymapProvider, registerAinnKeymap }] = await Promise.all([
     import("../../../src/ui/dialog"),
     import("../../../src/ui/dialog-prompt"),
     import("../../../src/context/kv"),
@@ -41,12 +41,12 @@ test("tab expands the selected directory and enter still submits raw text", asyn
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
     const resolvedConfig = createTuiResolvedConfig()
-    const off = registerCodexProxyKeymap(keymap, renderer, resolvedConfig)
+    const off = registerAinnKeymap(keymap, renderer, resolvedConfig)
     onCleanup(off)
 
     return (
       <TestTuiContexts directory={tmp.path} paths={{ home: tmp.path, state, worktree: tmp.path }}>
-        <CodexProxyKeymapProvider keymap={keymap}>
+        <AinnKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={resolvedConfig}>
             <KVProvider persist={false}>
               <ThemeProvider mode="dark">
@@ -63,7 +63,7 @@ test("tab expands the selected directory and enter still submits raw text", asyn
               </ThemeProvider>
             </KVProvider>
           </TuiConfigProvider>
-        </CodexProxyKeymapProvider>
+        </AinnKeymapProvider>
       </TestTuiContexts>
     )
   }

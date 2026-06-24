@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	"github.com/jesse/codex-app-proxy/internal/logging"
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/logging"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 type Config struct {
@@ -169,7 +169,7 @@ func New(cfg Config) *Manager {
 
 func hostedSessionRegistryPath(stateDir string) string {
 	if stateDir == "" {
-		stateDir = "~/.codex-proxy"
+		stateDir = "~/.ainn"
 	}
 	return filepath.Join(expandHomePath(stateDir), hostedSessionsFileName)
 }
@@ -574,12 +574,12 @@ func (m *Manager) LogSink(name string) *logging.WorkerLogSink {
 	m.mu.RUnlock()
 
 	if logDir == "" {
-		logDir = "~/.codex-proxy/logs"
+		logDir = "~/.ainn/logs"
 	}
 	logDir = expandHomePath(logDir)
 	sink, err := logging.NewWorkerLogSink(filepath.Join(logDir, fmt.Sprintf("worker-%d.log", worker.Port)), 1000)
 	if err != nil {
-		sink, _ = logging.NewWorkerLogSink(filepath.Join(os.TempDir(), fmt.Sprintf("codex-proxy-worker-%d.log", worker.Port)), 1000)
+		sink, _ = logging.NewWorkerLogSink(filepath.Join(os.TempDir(), fmt.Sprintf("ainn-worker-%d.log", worker.Port)), 1000)
 	}
 	if sink != nil {
 		sink.SetLevel(workerLogLevel(worker))
@@ -911,7 +911,7 @@ func recoverWorkerConfigPatch(worker config.WorkerConfig, workerName string) (mo
 	}
 	stateDir, _ := moduleCfg.Params["state_dir"].(string)
 	if stateDir == "" {
-		stateDir = expandHomePath("~/.codex-proxy")
+		stateDir = expandHomePath("~/.ainn")
 	}
 	patch := module.NewConfigPatch(module.ConfigPatchOptions{
 		StateDir:    stateDir,

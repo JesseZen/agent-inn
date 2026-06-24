@@ -1,4 +1,4 @@
-import type { Event } from "@codex-proxy/sdk/v2"
+import type { Event } from "@agent-inn/sdk/v2"
 import { useSDK } from "./sdk"
 
 type EventMetadata = {

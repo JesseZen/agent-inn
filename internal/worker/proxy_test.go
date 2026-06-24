@@ -13,8 +13,8 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/jesse/codex-app-proxy/internal/module"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/module"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func TestWorkerPassesThroughWithNoModulesAndInjectsAuthorization(t *testing.T) {

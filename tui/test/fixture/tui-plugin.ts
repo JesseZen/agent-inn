@@ -1,4 +1,4 @@
-import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { TuiPluginApi } from "@agent-inn/plugin/tui"
 import { RGBA } from "@opentui/core"
 import { createTuiResolvedConfig } from "./tui-runtime"
 

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func (m *Manager) registerRoutes(mux *http.ServeMux) {

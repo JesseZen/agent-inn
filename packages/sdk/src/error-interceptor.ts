@@ -37,7 +37,7 @@ export function wrapClientError(
 
   // Empty body / network failure / undefined / null / empty object.
   const reason = response ? "(empty response body)" : "network error (no response)"
-  return new Error(`codex-proxy server ${describe(request, response)}: ${reason}`, {
+  return new Error(`ainn server ${describe(request, response)}: ${reason}`, {
     cause: { body: error, status: response?.status },
   })
 }

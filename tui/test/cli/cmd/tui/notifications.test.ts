@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import Notifications from "../../../../src/feature-plugins/system/notifications"
-import type { Event, PermissionRequest, QuestionRequest, Session } from "@codex-proxy/sdk/v2"
-import type { TuiAttentionNotifyInput } from "@codex-proxy/plugin/tui"
+import type { Event, PermissionRequest, QuestionRequest, Session } from "@agent-inn/sdk/v2"
+import type { TuiAttentionNotifyInput } from "@agent-inn/plugin/tui"
 import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
 async function setup() {

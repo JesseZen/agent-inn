@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 type HTTPWorkerClient struct {

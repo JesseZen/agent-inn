@@ -19,7 +19,7 @@ const MODULE_FIELDS: Record<string, ModuleField[]> = {
   api_translate: [{ key: "api_format", title: "API Format", placeholder: "responses or chat_completions" }],
   config_patch: [
     { key: "config_path", title: "Config Path", placeholder: "~/.codex/config.toml" },
-    { key: "state_dir", title: "State Dir", placeholder: "~/.codex-proxy" },
+    { key: "state_dir", title: "State Dir", placeholder: "~/.ainn" },
   ],
 }
 

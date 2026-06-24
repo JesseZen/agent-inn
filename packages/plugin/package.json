@@ -1,5 +1,5 @@
 {
-  "name": "@codex-proxy/plugin",
+  "name": "@agent-inn/plugin",
   "private": true,
   "type": "module",
   "exports": {
@@ -7,7 +7,7 @@
     "./tui": "./src/tui.ts"
   },
   "dependencies": {
-    "@codex-proxy/sdk": "workspace:*",
+    "@agent-inn/sdk": "workspace:*",
     "@opentui/core": "0.3.4",
     "@opentui/keymap": "0.3.4",
     "@opentui/solid": "0.3.4"

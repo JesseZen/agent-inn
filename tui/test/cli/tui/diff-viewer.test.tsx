@@ -3,13 +3,13 @@ import { expect, test } from "bun:test"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { DiffRenderable, type Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { testRender, useRenderer } from "@opentui/solid"
-import type { TuiPluginApi, TuiPluginMeta, TuiRouteCurrent, TuiRouteDefinition } from "@codex-proxy/plugin/tui"
-import type { Session } from "@codex-proxy/sdk/v2"
+import type { TuiPluginApi, TuiPluginMeta, TuiRouteCurrent, TuiRouteDefinition } from "@agent-inn/plugin/tui"
+import type { Session } from "@agent-inn/sdk/v2"
 import { KVProvider } from "../../../src/context/kv"
 import { ThemeProvider } from "../../../src/context/theme"
 import { TuiConfigProvider } from "../../../src/config"
 import { TuiKeybind } from "../../../src/config/keybind"
-import { CodexProxyKeymapProvider } from "../../../src/keymap"
+import { AinnKeymapProvider } from "../../../src/keymap"
 import diffViewerPlugin from "../../../src/feature-plugins/system/diff-viewer"
 import { createTuiPluginApi } from "../../fixture/tui-plugin"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
@@ -153,7 +153,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20) {
 
     return (
       <TestTuiContexts>
-        <CodexProxyKeymapProvider keymap={keymap}>
+        <AinnKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={config}>
             <KVProvider persist={false}>
               <ThemeProvider mode="dark">
@@ -161,7 +161,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20) {
               </ThemeProvider>
             </KVProvider>
           </TuiConfigProvider>
-        </CodexProxyKeymapProvider>
+        </AinnKeymapProvider>
       </TestTuiContexts>
     )
   }

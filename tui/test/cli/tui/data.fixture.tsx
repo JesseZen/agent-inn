@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
-import type { Event, GlobalEvent } from "@codex-proxy/sdk/v2"
+import type { Event, GlobalEvent } from "@agent-inn/sdk/v2"
 import { onMount } from "solid-js"
 import { ProjectProvider } from "../../../src/context/project"
 import { SDKProvider } from "../../../src/context/sdk"

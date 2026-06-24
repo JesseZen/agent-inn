@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 func TestManagerEventsEndpointReplaysLastEventID(t *testing.T) {

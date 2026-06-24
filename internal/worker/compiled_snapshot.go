@@ -3,8 +3,8 @@ package worker
 import (
 	"os"
 
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 var runtimeModuleNames = []string{"image_filter", "api_translate", "model_override", "request_log", "debug_sse"}

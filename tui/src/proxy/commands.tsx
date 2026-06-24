@@ -1,4 +1,4 @@
-import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { TuiPluginApi } from "@agent-inn/plugin/tui"
 import { DialogSettings } from "./dialog-settings"
 import { DialogLogs } from "./dialog-logs"
 import { DialogUpstream } from "./dialog-upstream"

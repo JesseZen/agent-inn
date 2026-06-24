@@ -1,8 +1,8 @@
 import { mock } from "bun:test"
 import { createTestRenderer } from "@opentui/core/testing"
-import type { TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { TuiPluginApi } from "@agent-inn/plugin/tui"
 import { Effect } from "effect"
-import { Global } from "@codex-proxy/core/global"
+import { Global } from "@agent-inn/core/global"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "./fixture/fixture"
@@ -10,7 +10,7 @@ import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
 import {
-  toCodexProxyUpstreams,
+  toAinnUpstreams,
   type ProxyConfigStatus,
   type ProxySettings,
   type RedactedUpstream,
@@ -95,15 +95,15 @@ function createProxyHarness() {
       last_save_error: "",
     },
     settings: {
-      state_dir: "~/.codex-proxy",
-      log_dir: "~/.codex-proxy/logs",
+      state_dir: "~/.ainn",
+      log_dir: "~/.ainn/logs",
       launch: { default_mode: "hosted-terminal" },
       terminal: {
         host: "tmux",
         opener: "default",
         tmux: {
-          socket_name: "cap",
-          host_session: "cap-host",
+          socket_name: "ainn",
+          host_session: "ainn-host",
         },
       },
     },
@@ -124,12 +124,12 @@ function createProxyHarness() {
   const fetch = createFetch((url) => {
     if (url.pathname === "/config/providers")
       return json({
-        providers: toCodexProxyUpstreams([...providers.values()]),
+        providers: toAinnUpstreams([...providers.values()]),
         default: Object.fromEntries([...providers.keys()].map((name) => [name, `${name}-proxy`])),
       })
     if (url.pathname === "/provider")
       return json({
-        all: toCodexProxyUpstreams([...providers.values()]),
+        all: toAinnUpstreams([...providers.values()]),
         default: Object.fromEntries([...providers.keys()].map((name) => [name, `${name}-proxy`])),
         connected: [...providers.keys()],
       })
@@ -313,7 +313,7 @@ function createProxyHarness() {
 export async function mountProxyApp() {
   const tmp = await tmpdir()
   const home = tmp.path
-  const app = "codex-proxy"
+  const app = "ainn"
   const data = path.join(home, ".local", "share", app)
   const cache = path.join(home, ".cache", app)
   const state = path.join(home, ".local", "state", app)

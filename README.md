@@ -1,4 +1,4 @@
-# codex-app-proxy
+# agent-inn
 
 **English** | [中文](translations/zh-CN/README.md)
 
@@ -69,23 +69,23 @@ Each Worker is bound to one Upstream. You can run multiple Workers pointing to d
 bun install
 
 # Build Go binary
-go build -o codex-proxy .
+go build -o ainn .
 
 ```
 
 ### Configuration
 
 ```bash
-mkdir -p ${HOME}/.codex-proxy
+mkdir -p ${HOME}/.ainn
 
-cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
-# Edit ${HOME}/.codex-proxy/config.yaml to set workers and upstreams
+cp config.example.yaml ${HOME}/.ainn/config.yaml
+# Edit ${HOME}/.ainn/config.yaml to set workers and upstreams
 ```
 
 ### Run
 
 ```bash
-./codex-proxy
+./ainn
 ```
 
 This single command starts the Manager → starts all Workers → starts the TUI.
@@ -94,11 +94,11 @@ This single command starts the Manager → starts all Workers → starts the TUI
 
 ```bash
 # Terminal 1: Backend only (default manager-port is 9090)
-./codex-proxy --config-dir ${HOME}/.codex-proxy --manager-port 9090 &
+./ainn --config-dir ${HOME}/.ainn --manager-port 9090 &
 
 # Terminal 2: TUI with hot reload
 bun install  # Install dependencies from project root (required first time)
-cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
+cd tui && AINN_URL=http://localhost:9090 bun run dev
 ```
 
 ## TUI Operations
@@ -132,16 +132,16 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 ```yaml
 # Runtime settings
 settings:
-  state_dir: ~/.codex-proxy
-  log_dir: ~/.codex-proxy/logs
+  state_dir: ~/.ainn
+  log_dir: ~/.ainn/logs
   launch:
     default_mode: hosted-terminal
   terminal:
     host: tmux
     opener: default
     tmux:
-      socket_name: cap
-      host_session: cap-host
+      socket_name: ainn
+      host_session: ainn-host
 
 # Worker definitions
 workers:
@@ -182,7 +182,7 @@ Leaving `api_format` empty or unset = native passthrough, no translation.
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `log_level` defaults to `"simple"`;
 
-`settings.state_dir` stores CAP runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
+`settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
 
 ### API Key Resolution
 
@@ -204,18 +204,18 @@ cd tui && bun run typecheck
 ## Subcommands
 
 ```bash
-./codex-proxy version           # Show version
-./codex-proxy worker ...        # Worker process (auto-started by Manager, no need to run manually)
-./codex-proxy launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
+./ainn version           # Show version
+./ainn worker ...        # Worker process (auto-started by Manager, no need to run manually)
+./ainn launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
                                 # Launch Codex CLI connected to a worker
-                                # --mode hosted-terminal runs Codex inside a CAP-owned tmux host (requires tmux)
+                                # --mode hosted-terminal runs Codex inside a AINN-owned tmux host (requires tmux)
 ```
 
 ## TODO
 
 - [ ] `/status`: reintroduce a dedicated worker status view after `/workers` owns the main worker management flow
-- [x] hosted-terminal (experimental): `/launch` can run Codex CLI inside a CAP-owned `tmux -L cap` host; CAP handles `create` / `switch` / `attach`
-- [ ] embedded-terminal: built-in PTY sessions inside CAP with direct session switching
+- [x] hosted-terminal (experimental): `/launch` can run Codex CLI inside a AINN-owned `tmux -L ainn` host; AINN handles `create` / `switch` / `attach`
+- [ ] embedded-terminal: built-in PTY sessions inside AINN with direct session switching
 
 ## License
 

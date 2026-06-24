@@ -1,6 +1,6 @@
-import { createCodexProxyClient } from "@codex-proxy/sdk/v2"
-import type { GlobalEvent } from "@codex-proxy/sdk/v2"
-import { Flag } from "@codex-proxy/core/flag/flag"
+import { createAinnClient } from "@agent-inn/sdk/v2"
+import type { GlobalEvent } from "@agent-inn/sdk/v2"
+import { Flag } from "@agent-inn/core/flag/flag"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
 import type {
@@ -34,7 +34,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     let sse: AbortController | undefined
 
     function createSDK() {
-      const client = createCodexProxyClient({
+      const client = createAinnClient({
         baseUrl: props.url,
         signal: abort.signal,
         directory: props.directory,
@@ -280,7 +280,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             sseMaxRetryAttempts: 0,
           })
 
-          if (Flag.CODEX_PROXY_EXPERIMENTAL_WORKSPACES) {
+          if (Flag.AINN_EXPERIMENTAL_WORKSPACES) {
             // Start syncing workspaces, it's important to do this after
             // we've started listening to events
             await sdk.sync.start().catch(() => {})
@@ -308,7 +308,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         const unsub = await props.events.subscribe(handleEvent)
         onCleanup(unsub)
 
-        if (Flag.CODEX_PROXY_EXPERIMENTAL_WORKSPACES) {
+        if (Flag.AINN_EXPERIMENTAL_WORKSPACES) {
           // Start syncing workspaces, it's important to do this after
           // we've started listening to events
           await sdk.sync.start().catch(() => {})

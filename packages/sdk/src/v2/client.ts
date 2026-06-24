@@ -5,7 +5,7 @@ import { createClient } from "./gen/client/client.gen.js"
 import { type Config } from "./gen/client/types.gen.js"
 import { OpencodeClient } from "./gen/sdk.gen.js"
 import { wrapClientError } from "../error-interceptor.js"
-export { type Config as CodexProxyClientConfig, OpencodeClient }
+export { type Config as AinnClientConfig, OpencodeClient }
 
 function pick(value: string | null, fallback?: string, encode?: (value: string) => string) {
   if (!value) return
@@ -22,8 +22,8 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   let changed = false
 
   for (const [name, key] of [
-    ["x-codex-proxy-directory", "directory"],
-    ["x-codex-proxy-workspace", "workspace"],
+    ["x-ainn-directory", "directory"],
+    ["x-agent-inn-workspace", "workspace"],
   ] as const) {
     const value = pick(
       request.headers.get(name),
@@ -42,12 +42,12 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   if (!changed) return request
 
   const next = new Request(url, request)
-  next.headers.delete("x-codex-proxy-directory")
-  next.headers.delete("x-codex-proxy-workspace")
+  next.headers.delete("x-ainn-directory")
+  next.headers.delete("x-agent-inn-workspace")
   return next
 }
 
-export function createCodexProxyClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
+export function createAinnClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
   if (!config?.fetch) {
     const customFetch: any = (req: any) => {
       // @ts-ignore
@@ -63,14 +63,14 @@ export function createCodexProxyClient(config?: Config & { directory?: string; e
   if (config?.directory) {
     config.headers = {
       ...config.headers,
-      "x-codex-proxy-directory": encodeURIComponent(config.directory),
+      "x-ainn-directory": encodeURIComponent(config.directory),
     }
   }
 
   if (config?.experimental_workspaceID) {
     config.headers = {
       ...config.headers,
-      "x-codex-proxy-workspace": config.experimental_workspaceID,
+      "x-agent-inn-workspace": config.experimental_workspaceID,
     }
   }
 
@@ -84,7 +84,7 @@ export function createCodexProxyClient(config?: Config & { directory?: string; e
   client.interceptors.response.use((response) => {
     const contentType = response.headers.get("content-type")
     if (contentType === "text/html")
-      throw new Error("Request is not supported by this version of CodexProxy Server (Server responded with text/html)")
+      throw new Error("Request is not supported by this version of Ainn Server (Server responded with text/html)")
 
     return response
   })

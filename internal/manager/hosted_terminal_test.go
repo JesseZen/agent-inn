@@ -15,7 +15,7 @@ func TestTmuxDetectCommand(t *testing.T) {
 
 func TestTmuxHasSessionCommand(t *testing.T) {
 	got := TmuxHasSessionCommand()
-	want := []string{"tmux", "-L", "cap", "has-session", "-t", "cap-host"}
+	want := []string{"tmux", "-L", "ainn", "has-session", "-t", "ainn-host"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -23,23 +23,23 @@ func TestTmuxHasSessionCommand(t *testing.T) {
 
 func TestTmuxStartHostCommand(t *testing.T) {
 	got := TmuxStartHostCommand()
-	want := []string{"tmux", "-L", "cap", "new-session", "-d", "-s", "cap-host"}
+	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
 func TestTmuxCreateWindowCommand(t *testing.T) {
-	got := TmuxCreateWindowCommand("codex:cli-openai", []string{"codex", "--profile", "cli-openai", "--cd", "/tmp/work"})
-	want := []string{"tmux", "-L", "cap", "new-window", "-t", "cap-host", "-n", "codex:cli-openai", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"}
+	got := TmuxCreateWindowCommand("ainn:cli-openai", []string{"codex", "--profile", "cli-openai", "--cd", "/tmp/work"})
+	want := []string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "ainn:cli-openai", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
 func TestTmuxSelectWindowCommand(t *testing.T) {
-	got := TmuxSelectWindowCommand("codex:cli-openai")
-	want := []string{"tmux", "-L", "cap", "select-window", "-t", "cap-host:codex:cli-openai"}
+	got := TmuxSelectWindowCommand("ainn:cli-openai")
+	want := []string{"tmux", "-L", "ainn", "select-window", "-t", "ainn-host:ainn:cli-openai"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -47,7 +47,7 @@ func TestTmuxSelectWindowCommand(t *testing.T) {
 
 func TestTmuxAttachCommand(t *testing.T) {
 	got := TmuxAttachCommand()
-	want := []string{"tmux", "-L", "cap", "attach-session", "-t", "cap-host"}
+	want := []string{"tmux", "-L", "ainn", "attach-session", "-t", "ainn-host"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -58,12 +58,12 @@ func TestSafeWindowName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"cli-openai", "codex:cli-openai"},
-		{"cli_openai", "codex:cli_openai"},
-		{"cli openai", "codex:cli-openai"},
-		{"cli/openai", "codex:cli-openai"},
-		{"cli.openai", "codex:cli-openai"},
-		{"", "codex:"},
+		{"cli-openai", "ainn:cli-openai"},
+		{"cli_openai", "ainn:cli_openai"},
+		{"cli openai", "ainn:cli-openai"},
+		{"cli/openai", "ainn:cli-openai"},
+		{"cli.openai", "ainn:cli-openai"},
+		{"", "ainn:"},
 	}
 	for _, tc := range cases {
 		got := SafeWindowName(tc.input)

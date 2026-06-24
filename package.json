@@ -1,5 +1,5 @@
 {
-  "name": "codex-proxy-workspace",
+  "name": "agent-inn-workspace",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",

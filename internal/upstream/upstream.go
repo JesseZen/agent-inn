@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	"github.com/jesse/agent-inn/internal/config"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 type RuntimeUpstream struct {

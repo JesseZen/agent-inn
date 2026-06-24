@@ -7,14 +7,14 @@ import (
 
 func TestBuildCodexLaunchCommandUsesOpenAIBaseURLOutput(t *testing.T) {
 	cmd := buildCodexLaunchCommand(CodexLaunchOptions{
-		Profile:   "cap-proxy",
+		Profile:   "ainn-proxy",
 		Workspace:  "/tmp/work",
 		AddDirs:    []string{"/tmp/shared"},
 		WorkerPort: 11199,
 		Model:      "gpt-5.5",
 	})
 	got := strings.Join(cmd, " ")
-	if !strings.Contains(got, "--profile cap-proxy") {
+	if !strings.Contains(got, "--profile ainn-proxy") {
 		t.Fatalf("missing profile flag: %s", got)
 	}
 	if !strings.Contains(got, "--cd /tmp/work") {

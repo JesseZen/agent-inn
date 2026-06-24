@@ -101,7 +101,7 @@ func TestExecProcessStopSendsSIGTERM(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
 	readyPath := filepath.Join(dir, "ready")
-	t.Setenv("CODEX_PROXY_PROCESS_TEST_HELPER", "1")
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
 
 	process, err := ExecStarter{Executable: os.Args[0], StopGracePeriod: 2 * time.Second}.Start(WorkerSpawn{
 		Args:        helperProcessArgs("term-exits", signalPath, readyPath),
@@ -146,7 +146,7 @@ func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
 	readyPath := filepath.Join(dir, "ready")
-	t.Setenv("CODEX_PROXY_PROCESS_TEST_HELPER", "1")
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
 
 	process, err := ExecStarter{Executable: os.Args[0], StopGracePeriod: 50 * time.Millisecond}.Start(WorkerSpawn{
 		Args:        helperProcessArgs("term-ignores", signalPath, readyPath),
@@ -170,7 +170,7 @@ func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 }
 
 func TestExecProcessHelper(t *testing.T) {
-	if os.Getenv("CODEX_PROXY_PROCESS_TEST_HELPER") != "1" {
+	if os.Getenv("AINN_PROCESS_TEST_HELPER") != "1" {
 		return
 	}
 	args := helperArgsAfterSeparator()

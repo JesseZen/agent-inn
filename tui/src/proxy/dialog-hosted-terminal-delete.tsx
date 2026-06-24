@@ -26,7 +26,7 @@ export async function deleteHostedTerminalSession(input: {
   const confirmed = await DialogConfirm.show(
     dialog,
     "Delete hosted session",
-    `Delete ${session.session_label}? This will remove the CAP session record${session.status === "active" ? " and close its tmux window" : ""}.`,
+    `Delete ${session.session_label}? This will remove the AINN session record${session.status === "active" ? " and close its tmux window" : ""}.`,
   )
   if (!confirmed) return
   try {
@@ -83,7 +83,7 @@ export function DialogHostedTerminalDelete() {
             const confirmed = await DialogConfirm.show(
               dialog,
               "Delete hosted sessions",
-              "Delete all stale sessions? This will remove every stale CAP session record currently shown in TUI. Active sessions will not be touched.",
+              "Delete all stale sessions? This will remove every stale AINN session record currently shown in TUI. Active sessions will not be touched.",
             )
             if (!confirmed) return
             try {

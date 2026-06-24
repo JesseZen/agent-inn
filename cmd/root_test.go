@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 func TestRunVersionPrintsVersion(t *testing.T) {
@@ -20,8 +20,8 @@ func TestRunVersionPrintsVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d", code)
 	}
-	if !strings.Contains(stdout.String(), "codex-proxy") {
-		t.Fatalf("expected version output to name codex-proxy, got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "ainn") {
+		t.Fatalf("expected version output to name ainn, got %q", stdout.String())
 	}
 }
 
@@ -222,7 +222,7 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 }
 
 func TestRootProgramFactoryBuildsTypeScriptTUICommand(t *testing.T) {
-	program := rootProgramFactory("127.0.0.1:8787", "", "/tmp/cap-config")
+	program := rootProgramFactory("127.0.0.1:8787", "", "/tmp/ainn-config")
 	cmd := program.CommandLine()
 	if cmd[len(cmd)-2] != "run" || cmd[len(cmd)-1] != "src/cli.ts" {
 		t.Fatalf("expected bun run src/cli.ts command, got %#v", cmd)
@@ -230,22 +230,22 @@ func TestRootProgramFactoryBuildsTypeScriptTUICommand(t *testing.T) {
 	if program.WorkingDir() != "tui" {
 		t.Fatalf("expected tui working dir, got %q", program.WorkingDir())
 	}
-	if program.Env()["CODEX_PROXY_URL"] != "http://127.0.0.1:8787" {
-		t.Fatalf("expected CODEX_PROXY_URL for manager API, got %#v", program.Env())
+	if program.Env()["AINN_URL"] != "http://127.0.0.1:8787" {
+		t.Fatalf("expected AINN_URL for manager API, got %#v", program.Env())
 	}
-	if program.Env()["CODEX_PROXY_PROJECT_DIR"] == "" {
-		t.Fatalf("expected CODEX_PROXY_PROJECT_DIR to be set, got %#v", program.Env())
+	if program.Env()["AINN_PROJECT_DIR"] == "" {
+		t.Fatalf("expected AINN_PROJECT_DIR to be set, got %#v", program.Env())
 	}
-	if program.Env()["CODEX_PROXY_CONFIG_DIR"] != "/tmp/cap-config" {
-		t.Fatalf("expected CODEX_PROXY_CONFIG_DIR for TUI, got %#v", program.Env())
+	if program.Env()["AINN_CONFIG_DIR"] != "/tmp/ainn-config" {
+		t.Fatalf("expected AINN_CONFIG_DIR for TUI, got %#v", program.Env())
 	}
 }
 
 func TestRootProgramEnvIncludesConfigDir(t *testing.T) {
-	program := newTUIProgram("127.0.0.1:8787", "", "/tmp/cap-config")
+	program := newTUIProgram("127.0.0.1:8787", "", "/tmp/ainn-config")
 
-	if program.Env()["CODEX_PROXY_CONFIG_DIR"] != "/tmp/cap-config" {
-		t.Fatalf("expected CODEX_PROXY_CONFIG_DIR, got %#v", program.Env())
+	if program.Env()["AINN_CONFIG_DIR"] != "/tmp/ainn-config" {
+		t.Fatalf("expected AINN_CONFIG_DIR, got %#v", program.Env())
 	}
 }
 
@@ -306,7 +306,7 @@ func (lockedLocker) Acquire() (func(), error) {
 	return nil, errAlreadyLocked
 }
 
-// noopLocker 总是成功抢锁，用于走 runRoot 的测试避免依赖真 /tmp/cap.lock。
+// noopLocker 总是成功抢锁，用于走 runRoot 的测试避免依赖真 /tmp/ainn.lock。
 type noopLocker struct{}
 
 func (noopLocker) Acquire() (func(), error) {

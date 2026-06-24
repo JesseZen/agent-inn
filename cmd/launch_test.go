@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jesse/codex-app-proxy/internal/manager"
+	"github.com/jesse/agent-inn/internal/manager"
 )
 
 func TestRunLaunchRequiresWorker(t *testing.T) {
@@ -116,7 +116,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
-	writeLaunchConfig(t, configDir, stateDir, "cap-test", "cap-test-host")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host")
 
 	var got [][]string
 	restore := func() func() {
@@ -128,7 +128,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 					return "off\n", nil
 				}
 				// Simulate fresh tmux host: has-session and select-window fail.
-				// tmux subcommand sits at args[3] after `tmux -L cap`.
+				// tmux subcommand sits at args[3] after `tmux -L ainn`.
 				if len(args) > 3 && args[3] == "has-session" {
 					return "", errors.New("can't find session")
 				}
@@ -152,13 +152,13 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 
 	want := [][]string{
 		manager.TmuxDetectCommand(),
-		{"tmux", "-L", "cap-test", "has-session", "-t", "cap-test-host"},
-		{"tmux", "-L", "cap-test", "new-session", "-d", "-s", "cap-test-host"},
-		{"tmux", "-L", "cap-test", "show", "-gv", "mouse"},
-		{"tmux", "-L", "cap-test", "set-option", "-g", "mouse", "on"},
-		{"tmux", "-L", "cap-test", "select-window", "-t", "cap-test-host:solve problem A"},
-		{"tmux", "-L", "cap-test", "new-window", "-t", "cap-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"},
-		{"tmux", "-L", "cap-test", "attach-session", "-t", "cap-test-host"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
+		{"tmux", "-L", "ainn-test", "set-option", "-g", "mouse", "on"},
+		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
+		{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai", "--cd", "/tmp/work"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
@@ -186,7 +186,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
-	writeLaunchConfig(t, configDir, stateDir, "cap", "cap-host")
+	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host")
 
 	var got [][]string
 	restore := func() func() {
@@ -226,7 +226,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
-		{"tmux", "-L", "cap", "show", "-gv", "mouse"},
+		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
 	}
@@ -243,7 +243,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 func TestRunLaunchHostedTerminalMissingTmux(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
-	writeLaunchConfig(t, configDir, filepath.Join(dir, "state"), "cap", "cap-host")
+	writeLaunchConfig(t, configDir, filepath.Join(dir, "state"), "ainn", "ainn-host")
 
 	var stderr bytes.Buffer
 	restore := func() func() {
@@ -270,7 +270,7 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
-	writeLaunchConfig(t, configDir, stateDir, "cap", "cap-host")
+	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host")
 
 	var got [][]string
 	restore := func() func() {
@@ -309,8 +309,8 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
-		{"tmux", "-L", "cap", "show", "-gv", "mouse"},
-		{"tmux", "-L", "cap", "set-option", "-g", "mouse", "on"},
+		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
+		{"tmux", "-L", "ainn", "set-option", "-g", "mouse", "on"},
 		manager.TmuxSelectWindowCommand("@12"),
 	}
 	if len(got) != len(want) {
@@ -327,7 +327,7 @@ func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
-	writeLaunchConfig(t, configDir, stateDir, "cap", "cap-host")
+	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host")
 
 	var got [][]string
 	restore := func() func() {
@@ -366,7 +366,7 @@ func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
-		{"tmux", "-L", "cap", "show", "-gv", "mouse"},
+		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
 	}

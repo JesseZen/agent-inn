@@ -16,7 +16,7 @@ func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 		SessionLabel: "worker 1",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
-		TmuxWindowID: "codex:worker-1",
+		TmuxWindowID: "ainn:worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 			if len(args) == len(TmuxListWindowsCommand()) {
-				return "codex:worker-1\n", nil
+				return "ainn:worker-1\n", nil
 			}
 			return "", nil
 		})
@@ -111,7 +111,7 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 		SessionLabel: "worker 1",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
-		TmuxWindowID: "codex:worker-1",
+		TmuxWindowID: "ainn:worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 			got = append(got, append([]string{}, args...))
 			if len(args) == len(TmuxListWindowsCommand()) {
-				return "codex:worker-1\n", nil
+				return "ainn:worker-1\n", nil
 			}
 			return "", nil
 		})
@@ -136,7 +136,7 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	want := [][]string{
 		TmuxHasSessionCommand(),
 		TmuxListWindowsCommand(),
-		TmuxKillWindowCommand("codex:worker-1"),
+		TmuxKillWindowCommand("ainn:worker-1"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tmux calls: %#v", got)
@@ -184,7 +184,7 @@ func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxHostMissing(t *testing.T
 		SessionLabel: "worker 1",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
-		TmuxWindowID: "codex:worker-1",
+		TmuxWindowID: "ainn:worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)

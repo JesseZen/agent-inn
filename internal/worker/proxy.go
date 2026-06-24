@@ -11,9 +11,9 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 type Worker struct {

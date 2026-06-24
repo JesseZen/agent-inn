@@ -2,25 +2,23 @@
 
 exports[`TUI inline tool wrapping snapshots consecutive grep, glob, and read rows at a narrow width 1`] = `
 "   ✱ Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.
-     *dir|xdg|APPDATA" in packages/codex-proxy/src (151 matches)
-   ✱ Glob "**/*db*" in packages/codex-proxy (6 matches)
-   → Read packages/codex-proxy/src/storage/db.ts [offset=1, limit=130]
-   → Read packages/codex-proxy/src/index.ts [offset=1, limit=100]
-   ✱ Grep "export const
-     CODEX_PROXY_DB|CODEX_PROXY_DB|CODEX_PROXY_DEV|Global\\.Path\\.
-     data|data =" in packages/codex-proxy/src (115 matches)"
+     *dir|xdg|APPDATA" in packages/ainn/src (151 matches)
+   ✱ Glob "**/*db*" in packages/ainn (6 matches)
+   → Read packages/ainn/src/storage/db.ts [offset=1, limit=130]
+   → Read packages/ainn/src/index.ts [offset=1, limit=100]
+   ✱ Grep "export const AINN_DB|AINN_DB|AINN_DEV|Global\\.Path\\.
+     data|data =" in packages/ainn/src (115 matches)"
 `;
 
 exports[`TUI inline tool wrapping snapshots expanded tool errors under the tool text 1`] = `
 "   ✱ Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.
-     *dir|xdg|APPDATA" in packages/codex-proxy/src (151 matches)
-   ✱ Glob "**/*db*" in packages/codex-proxy (6 matches)
-   → Read packages/codex-proxy/src/storage/db.ts [offset=1, limit=130]
-   → Read packages/codex-proxy/src/index.ts [offset=1, limit=100]
+     *dir|xdg|APPDATA" in packages/ainn/src (151 matches)
+   ✱ Glob "**/*db*" in packages/ainn (6 matches)
+   → Read packages/ainn/src/storage/db.ts [offset=1, limit=130]
+   → Read packages/ainn/src/index.ts [offset=1, limit=100]
      No LSP server available for this file type.
-   ✱ Grep "export const
-     CODEX_PROXY_DB|CODEX_PROXY_DB|CODEX_PROXY_DEV|Global\\.Path\\.
-     data|data =" in packages/codex-proxy/src (115 matches)"
+   ✱ Grep "export const AINN_DB|AINN_DB|AINN_DEV|Global\\.Path\\.
+     data|data =" in packages/ainn/src (115 matches)"
 `;
 
 exports[`TUI inline tool wrapping keeps separation after a shell output block 1`] = `
@@ -33,13 +31,12 @@ exports[`TUI inline tool wrapping keeps separation after a shell output block 1`
   file.ts
 
    ✱ Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.
-     *dir|xdg|APPDATA" in packages/codex-proxy/src (151 matches)
-   ✱ Glob "**/*db*" in packages/codex-proxy (6 matches)
-   → Read packages/codex-proxy/src/storage/db.ts [offset=1, limit=130]
-   → Read packages/codex-proxy/src/index.ts [offset=1, limit=100]
-   ✱ Grep "export const
-     CODEX_PROXY_DB|CODEX_PROXY_DB|CODEX_PROXY_DEV|Global\\.Path\\.
-     data|data =" in packages/codex-proxy/src (115 matches)"
+     *dir|xdg|APPDATA" in packages/ainn/src (151 matches)
+   ✱ Glob "**/*db*" in packages/ainn (6 matches)
+   → Read packages/ainn/src/storage/db.ts [offset=1, limit=130]
+   → Read packages/ainn/src/index.ts [offset=1, limit=100]
+   ✱ Grep "export const AINN_DB|AINN_DB|AINN_DEV|Global\\.Path\\.
+     data|data =" in packages/ainn/src (115 matches)"
 `;
 
 exports[`TUI inline tool wrapping keeps separation after a padded user message 1`] = `
@@ -48,13 +45,12 @@ exports[`TUI inline tool wrapping keeps separation after a padded user message 1
 
 
    ✱ Grep "OPENCODE.*DB|database|sqlite|drizzle|dev.*db|data.
-     *dir|xdg|APPDATA" in packages/codex-proxy/src (151 matches)
-   ✱ Glob "**/*db*" in packages/codex-proxy (6 matches)
-   → Read packages/codex-proxy/src/storage/db.ts [offset=1, limit=130]
-   → Read packages/codex-proxy/src/index.ts [offset=1, limit=100]
-   ✱ Grep "export const
-     CODEX_PROXY_DB|CODEX_PROXY_DB|CODEX_PROXY_DEV|Global\\.Path\\.
-     data|data =" in packages/codex-proxy/src (115 matches)"
+     *dir|xdg|APPDATA" in packages/ainn/src (151 matches)
+   ✱ Glob "**/*db*" in packages/ainn (6 matches)
+   → Read packages/ainn/src/storage/db.ts [offset=1, limit=130]
+   → Read packages/ainn/src/index.ts [offset=1, limit=100]
+   ✱ Grep "export const AINN_DB|AINN_DB|AINN_DEV|Global\\.Path\\.
+     data|data =" in packages/ainn/src (115 matches)"
 `;
 
 exports[`TUI inline tool wrapping separates a contiguous subagent group from inline tools 1`] = `

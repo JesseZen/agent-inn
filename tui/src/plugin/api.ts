@@ -1,4 +1,4 @@
-import type { TuiPluginApi, TuiRouteDefinition } from "@codex-proxy/plugin/tui"
+import type { TuiPluginApi, TuiRouteDefinition } from "@agent-inn/plugin/tui"
 import { createSignal } from "solid-js"
 
 type RouteEntry = {

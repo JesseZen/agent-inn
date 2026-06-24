@@ -3,7 +3,7 @@ package manager
 import (
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/logging"
+	"github.com/jesse/agent-inn/internal/logging"
 )
 
 type WorkerSupervisor struct {

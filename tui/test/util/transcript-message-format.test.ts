@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { formatAssistantHeader, formatMessage, formatPart } from "../../src/util/transcript"
-import type { AssistantMessage, Part, UserMessage } from "@codex-proxy/sdk/v2"
+import type { AssistantMessage, Part, UserMessage } from "@agent-inn/sdk/v2"
 import { providers } from "./transcript.fixture"
 
 describe("transcript message formatting", () => {

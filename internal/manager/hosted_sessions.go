@@ -53,7 +53,7 @@ type hostedSessionFile struct {
 
 func HostedSessionRegistryPath(stateDir string) string {
 	if stateDir == "" {
-		stateDir = "~/.codex-proxy"
+		stateDir = "~/.ainn"
 	}
 	return filepath.Join(expandHomePath(stateDir), hostedSessionsFileName)
 }

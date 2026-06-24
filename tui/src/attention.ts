@@ -9,17 +9,17 @@ import type {
   TuiAttentionSoundName,
   TuiAttentionSoundPack,
   TuiAttentionSoundPackInfo,
-} from "@codex-proxy/plugin/tui"
+} from "@agent-inn/plugin/tui"
 import { AttentionSoundName, type TuiConfig } from "./config"
 import { Schema } from "effect"
 import stripAnsi from "strip-ansi"
 import * as TuiAudio from "./audio"
-import defaultSoundPath from "@codex-proxy/ui/audio/bip-bop-01.mp3" with { type: "file" }
-import questionSoundPath from "@codex-proxy/ui/audio/bip-bop-03.mp3" with { type: "file" }
-import permissionSoundPath from "@codex-proxy/ui/audio/staplebops-06.mp3" with { type: "file" }
-import errorSoundPath from "@codex-proxy/ui/audio/nope-03.mp3" with { type: "file" }
-import doneSoundPath from "@codex-proxy/ui/audio/bip-bop-01.mp3" with { type: "file" }
-import subagentDoneSoundPath from "@codex-proxy/ui/audio/yup-01.mp3" with { type: "file" }
+import defaultSoundPath from "@agent-inn/ui/audio/bip-bop-01.mp3" with { type: "file" }
+import questionSoundPath from "@agent-inn/ui/audio/bip-bop-03.mp3" with { type: "file" }
+import permissionSoundPath from "@agent-inn/ui/audio/staplebops-06.mp3" with { type: "file" }
+import errorSoundPath from "@agent-inn/ui/audio/nope-03.mp3" with { type: "file" }
+import doneSoundPath from "@agent-inn/ui/audio/bip-bop-01.mp3" with { type: "file" }
+import subagentDoneSoundPath from "@agent-inn/ui/audio/yup-01.mp3" with { type: "file" }
 
 type FocusState = "unknown" | "focused" | "blurred"
 
@@ -38,14 +38,14 @@ type TuiAttentionHost = TuiAttention & {
   dispose(): void
 }
 
-const DEFAULT_TITLE = "codex-proxy"
-const DEFAULT_PACK_ID = "codex-proxy.default"
+const DEFAULT_TITLE = "ainn"
+const DEFAULT_PACK_ID = "ainn.default"
 const KV_SOUND_PACK = "attention_sound_pack"
 const TITLE_LIMIT = 80
 const MESSAGE_LIMIT = 240
 const BUILTIN_PACK: RegisteredSoundPack = {
   id: DEFAULT_PACK_ID,
-  name: "CodexProxy Default",
+  name: "Ainn Default",
   builtin: true,
   sounds: {
     default: defaultSoundPath,

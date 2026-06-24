@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
-	"github.com/jesse/codex-app-proxy/internal/worker"
+	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
+	"github.com/jesse/agent-inn/internal/worker"
 )
 
 func runWorker(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -181,7 +181,7 @@ func buildConfigPatch(cfg WorkerRuntimeConfig) (*module.ConfigPatch, bool) {
 	}
 	stateDir, _ := moduleCfg.Params["state_dir"].(string)
 	if stateDir == "" {
-		stateDir = expandHome("~/.codex-proxy")
+		stateDir = expandHome("~/.ainn")
 	}
 	port := cfg.ListenPort
 	if port == 0 {

@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	"github.com/jesse/agent-inn/internal/config"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 func TestRuntimeBuilderBuildsCompleteWorkerRuntime(t *testing.T) {

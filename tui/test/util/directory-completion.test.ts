@@ -5,7 +5,7 @@ import path from "node:path"
 import { getDirectoryCompletions } from "../../src/util/directory-completion"
 
 async function makeTree() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cap-dir-complete-"))
+  const root = await mkdtemp(path.join(os.tmpdir(), "ainn-dir-complete-"))
   await mkdir(path.join(root, "alpha"), { recursive: true })
   await mkdir(path.join(root, "alpine"), { recursive: true })
   await mkdir(path.join(root, "nested", "child"), { recursive: true })

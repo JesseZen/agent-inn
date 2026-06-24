@@ -1,5 +1,5 @@
 # Go binary
-codex-proxy
+ainn
 *.exe
 
 # Environment files with secrets

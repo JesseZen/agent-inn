@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
+	"github.com/jesse/agent-inn/internal/config"
 	"github.com/pelletier/go-toml/v2"
 )
 

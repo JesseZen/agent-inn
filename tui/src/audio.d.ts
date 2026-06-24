@@ -3,7 +3,7 @@ declare module "*.mp3" {
   export default path
 }
 
-declare module "@codex-proxy/ui/audio/*.mp3" {
+declare module "@agent-inn/ui/audio/*.mp3" {
   const path: string
   export default path
 }

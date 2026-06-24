@@ -40,7 +40,7 @@ async function mountPrompt(input: {
     { ThemeProvider },
     { TuiConfigProvider },
     { ToastProvider },
-    { CodexProxyKeymapProvider, registerCodexProxyKeymap },
+    { AinnKeymapProvider, registerAinnKeymap },
   ] = await Promise.all([
     import("../../../src/ui/dialog"),
     import("../../../src/ui/dialog-prompt"),
@@ -58,7 +58,7 @@ async function mountPrompt(input: {
       keybinds: input.keybinds,
       leader_timeout: 1000,
     })
-    const off = registerCodexProxyKeymap(keymap, renderer, resolvedConfig)
+    const off = registerAinnKeymap(keymap, renderer, resolvedConfig)
     onCleanup(off)
 
     return (
@@ -70,7 +70,7 @@ async function mountPrompt(input: {
           worktree: input.root,
         }}
       >
-        <CodexProxyKeymapProvider keymap={keymap}>
+        <AinnKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={resolvedConfig}>
             <KVProvider persist={false}>
               <ThemeProvider mode="dark">
@@ -87,7 +87,7 @@ async function mountPrompt(input: {
               </ThemeProvider>
             </KVProvider>
           </TuiConfigProvider>
-        </CodexProxyKeymapProvider>
+        </AinnKeymapProvider>
       </TestTuiContexts>
     )
   }

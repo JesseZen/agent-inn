@@ -26,7 +26,7 @@ function shellQuote(value: string) {
 }
 
 export function createProxyLaunchCommand(opts: ProxyLaunchOptions) {
-  const cmd = [opts.executable || "codex-proxy", "launch", "--worker", String(opts.workerPort)]
+  const cmd = [opts.executable || "ainn", "launch", "--worker", String(opts.workerPort)]
   if (opts.profile) {
     cmd.push("--profile", opts.profile)
   }
@@ -80,7 +80,7 @@ export async function launchProxySession(opts: ProxyLaunchOptions) {
 }
 
 async function launchExternalWindow(opts: ProxyLaunchOptions) {
-  const executable = opts.executable || "codex-proxy"
+  const executable = opts.executable || "ainn"
   const terminalCommand = renderProxyLaunchCommand(createProxyLaunchCommand(opts))
   const args = ["launch", "--worker", String(opts.workerPort)]
   if (opts.profile) {
@@ -116,9 +116,9 @@ async function launchExternalWindow(opts: ProxyLaunchOptions) {
 // Terminal.app window for all hosted sessions: the first launch opens it, later
 // launches just switch the tmux window and focus the existing terminal.
 async function launchHostedTerminal(opts: ProxyLaunchOptions) {
-  const executable = opts.executable || "codex-proxy"
-  const tmuxSocket = opts.tmuxSocketName || "cap"
-  const tmuxHostSession = opts.tmuxHostSession || "cap-host"
+  const executable = opts.executable || "ainn"
+  const tmuxSocket = opts.tmuxSocketName || "ainn"
+  const tmuxHostSession = opts.tmuxHostSession || "ainn-host"
 
   // Phase 1: set up tmux host + window without attaching.
   const setupArgs = ["launch", "--worker", String(opts.workerPort), "--mode", "hosted-terminal", "--no-attach"]
@@ -145,7 +145,7 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
   }
   const setup = await runProcess(executable, setupArgs)
   if (setup.code !== 0) {
-    throw new Error(setup.stderr || `codex-proxy launch exited with code ${setup.code}`)
+    throw new Error(setup.stderr || `ainn launch exited with code ${setup.code}`)
   }
 
   if (await hasTmuxClient(tmuxSocket, tmuxHostSession)) {

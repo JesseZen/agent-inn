@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func TestManagerDetectsManagedPortConflict(t *testing.T) {
@@ -106,7 +106,7 @@ func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
 		SessionLabel: "worker 1",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
-		TmuxWindowID: "codex:worker-1",
+		TmuxWindowID: "ainn:worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 			if strings.Join(args, " ") == strings.Join(TmuxListWindowsCommand(), " ") {
-				return "codex:worker-1\n", nil
+				return "ainn:worker-1\n", nil
 			}
 			return "", nil
 		})
@@ -240,7 +240,7 @@ func TestManagerLogSinkWritesToDefaultHomeLogDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logPath := filepath.Join(home, ".codex-proxy", "logs", "worker-6767.log")
+	logPath := filepath.Join(home, ".ainn", "logs", "worker-6767.log")
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("expected default log file at %s: %v", logPath, err)

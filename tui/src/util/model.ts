@@ -1,4 +1,4 @@
-import type { Provider } from "@codex-proxy/sdk/v2"
+import type { Provider } from "@agent-inn/sdk/v2"
 
 export function parse(value: string) {
   const [providerID, ...modelID] = value.split("/")

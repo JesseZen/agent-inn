@@ -10,7 +10,7 @@ import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
 import type { HostedSessionSummary } from "./backend"
-import { Global } from "@codex-proxy/core/global"
+import { Global } from "@agent-inn/core/global"
 
 type HostedTerminalOption =
   | {
@@ -101,7 +101,7 @@ export function DialogHostedTerminal() {
           try {
           const settings = await sdk.client.getSettings()
           await launchProxySession({
-            executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
+            executable: import.meta.env?.AINN_EXECUTABLE || undefined,
             workerPort: worker.port,
             profile: worker.name,
             configDir: Global.Path.config,
@@ -154,7 +154,7 @@ export function DialogHostedTerminal() {
         }
         void sdk.client.getSettings().then((settings) =>
         void launchProxySession({
-          executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
+          executable: import.meta.env?.AINN_EXECUTABLE || undefined,
           workerPort: session.worker_port,
           profile: session.worker_name,
           configDir: Global.Path.config,

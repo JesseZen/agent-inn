@@ -51,7 +51,7 @@ test("proxy settings editor patches settings through manager API", async () => {
     await wait(async () => {
       await app.render()
       const frame = app.frame()
-      return frame.includes("Settings") && frame.includes("State Dir") && frame.includes("~/.codex-proxy")
+      return frame.includes("Settings") && frame.includes("State Dir") && frame.includes("~/.ainn")
     })
 
     app.api.keymap.dispatchCommand("dialog.select.submit")
@@ -62,7 +62,7 @@ test("proxy settings editor patches settings through manager API", async () => {
     const editor = app.setup.renderer.currentFocusedEditor
     if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
     editor.selectAll()
-    await app.mockInput.typeText("/tmp/cap-state")
+    await app.mockInput.typeText("/tmp/ainn-state")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
@@ -70,7 +70,7 @@ test("proxy settings editor patches settings through manager API", async () => {
       return app.calls.patchSettings.length === 1
     })
 
-    expect(app.calls.patchSettings).toEqual([{ state_dir: "/tmp/cap-state" }])
+    expect(app.calls.patchSettings).toEqual([{ state_dir: "/tmp/ainn-state" }])
   } finally {
     await app.cleanup()
   }

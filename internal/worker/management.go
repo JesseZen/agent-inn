@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
-	"github.com/jesse/codex-app-proxy/internal/upstream"
+	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func (w *Worker) serveManagement(rw http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,7 @@ import { DialogAlert } from "../ui/dialog-alert"
 import { useProject } from "../context/project"
 import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand, type LaunchMode } from "./launch"
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
-import { Global } from "@codex-proxy/core/global"
+import { Global } from "@agent-inn/core/global"
 import { useSDK } from "../context/sdk"
 
 export function DialogLaunch() {
@@ -23,7 +23,7 @@ export function DialogLaunch() {
     {
       title: "Hosted terminal",
       value: "hosted-terminal",
-      description: "Run Codex CLI inside a CAP-managed tmux session",
+      description: "Run Codex CLI inside a AINN-managed tmux session",
     },
   ]
 
@@ -90,7 +90,7 @@ function DialogExternalWindowLaunch() {
     await clipboard.write?.(rendered).catch(() => undefined)
     try {
       const launched = await launchProxySession({
-        executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
+        executable: import.meta.env?.AINN_EXECUTABLE || undefined,
         workerPort: worker.port,
         profile: worker.name,
         configDir: Global.Path.config,

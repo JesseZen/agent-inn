@@ -17,10 +17,10 @@ export function TestTuiContexts(
   return (
     <TuiPathsProvider
       value={{
-        cwd: props.cwd ?? props.directory ?? "/tmp/codex-proxy/packages/tui",
-        home: "/tmp/codex-proxy/home",
-        state: "/tmp/codex-proxy/state",
-        worktree: "/tmp/codex-proxy",
+        cwd: props.cwd ?? props.directory ?? "/tmp/ainn/packages/tui",
+        home: "/tmp/ainn/home",
+        state: "/tmp/ainn/state",
+        worktree: "/tmp/ainn",
         ...props.paths,
       }}
     >

@@ -3,7 +3,7 @@ package config
 import "os"
 
 const (
-	DefaultConfigDir = "~/.codex-proxy"
+	DefaultConfigDir = "~/.ainn"
 	ConfigFileName   = "config.yaml"
 )
 
@@ -71,10 +71,10 @@ func (c *Config) ApplyDefaults() {
 		c.Settings.Terminal.Opener = "default"
 	}
 	if c.Settings.Terminal.Tmux.SocketName == "" {
-		c.Settings.Terminal.Tmux.SocketName = "cap"
+		c.Settings.Terminal.Tmux.SocketName = "ainn"
 	}
 	if c.Settings.Terminal.Tmux.HostSession == "" {
-		c.Settings.Terminal.Tmux.HostSession = "cap-host"
+		c.Settings.Terminal.Tmux.HostSession = "ainn-host"
 	}
 	if c.Workers == nil {
 		c.Workers = map[string]WorkerConfig{}

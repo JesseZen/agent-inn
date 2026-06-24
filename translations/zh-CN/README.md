@@ -1,4 +1,4 @@
-# codex-app-proxy
+# agent-inn
 
 **[English](../../README.md)** | 中文
 
@@ -69,23 +69,23 @@ Codex App / CLI
 bun install
 
 # 构建 Go 二进制文件
-go build -o codex-proxy .
+go build -o ainn .
 
 ```
 
 ### 配置
 
 ```bash
-mkdir -p ${HOME}/.codex-proxy
+mkdir -p ${HOME}/.ainn
 
-cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
-# 编辑 ${HOME}/.codex-proxy/config.yaml 以设置 workers 和 upstreams
+cp config.example.yaml ${HOME}/.ainn/config.yaml
+# 编辑 ${HOME}/.ainn/config.yaml 以设置 workers 和 upstreams
 ```
 
 ### 运行
 
 ```bash
-./codex-proxy
+./ainn
 ```
 
 这条命令会启动 Manager → 启动所有 Worker → 启动 TUI。
@@ -94,11 +94,11 @@ cp config.example.yaml ${HOME}/.codex-proxy/config.yaml
 
 ```bash
 # 终端 1：仅后端（默认 manager-port 为 9090）
-./codex-proxy --config-dir ${HOME}/.codex-proxy --manager-port 9090 &
+./ainn --config-dir ${HOME}/.ainn --manager-port 9090 &
 
 # 终端 2：带热重载的 TUI
 bun install  # 从项目根目录安装依赖（首次需要）
-cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
+cd tui && AINN_URL=http://localhost:9090 bun run dev
 ```
 
 ## TUI 操作
@@ -132,16 +132,16 @@ cd tui && CODEX_PROXY_URL=http://localhost:9090 bun run dev
 ```yaml
 # 运行时设置
 settings:
-  state_dir: ~/.codex-proxy
-  log_dir: ~/.codex-proxy/logs
+  state_dir: ~/.ainn
+  log_dir: ~/.ainn/logs
   launch:
     default_mode: hosted-terminal
   terminal:
     host: tmux
     opener: default
     tmux:
-      socket_name: cap
-      host_session: cap-host
+      socket_name: ainn
+      host_session: ainn-host
 
 # Worker definitions
 workers:
@@ -182,7 +182,7 @@ upstreams:
 
 `role` 默认为 `"cli"`；`role: app` 的 Worker 不会出现在 `/launch` 选择器中。`log_level` 默认为 `"simple"`。
 
-`settings.state_dir` 用于存放 CAP 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
+`settings.state_dir` 用于存放 AINN 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
 
 ### API Key 解析
 
@@ -204,18 +204,18 @@ cd tui && bun run typecheck
 ## 子命令
 
 ```bash
-./codex-proxy version           # 显示版本
-./codex-proxy worker ...        # Worker 进程（由 Manager 自动启动，无需手动运行）
-./codex-proxy launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
+./ainn version           # 显示版本
+./ainn worker ...        # Worker 进程（由 Manager 自动启动，无需手动运行）
+./ainn launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
                                 # 启动连接到 Worker 的 Codex CLI
-                                # --mode hosted-terminal 会在 CAP 管理的 tmux host 内运行 Codex（需要 tmux）
+                                # --mode hosted-terminal 会在 AINN 管理的 tmux host 内运行 Codex（需要 tmux）
 ```
 
 ## 待办事项
 
 - [ ] `/status`：在 `/workers` 承接主要 Worker 管理流程后，重新加入独立 Worker 状态视图
-- [ ] hosted-terminal: 使用 `tmux` 或类似多路复用器作为外部终端主机；CAP 处理 `create` / `list` / `attach` / `switch`
-- [ ] embedded-terminal: 在 CAP 内部内置 PTY 会话，支持直接会话切换
+- [ ] hosted-terminal: 使用 `tmux` 或类似多路复用器作为外部终端主机；AINN 处理 `create` / `list` / `attach` / `switch`
+- [ ] embedded-terminal: 在 AINN 内部内置 PTY 会话，支持直接会话切换
 
 计划顺序：先实现 `hosted-terminal`，然后是 `embedded-terminal`。
 

@@ -11,7 +11,7 @@ version:
 
 # ── Build ───────────────────────────────────────────────────────────
 build:
-	go build -ldflags "-X github.com/jesse/codex-app-proxy/cmd.version=$(VERSION)" -o codex-proxy .
+	go build -ldflags "-X github.com/jesse/agent-inn/cmd.version=$(VERSION)" -o ainn .
 
 # ── Test ────────────────────────────────────────────────────────────
 test:
@@ -19,4 +19,4 @@ test:
 
 # ── Clean ───────────────────────────────────────────────────────────
 clean:
-	rm -f codex-proxy
+	rm -f ainn

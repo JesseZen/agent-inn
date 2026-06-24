@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/manager"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/manager"
 )
 
 const (
@@ -71,8 +71,8 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	model := flags.String("model", "", "model override")
 	mode := flags.String("mode", modeExternalWindow, "launch mode: external-window or hosted-terminal")
 	noAttach := flags.Bool("no-attach", false, "hosted-terminal: set up window without attaching (for TUI use)")
-	sessionID := flags.String("session-id", "", "hosted-terminal: existing CAP session id")
-	sessionLabel := flags.String("session-label", "", "hosted-terminal: session label for new CAP sessions")
+	sessionID := flags.String("session-id", "", "hosted-terminal: existing AINN session id")
+	sessionLabel := flags.String("session-label", "", "hosted-terminal: session label for new AINN sessions")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -133,7 +133,7 @@ func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) 
 	return err
 }
 
-// runHostedTerminalLaunch runs the Codex CLI inside a CAP-owned tmux host.
+// runHostedTerminalLaunch runs the Codex CLI inside a AINN-owned tmux host.
 // It ensures the host session exists, creates or switches to a window for the
 // session, and attaches to the host. The sessionID determines the tmux window
 // name so re-launching the same session switches to the existing window.

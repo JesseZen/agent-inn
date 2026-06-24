@@ -6,16 +6,16 @@ import { Context, Effect, Layer } from "effect"
 import { Flag } from "./flag/flag"
 import { Flock } from "./util/flock"
 
-const app = "codex-proxy"
+const app = "ainn"
 
 export const Path = {
   get home() {
-    return process.env.CODEX_PROXY_TEST_HOME ?? os.homedir()
+    return process.env.AINN_TEST_HOME ?? os.homedir()
   },
   data: path.join(xdgData ?? path.join(os.homedir(), ".local", "share"), app),
   cache: path.join(xdgCache ?? path.join(os.homedir(), ".cache"), app),
   get config() {
-    return Flag.CODEX_PROXY_CONFIG_DIR ?? path.join(this.home, ".codex-proxy")
+    return Flag.AINN_CONFIG_DIR ?? path.join(this.home, ".ainn")
   },
   state: path.join(xdgState ?? path.join(os.homedir(), ".local", "state"), app),
   tmp: path.join(os.tmpdir(), app),
@@ -54,7 +54,7 @@ export interface Interface {
   readonly repos: string
 }
 
-export class Service extends Context.Service<Service, Interface>()("@codex-proxy/Global") {}
+export class Service extends Context.Service<Service, Interface>()("@agent-inn/Global") {}
 
 export function make(input: Partial<Interface> = {}): Interface {
   return {

@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-import type { TuiPlugin, TuiPluginApi, TuiRouteCurrent } from "@codex-proxy/plugin/tui"
-import type { SnapshotFileDiff, VcsFileDiff } from "@codex-proxy/sdk/v2"
+import type { TuiPlugin, TuiPluginApi, TuiRouteCurrent } from "@agent-inn/plugin/tui"
+import type { SnapshotFileDiff, VcsFileDiff } from "@agent-inn/sdk/v2"
 import {
   TextAttributes,
   type BorderSides,
@@ -39,7 +39,7 @@ import {
 const ROUTE = "diff"
 const MIN_SPLIT_WIDTH = 100
 const FILE_TREE_WIDTH = 32
-const PLAIN_TEXT_FILETYPE = "codex-proxy-plain-text"
+const PLAIN_TEXT_FILETYPE = "ainn-plain-text"
 const WORKING_TREE_DIFF_CONTEXT_LINES = 12
 const KV_SHOW_FILE_TREE = "diff_viewer_show_file_tree"
 const KV_SINGLE_PATCH = "diff_viewer_single_patch"

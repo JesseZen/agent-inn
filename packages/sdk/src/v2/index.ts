@@ -1,18 +1,18 @@
 export * from "./client.js"
 export * from "./server.js"
 
-import { createCodexProxyClient } from "./client.js"
-import { createCodexProxyServer } from "./server.js"
+import { createAinnClient } from "./client.js"
+import { createAinnServer } from "./server.js"
 import type { ServerOptions } from "./server.js"
 
 export * as data from "./data.js"
 
-export async function createCodexProxy(options?: ServerOptions) {
-  const server = await createCodexProxyServer({
+export async function createAinn(options?: ServerOptions) {
+  const server = await createAinnServer({
     ...options,
   })
 
-  const client = createCodexProxyClient({
+  const client = createAinnClient({
     baseUrl: server.url,
   })
 

@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@codex-proxy/sdk/v2"
-import type { TuiPlugin, TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { AssistantMessage } from "@agent-inn/sdk/v2"
+import type { TuiPlugin, TuiPluginApi } from "@agent-inn/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo } from "solid-js"
 

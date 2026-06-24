@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/config"
-	"github.com/jesse/codex-app-proxy/internal/constants"
-	"github.com/jesse/codex-app-proxy/internal/manager"
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/manager"
 )
 
 type rootManager interface {
@@ -112,7 +112,7 @@ var rootLockerFactory = func() rootLocker {
 	return flockLocker{path: defaultLockPath()}
 }
 
-// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/cap.lock。
+// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/ainn.lock。
 func setRootLockerFactoryForTest(locker rootLocker) func() {
 	previous := rootLockerFactory
 	rootLockerFactory = func() rootLocker { return locker }
@@ -213,19 +213,19 @@ func (p *tuiProgram) WorkingDir() string {
 
 func (p *tuiProgram) Env() map[string]string {
 	env := map[string]string{
-		"CODEX_PROXY_URL": "http://" + p.addr,
+		"AINN_URL": "http://" + p.addr,
 	}
 	if p.configDir != "" {
-		env["CODEX_PROXY_CONFIG_DIR"] = p.configDir
+		env["AINN_CONFIG_DIR"] = p.configDir
 	}
 	if exe, err := os.Executable(); err == nil {
-		env["CODEX_PROXY_EXECUTABLE"] = exe
+		env["AINN_EXECUTABLE"] = exe
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		env["CODEX_PROXY_PROJECT_DIR"] = cwd
+		env["AINN_PROJECT_DIR"] = cwd
 	}
 	if p.startupStatus != "" {
-		env["CODEX_PROXY_STARTUP_STATUS"] = p.startupStatus
+		env["AINN_STARTUP_STATUS"] = p.startupStatus
 	}
 	return env
 }
@@ -251,7 +251,7 @@ func setRootLogWriterForTest(writer io.Writer) func() {
 }
 
 func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
-	flags := flag.NewFlagSet("codex-proxy", flag.ContinueOnError)
+	flags := flag.NewFlagSet("ainn", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configDir := flags.String("config-dir", expandHome(config.DefaultConfigDir), "config directory")
 	managerPort := flags.Int("manager-port", 9090, "manager API port")

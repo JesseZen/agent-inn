@@ -1,4 +1,4 @@
-import type { TuiPlugin, TuiPluginApi, TuiPluginStatus } from "@codex-proxy/plugin/tui"
+import type { TuiPlugin, TuiPluginApi, TuiPluginStatus } from "@agent-inn/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { useTerminalDimensions } from "@opentui/solid"
 import { fileURLToPath } from "url"

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jesse/codex-app-proxy/internal/module"
-	appruntime "github.com/jesse/codex-app-proxy/internal/runtime"
+	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 func TestRunWorkerReadsRuntimeConfigFromFD(t *testing.T) {
@@ -128,7 +128,7 @@ func TestBuildConfigPatchFromRuntimeConfig(t *testing.T) {
 				Enabled: true,
 				Params: map[string]any{
 					"config_path": "/tmp/codex-config.toml",
-					"state_dir":   "/tmp/codex-proxy",
+					"state_dir":   "/tmp/ainn",
 				},
 			},
 		},

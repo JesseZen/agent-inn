@@ -1,4 +1,4 @@
-import type { TuiPlugin, TuiPluginApi } from "@codex-proxy/plugin/tui"
+import type { TuiPlugin, TuiPluginApi } from "@agent-inn/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
 import { Tips } from "./tips-view"

@@ -1,5 +1,5 @@
 {
-  "name": "@codex-proxy/sdk",
+  "name": "@agent-inn/sdk",
   "private": true,
   "type": "module",
   "exports": {
