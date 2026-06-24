@@ -19,7 +19,7 @@ settings:
     default_mode: hosted-terminal
   terminal:
     host: tmux
-    opener: terminal_app
+    opener: default
     tmux:
       socket_name: cap-test
       host_session: cap-test-host
@@ -50,7 +50,7 @@ upstreams:
 	if cfg.Settings.Launch.DefaultMode != "hosted-terminal" {
 		t.Fatalf("expected launch default mode to load, got %#v", cfg.Settings.Launch)
 	}
-	if cfg.Settings.Terminal.Host != "tmux" || cfg.Settings.Terminal.Opener != "terminal_app" {
+	if cfg.Settings.Terminal.Host != "tmux" || cfg.Settings.Terminal.Opener != "default" {
 		t.Fatalf("expected terminal settings to load, got %#v", cfg.Settings.Terminal)
 	}
 	if cfg.Settings.Terminal.Tmux.SocketName != "cap-test" || cfg.Settings.Terminal.Tmux.HostSession != "cap-test-host" {
@@ -95,7 +95,7 @@ upstreams:
 		},
 		Terminal: TerminalSettings{
 			Host:   "tmux",
-			Opener: "terminal_app",
+			Opener: "default",
 			Tmux: TmuxSettings{
 				SocketName:  "cap",
 				HostSession: "cap-host",

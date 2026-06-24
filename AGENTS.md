@@ -31,15 +31,16 @@
 15. 分支名 ≤3 个词，用连字符分隔，不加 type 前缀（如 feat/、fix/）。示例：session-recovery、fix-scroll-state。
 16. Commit 和 PR 标题用 conventional commit 格式：type(scope): summary。type 限：feat、fix、docs、chore、refactor、test。scope 可选。
 17. 默认分支是 main。对比差异时用 origin/main。
+18. 禁止用 force 方式提交被 `.gitignore` 忽略的内容，如 `git add -f`；需要入库忽略内容时先寻求同意，再改 ignore 规则。
 
 ## 变更规模
 
-18. 单次变更非机械改动不超过 800 行，复杂逻辑改动不超过 500 行，超出要拆成可审查阶段。
+19. 单次变更非机械改动不超过 800 行，复杂逻辑改动不超过 500 行，超出要拆成可审查阶段。
 
 ## 版本
 
-19. 版本号由 git tag 驱动，构建时通过 `git describe --tags` 注入。切换 channel：`gh workflow run bump.yml -f channel=beta`
+20. 版本号由 git tag 驱动，构建时通过 `git describe --tags` 注入。切换 channel：`gh workflow run bump.yml -f channel=beta`
 
 ## 调试
 
-20. Worker 日志默认在 `~/.codex-proxy/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置
+21. Worker 日志默认在 `~/.codex-proxy/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置

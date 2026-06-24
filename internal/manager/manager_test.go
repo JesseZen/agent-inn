@@ -1237,6 +1237,9 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 	if loaded.Settings.Terminal.Tmux.SocketName != "custom-socket" || loaded.Settings.Terminal.Tmux.HostSession != "custom-host" {
 		t.Fatalf("settings patch should preserve omitted terminal settings: %#v", loaded.Settings.Terminal.Tmux)
 	}
+	if loaded.Settings.Terminal.Opener != "default" {
+		t.Fatalf("settings patch should preserve omitted terminal opener: %#v", loaded.Settings.Terminal)
+	}
 }
 
 func TestManagerUpstreamUpdatePersistsDesiredStateAndMarksFailedApplyOutOfSync(t *testing.T) {

@@ -6,6 +6,7 @@ import { useToast } from "../ui/toast"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { createMemo, createSignal, onMount } from "solid-js"
 import type { ProxySettings } from "./backend"
+import { DialogAlert } from "../ui/dialog-alert"
 
 type SettingsField = {
   key: string
@@ -36,6 +37,13 @@ const FIELDS: SettingsField[] = [
     category: "Launch",
     value: (settings) => settings.launch.default_mode,
     patch: (value) => ({ launch: { default_mode: value } }),
+  },
+  {
+    key: "terminal.opener",
+    title: "Terminal Opener",
+    category: "Terminal",
+    value: (settings) => settings.terminal.opener,
+    patch: (value) => ({ terminal: { opener: value } } as Partial<ProxySettings>),
   },
   {
     key: "terminal.tmux.socket_name",
@@ -81,6 +89,29 @@ export function DialogSettings() {
         category: field.category,
         onSelect: async () => {
           if (!current) return
+          if (field.key === "terminal.opener") {
+            const presets = ["default", "terminal_app", "iterm2", "wezterm", "kitty"]
+            const result = await DialogPrompt.show(dialog, field.title, {
+              value: field.value(current),
+              selectAll: true,
+              placeholder: presets.join(", "),
+            })
+            if (result === null) return
+            if (!presets.includes(result)) {
+              await DialogAlert.show(dialog, "Invalid terminal opener", `Choose one of: ${presets.join(", ")}`)
+              return
+            }
+            try {
+              const response = await sdk.client.patchSettings(field.patch(result))
+              setSettings(response.settings)
+              await sync.bootstrap({ fatal: false })
+              toast.show({ message: `Saved ${field.title}`, variant: "success" })
+            } catch (err) {
+              toast.error(err)
+            }
+            dialog.clear()
+            return
+          }
           const result = await DialogPrompt.show(dialog, field.title, {
             value: field.value(current),
             selectAll: true,

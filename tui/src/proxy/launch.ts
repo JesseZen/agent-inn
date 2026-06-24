@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import { platform } from "node:os"
+import { createTerminalOpenCommand } from "./terminal-opener"
 
 export type LaunchMode = "external-window" | "hosted-terminal"
 
@@ -14,10 +15,10 @@ export type ProxyLaunchOptions = {
   mode?: LaunchMode
   sessionID?: string
   sessionLabel?: string
+  opener?: string
+  tmuxSocketName?: string
+  tmuxHostSession?: string
 }
-
-const tmuxSocket = "cap"
-const tmuxHostSession = "cap-host"
 
 function shellQuote(value: string) {
   if (value === "") return "''"
@@ -65,17 +66,6 @@ function runProcess(cmd: string, args: string[]): Promise<{ code: number; stdout
   })
 }
 
-function runOsascript(script: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("osascript", ["-e", script], { stdio: "ignore" })
-    child.on("error", reject)
-    child.on("exit", (code) => {
-      if (code === 0) return resolve()
-      reject(new Error(`osascript exited with code ${code}`))
-    })
-  })
-}
-
 export async function launchProxySession(opts: ProxyLaunchOptions) {
   if (opts.mode === "hosted-terminal") {
     return launchHostedTerminal(opts)
@@ -85,6 +75,7 @@ export async function launchProxySession(opts: ProxyLaunchOptions) {
 
 async function launchExternalWindow(opts: ProxyLaunchOptions) {
   const executable = opts.executable || "codex-proxy"
+  const terminalCommand = renderProxyLaunchCommand(createProxyLaunchCommand(opts))
   const args = ["launch", "--worker", String(opts.workerPort)]
   if (opts.profile) {
     args.push("--profile", opts.profile)
@@ -101,14 +92,12 @@ async function launchExternalWindow(opts: ProxyLaunchOptions) {
   if (opts.model) {
     args.push("--model", opts.model)
   }
-  if (platform() === "darwin") {
-    const command = renderProxyLaunchCommand([executable, ...args])
-    const escaped = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-    await runOsascript(`tell application "Terminal" to do script "${escaped}"`)
-    return true
-  }
-
-  const child = spawn(executable, args, {
+  const openCommand = createTerminalOpenCommand({
+    platform: platform(),
+    opener: opts.opener || "default",
+    command: terminalCommand,
+  })
+  const child = spawn(openCommand[0], openCommand.slice(1), {
     detached: true,
     stdio: "ignore",
   })
@@ -122,6 +111,8 @@ async function launchExternalWindow(opts: ProxyLaunchOptions) {
 // launches just switch the tmux window and focus the existing terminal.
 async function launchHostedTerminal(opts: ProxyLaunchOptions) {
   const executable = opts.executable || "codex-proxy"
+  const tmuxSocket = opts.tmuxSocketName || "cap"
+  const tmuxHostSession = opts.tmuxHostSession || "cap-host"
 
   // Phase 1: set up tmux host + window without attaching.
   const setupArgs = ["launch", "--worker", String(opts.workerPort), "--mode", "hosted-terminal", "--no-attach"]
@@ -151,21 +142,13 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
     throw new Error(setup.stderr || `codex-proxy launch exited with code ${setup.code}`)
   }
 
-  // Phase 2: check whether a client is already attached to the tmux host.
-  const clients = await runProcess("tmux", ["-L", tmuxSocket, "list-clients", "-t", tmuxHostSession])
-  const hasClients = clients.code === 0 && clients.stdout.trim().length > 0
-
-  if (platform() === "darwin") {
-    if (hasClients) {
-      await runOsascript('tell application "Terminal" to activate')
-    } else {
-      await runOsascript(`tell application "Terminal" to do script "tmux -L ${tmuxSocket} attach-session -t ${tmuxHostSession}"`)
-    }
-    return true
-  }
-
-  // Non-macOS: attach in a detached process.
-  const child = spawn("tmux", ["-L", tmuxSocket, "attach-session", "-t", tmuxHostSession], {
+  const attachCommand = `tmux -L ${tmuxSocket} attach-session -t ${tmuxHostSession}`
+  const openCommand = createTerminalOpenCommand({
+    platform: platform(),
+    opener: opts.opener || "default",
+    command: attachCommand,
+  })
+  const child = spawn(openCommand[0], openCommand.slice(1), {
     detached: true,
     stdio: "ignore",
   })

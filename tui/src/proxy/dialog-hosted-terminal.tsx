@@ -99,6 +99,7 @@ export function DialogHostedTerminal() {
             return
           }
           try {
+          const settings = await sdk.client.getSettings()
           await launchProxySession({
             executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
             workerPort: worker.port,
@@ -107,6 +108,9 @@ export function DialogHostedTerminal() {
             workspace: workspace || undefined,
             mode: "hosted-terminal",
             sessionLabel,
+            opener: settings.settings.terminal.opener,
+            tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+            tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             await refreshSessions()
             dialog.clear()
@@ -148,6 +152,7 @@ export function DialogHostedTerminal() {
           void DialogAlert.show(dialog, "Open hosted session failed", `Session ${session.session_label} is stale. Delete it or create a new one.`)
           return
         }
+        void sdk.client.getSettings().then((settings) =>
         void launchProxySession({
           executable: import.meta.env?.CODEX_PROXY_EXECUTABLE || undefined,
           workerPort: session.worker_port,
@@ -155,9 +160,12 @@ export function DialogHostedTerminal() {
           configDir: Global.Path.config,
           mode: "hosted-terminal",
           sessionID: session.session_id,
+          opener: settings.settings.terminal.opener,
+          tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+          tmuxHostSession: settings.settings.terminal.tmux.host_session,
         }).catch(async (err) => {
           await DialogAlert.show(dialog, "Open hosted session failed", String(err instanceof Error ? err.message : err))
-        })
+        }))
       }}
     />
   )
