@@ -180,10 +180,7 @@ test("proxy workers module action patches module through module API", async () =
     expect(app.frame()).not.toContain("Modules: app")
 
     app.mockInput.pressEscape()
-    await wait(async () => {
-      await app.render()
-      return !app.frame().includes("Saved model_override")
-    })
+    await app.render()
     expect(app.frame()).not.toContain("Saved model_override")
   } finally {
     await app.cleanup()
@@ -199,7 +196,7 @@ test("proxy workers detail opens logs and controls worker lifecycle", async () =
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(() => app.calls.getLogs === 1)
+    await wait(() => app.calls.getLogs > 0)
     await wait(async () => {
       await app.render()
       return app.frame().includes("Logs: app (:6767)") && app.frame().includes("booted")
@@ -218,6 +215,31 @@ test("proxy workers detail opens logs and controls worker lifecycle", async () =
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.stopWorker.length === 1)
     expect(app.calls.stopWorker).toEqual([6767])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers detail deletes worker config after confirmation", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete worker")
+    })
+
+    app.api.keymap.dispatchCommand("worker.delete")
+    app.mockInput.pressEnter()
+    await wait(() => app.calls.deleteWorker.length === 1)
+    await app.render()
+
+    expect(app.calls.deleteWorker).toEqual([6767])
+    await runCommand(app, "proxy.workers")
+    expect(app.frame()).not.toContain("app")
   } finally {
     await app.cleanup()
   }

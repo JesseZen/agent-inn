@@ -9,6 +9,7 @@ import { useToast } from "../ui/toast"
 import { DialogUpstreamPicker } from "./dialog-upstream-picker"
 import { DialogLogs } from "./dialog-logs"
 import { DialogModulePicker } from "./dialog-module"
+import { DialogConfirm } from "../ui/dialog-confirm"
 
 const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
@@ -112,9 +113,34 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     },
   }
 
+  const deleteAction: DialogSelectOption<string> = {
+    title: "Delete Worker",
+    value: "delete",
+    description: `:${props.worker.port}`,
+    onSelect: async () => {
+      const confirmed = await DialogConfirm.show(
+        dialog,
+        "Delete worker",
+        `Delete ${props.worker.name}? This will remove the worker config and stop the process.`,
+      )
+      if (!confirmed) {
+        dialog.clear()
+        return
+      }
+      try {
+        await sdk.client.deleteWorker(props.worker.port)
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Deleted ${props.worker.name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
+    },
+  }
+
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [logLevelAction, switchAction, modulesAction, logsAction, restartAction, stopAction]
+      ? [logLevelAction, switchAction, modulesAction, logsAction, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 

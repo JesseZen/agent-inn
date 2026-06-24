@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { resolveSlashCommand } from "../src/keymap"
 import { mountProxyApp, openUpstreamEditor, openUpstreamManager, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 
 test("proxy workers switch upstream action updates worker provider and reflects the change", async () => {
@@ -31,6 +32,8 @@ test("proxy upstream registers an upstream command", async () => {
     await openUpstreamManager(app)
     expect(app.frame()).toContain("Manage Upstreams")
     expect(app.frame()).toContain("Create New Upstream")
+    expect(resolveSlashCommand(app.api.keymap, "/upstreams")).toBe("proxy.upstreams")
+    expect(resolveSlashCommand(app.api.keymap, "/upstream")).toBeUndefined()
   } finally {
     await app.cleanup()
   }
@@ -120,7 +123,9 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     expect(frame).toContain("API Format")
     expect(frame).not.toContain("chat_completions")
 
-    app.api.keymap.dispatchCommand("dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
@@ -132,6 +137,32 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     expect(app.calls.patchUpstream).toEqual([
       { name: "openai", body: { api_format: "responses" } },
     ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream editor deletes upstream after confirmation", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await runCommand(app, "dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete upstream")
+    })
+
+    app.mockInput.pressEnter()
+    await wait(() => app.calls.deleteUpstream.length === 1)
+    await app.render()
+
+    expect(app.calls.deleteUpstream).toEqual(["openai"])
+    await openUpstreamManager(app)
+    expect(app.frame()).not.toContain("openai")
   } finally {
     await app.cleanup()
   }

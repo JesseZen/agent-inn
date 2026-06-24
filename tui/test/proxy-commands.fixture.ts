@@ -113,6 +113,8 @@ function createProxyHarness() {
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     patchSettings: [] as Array<Partial<ProxySettings>>,
+    deleteWorker: [] as number[],
+    deleteUpstream: [] as string[],
     restartWorker: [] as number[],
     stopWorker: [] as number[],
     saveConfig: 0,
@@ -240,6 +242,12 @@ function createProxyHarness() {
       return json({ worker: "app", status: "stopped" })
     }
 
+    if (url.pathname === "/api/workers/6767/config" && method === "DELETE") {
+      calls.deleteWorker.push(6767)
+      workers.delete(6767)
+      return json({ worker: "app" })
+    }
+
     if (url.pathname.startsWith("/api/upstreams/") && method === "PATCH") {
       const name = url.pathname.slice("/api/upstreams/".length)
       const body = JSON.parse(String(init?.body ?? "null")) as { base_url?: string; api_key?: string; api_format?: string }
@@ -258,6 +266,13 @@ function createProxyHarness() {
         })
       }
       return json(providers.get(name)!)
+    }
+
+    if (url.pathname.startsWith("/api/upstreams/") && method === "DELETE") {
+      const name = url.pathname.slice("/api/upstreams/".length)
+      calls.deleteUpstream.push(name)
+      providers.delete(name)
+      return json({ upstream: name })
     }
 
     if (url.pathname === "/api/config" && method === "PUT") {
@@ -390,7 +405,7 @@ export async function openWorkerDetail(app: ProxyApp) {
 }
 
 export async function openUpstreamManager(app: ProxyApp) {
-  await runCommand(app, "proxy.upstream")
+  await runCommand(app, "proxy.upstreams")
 }
 
 export async function openUpstreamEditor(app: ProxyApp, name: string) {

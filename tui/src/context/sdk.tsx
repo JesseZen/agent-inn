@@ -94,6 +94,11 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             method: "DELETE",
           })
         },
+        async deleteWorker(port: number) {
+          return request<{ worker: string }>(`/api/workers/${port}/config`, {
+            method: "DELETE",
+          })
+        },
         async toggleModule(port: number, moduleName: string) {
           return request<{ worker: string; module: string; enabled: boolean }>(`/api/workers/${port}/modules/${moduleName}/toggle`, {
             method: "POST",
@@ -132,6 +137,11 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(profile),
+          })
+        },
+        async deleteUpstream(name: string) {
+          return request<{ upstream: string }>(`/api/upstreams/${name}`, {
+            method: "DELETE",
           })
         },
         async getConfig() {

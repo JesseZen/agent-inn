@@ -903,6 +903,90 @@ func TestManagerWorkerLifecycleStateTransitions(t *testing.T) {
 	assertWorkerStatus(t, m, "stopped")
 }
 
+func TestManagerAPIDeleteWorkerConfigStopsAndRemovesWorker(t *testing.T) {
+	process := &recordingManagedProcess{}
+	m := New(Config{
+		Config: config.Config{
+			Workers: map[string]config.WorkerConfig{
+				"codex-app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: fixedStarter{process: process},
+	})
+	if err := m.StartWorker("codex-app"); err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/workers/6767/config", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected delete status %d: %s", res.Code, res.Body.String())
+	}
+	if process.stopCount != 1 {
+		t.Fatalf("expected worker process to stop once, got %d", process.stopCount)
+	}
+	if _, ok := m.workerConfig("codex-app"); ok {
+		t.Fatal("expected worker config to be removed")
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/6767", nil))
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected removed worker lookup to return 404, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestManagerAPIDeleteUpstreamRejectsReferencedProvider(t *testing.T) {
+	m := New(Config{
+		Config: config.Config{
+			Workers: map[string]config.WorkerConfig{
+				"codex-app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/upstreams/openai", nil))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected upstream conflict, got %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "used by worker") {
+		t.Fatalf("expected conflict response to name worker usage, got %s", res.Body.String())
+	}
+}
+
+func TestManagerAPIDeleteUpstreamRemovesUnreferencedProvider(t *testing.T) {
+	m := New(Config{
+		Config: config.Config{
+			Workers: map[string]config.WorkerConfig{
+				"codex-app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai":    {BaseURL: "https://api.openai.com/v1"},
+				"anthropic": {BaseURL: "https://api.anthropic.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/upstreams/anthropic", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected delete status %d: %s", res.Code, res.Body.String())
+	}
+	if _, ok := m.upstreamProfileSnapshot()["anthropic"]; ok {
+		t.Fatal("expected upstream profile to be removed")
+	}
+	if _, ok := m.upstreamProfileSnapshot()["openai"]; !ok {
+		t.Fatal("expected referenced upstream to remain")
+	}
+}
+
 func TestManagerReportsForcedStopState(t *testing.T) {
 	starter := &recordingStarter{forcedStop: true}
 	m := New(Config{
@@ -1633,6 +1717,23 @@ func (fakeStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 type fakeProcess struct{}
 
 func (fakeProcess) Stop() error { return nil }
+
+type fixedStarter struct {
+	process ManagedProcess
+}
+
+func (s fixedStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
+	return s.process, nil
+}
+
+type recordingManagedProcess struct {
+	stopCount int
+}
+
+func (p *recordingManagedProcess) Stop() error {
+	p.stopCount++
+	return nil
+}
 
 type recordingWorkerClient struct {
 	toggledPort      int

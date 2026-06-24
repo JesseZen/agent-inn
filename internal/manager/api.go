@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -188,6 +189,27 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName, "status": string(m.workerStatus(workerName))})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "config" && r.Method == http.MethodDelete {
+		port, err := strconv.Atoi(parts[0])
+		if err != nil {
+			http.NotFound(rw, r)
+			return
+		}
+		workerName, _, ok := m.workerByPort(port)
+		if !ok {
+			http.NotFound(rw, r)
+			return
+		}
+		if err := m.StopWorker(workerName); err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		m.updateConfig(func(cfgRoot *config.Config) {
+			delete(cfgRoot.Workers, workerName)
+		})
+		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName})
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodPatch {
@@ -495,12 +517,29 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
+	name := strings.TrimPrefix(r.URL.Path, "/api/upstreams/")
+	if name == "" || strings.Contains(name, "/") {
 		http.NotFound(rw, r)
 		return
 	}
-	name := strings.TrimPrefix(r.URL.Path, "/api/upstreams/")
-	if name == "" || strings.Contains(name, "/") {
+	if r.Method == http.MethodDelete {
+		for workerName, worker := range m.workerConfigSnapshot() {
+			if worker.Upstream == name {
+				writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("upstream %q is used by worker %q", name, workerName)})
+				return
+			}
+		}
+		if _, ok := m.upstreamProfileSnapshot()[name]; !ok {
+			http.NotFound(rw, r)
+			return
+		}
+		m.updateConfig(func(cfgRoot *config.Config) {
+			delete(cfgRoot.Upstreams, name)
+		})
+		writeJSON(rw, http.StatusOK, map[string]any{"upstream": name})
+		return
+	}
+	if r.Method != http.MethodPatch {
 		http.NotFound(rw, r)
 		return
 	}

@@ -107,8 +107,28 @@ function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: "create
       },
     })),
   )
+  const deleteAction: DialogSelectOption<string> = {
+    title: "Delete Upstream",
+    value: "delete",
+    description: props.name,
+    onSelect: async () => {
+      const confirmed = await DialogConfirm.show(dialog, "Delete upstream", `Delete ${props.name}? This will remove the provider config.`)
+      if (!confirmed) {
+        dialog.clear()
+        return
+      }
+      try {
+        await sdk.client.deleteUpstream(props.name)
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Deleted upstream ${props.name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
+    },
+  }
 
-  return <DialogSelect title={`Edit Upstream: ${props.name}`} options={options()} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
+  return <DialogSelect title={`Edit Upstream: ${props.name}`} options={[...options(), deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
 }
 
 function describe(field: Field, draft: Draft) {

@@ -11,10 +11,10 @@ export function registerProxyCommands(api: TuiPluginApi) {
     commands: [
       {
         namespace: "palette",
-        name: "proxy.upstream",
+        name: "proxy.upstreams",
         title: "Manage upstreams",
         category: "Proxy",
-        slashName: "upstream",
+        slashName: "upstreams",
         run() {
           api.ui.dialog.replace(() => <DialogUpstream />)
         },
