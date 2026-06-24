@@ -9,6 +9,7 @@ import { useProject } from "../context/project"
 import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand, type LaunchMode } from "./launch"
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 import { Global } from "@codex-proxy/core/global"
+import { useSDK } from "../context/sdk"
 
 export function DialogLaunch() {
   const dialog = useDialog()
@@ -45,6 +46,7 @@ export function DialogLaunch() {
 
 function DialogExternalWindowLaunch() {
   const sync = useSync()
+  const sdk = useSDK()
   const project = useProject()
   const dialog = useDialog()
   const clipboard = useClipboard()
@@ -77,6 +79,7 @@ function DialogExternalWindowLaunch() {
     if (workspace === null) return
 
     dialog.clear()
+    const settings = await sdk.client.getSettings()
     const command = createProxyLaunchCommand({
       workerPort: worker.port,
       profile: worker.name,
@@ -92,6 +95,7 @@ function DialogExternalWindowLaunch() {
         profile: worker.name,
         configDir: Global.Path.config,
         workspace: workspace || undefined,
+        opener: settings.settings.terminal.opener,
       })
       if (!launched) {
         await DialogAlert.show(dialog, "Launch Command", rendered)

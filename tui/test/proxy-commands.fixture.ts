@@ -100,7 +100,7 @@ function createProxyHarness() {
       launch: { default_mode: "hosted-terminal" },
       terminal: {
         host: "tmux",
-        opener: "terminal_app",
+        opener: "default",
         tmux: {
           socket_name: "cap",
           host_session: "cap-host",

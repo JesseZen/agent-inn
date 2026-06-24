@@ -68,7 +68,7 @@ func (c *Config) ApplyDefaults() {
 		c.Settings.Terminal.Host = "tmux"
 	}
 	if c.Settings.Terminal.Opener == "" {
-		c.Settings.Terminal.Opener = "terminal_app"
+		c.Settings.Terminal.Opener = "default"
 	}
 	if c.Settings.Terminal.Tmux.SocketName == "" {
 		c.Settings.Terminal.Tmux.SocketName = "cap"
