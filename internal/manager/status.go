@@ -25,6 +25,7 @@ const (
 	EventWorkerUpdated       EventType = "worker.updated"
 	EventModuleUpdated       EventType = "module.updated"
 	EventUpstreamUpdated     EventType = "upstream.updated"
+	EventUpstreamProbed      EventType = "upstream.probed"
 	EventConfigStatusChanged EventType = "config.status.changed"
 	EventStreamRawRedacted   EventType = "stream.raw_redacted"
 )

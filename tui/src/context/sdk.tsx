@@ -11,6 +11,7 @@ import type {
   ProxySettings,
   ProxySettingsResponse,
   RedactedUpstream,
+  UpstreamProbeResult,
   WorkerDetail,
   WorkerSummary,
 } from "../proxy/backend"
@@ -19,7 +20,7 @@ export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
 }
 
-export type { ProxyConfigStatus, ProxySettings, ProxySettingsResponse, RedactedUpstream, WorkerDetail, WorkerSummary }
+export type { ProxyConfigStatus, ProxySettings, ProxySettingsResponse, RedactedUpstream, UpstreamProbeResult, WorkerDetail, WorkerSummary }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
@@ -143,6 +144,16 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           return request<{ upstream: string }>(`/api/upstreams/${name}`, {
             method: "DELETE",
           })
+        },
+        async testUpstream(name: string) {
+          return request<UpstreamProbeResult>(`/api/upstreams/${name}/test`, {
+            method: "POST",
+          })
+        },
+        async testAllUpstreams() {
+          return request<{ results: UpstreamProbeResult[] }>(`/api/upstreams/test`, {
+            method: "POST",
+          }).then((result) => result.results ?? [])
         },
         async getConfig() {
           return request<ProxyConfigResponse>("/api/config")

@@ -20,7 +20,7 @@ import type {
   SnapshotFileDiff,
   ConsoleState,
 } from "@agent-inn/sdk/v2"
-import type { ProxyConfigStatus, RedactedUpstream, WorkerSummary } from "./sdk"
+import type { ProxyConfigStatus, RedactedUpstream, UpstreamProbeResult, WorkerSummary } from "./sdk"
 import { produce, reconcile } from "solid-js/store"
 import { batch } from "solid-js"
 
@@ -70,6 +70,7 @@ export type SyncStore = {
   vcs: VcsInfo | undefined
   workers: WorkerSummary[]
   upstreams: RedactedUpstream[]
+  upstreamProbes: Record<string, UpstreamProbeResult>
   config_status: ProxyConfigStatus | undefined
   error?: string
 }

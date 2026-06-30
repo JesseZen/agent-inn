@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -850,6 +851,49 @@ func (m *Manager) StartHealthMonitor(interval time.Duration) func() {
 	return func() { close(done) }
 }
 
+const defaultUpstreamProbeInterval = 1 * time.Minute
+
+// StartUpstreamProber 启动后台 ticker 定期 probe 所有 upstream。
+// interval <= 0 时使用 defaultUpstreamProbeInterval。启动时立即跑一次。
+func (m *Manager) StartUpstreamProber(interval time.Duration) func() {
+	if interval <= 0 {
+		interval = defaultUpstreamProbeInterval
+	}
+	done := make(chan struct{})
+	go func() {
+		m.probeAllUpstreams(context.Background())
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.probeAllUpstreams(context.Background())
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+func (m *Manager) probeAllUpstreams(ctx context.Context) {
+	profiles := m.upstreamProfileSnapshot()
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var wg sync.WaitGroup
+	for _, name := range names {
+		wg.Add(1)
+		go func(n string) {
+			defer wg.Done()
+			m.probeUpstreamByName(ctx, n)
+		}(name)
+	}
+	wg.Wait()
+}
+
 type HTTPHealthChecker struct {
 	Client *http.Client
 }
@@ -907,12 +951,14 @@ func recoverWorkerConfigPatch(worker config.WorkerConfig, workerName string) (mo
 	}
 	configPath, _ := moduleCfg.Params["config_path"].(string)
 	if configPath == "" {
-		configPath = expandHomePath("~/.codex/config.toml")
+		configPath = "~/.codex/config.toml"
 	}
+	configPath = expandHomePath(configPath)
 	stateDir, _ := moduleCfg.Params["state_dir"].(string)
 	if stateDir == "" {
-		stateDir = expandHomePath("~/.ainn")
+		stateDir = "~/.ainn"
 	}
+	stateDir = expandHomePath(stateDir)
 	patch := module.NewConfigPatch(module.ConfigPatchOptions{
 		StateDir:    stateDir,
 		ConfigPath:  configPath,

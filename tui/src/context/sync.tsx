@@ -80,6 +80,7 @@ export const {
       vcs: undefined,
       workers: [],
       upstreams: [],
+      upstreamProbes: {},
       config_status: undefined,
       error: undefined,
     })
@@ -262,7 +263,12 @@ export const {
       let unsubscribe = () => {}
       onCleanup(() => unsubscribe())
       void sdk.client
-        .subscribeManagerEvents(() => {
+        .subscribeManagerEvents((event) => {
+          if (event.type === "upstream.probed") {
+            const probe = event.payload as { upstream: string; ok: boolean; degraded?: boolean; status_code: number; latency_ms: number; error?: string }
+            setStore("upstreamProbes", probe.upstream, reconcile(probe))
+            return
+          }
           void refreshManagerData().catch((error) => {
             setStore("error", error instanceof Error ? error.message : String(error))
           })
