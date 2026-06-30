@@ -907,12 +907,14 @@ func recoverWorkerConfigPatch(worker config.WorkerConfig, workerName string) (mo
 	}
 	configPath, _ := moduleCfg.Params["config_path"].(string)
 	if configPath == "" {
-		configPath = expandHomePath("~/.codex/config.toml")
+		configPath = "~/.codex/config.toml"
 	}
+	configPath = expandHomePath(configPath)
 	stateDir, _ := moduleCfg.Params["state_dir"].(string)
 	if stateDir == "" {
-		stateDir = expandHomePath("~/.ainn")
+		stateDir = "~/.ainn"
 	}
+	stateDir = expandHomePath(stateDir)
 	patch := module.NewConfigPatch(module.ConfigPatchOptions{
 		StateDir:    stateDir,
 		ConfigPath:  configPath,
