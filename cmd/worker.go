@@ -177,12 +177,14 @@ func buildConfigPatch(cfg WorkerRuntimeConfig) (*module.ConfigPatch, bool) {
 	}
 	configPath, _ := moduleCfg.Params["config_path"].(string)
 	if configPath == "" {
-		configPath = expandHome("~/.codex/config.toml")
+		configPath = "~/.codex/config.toml"
 	}
+	configPath = expandHome(configPath)
 	stateDir, _ := moduleCfg.Params["state_dir"].(string)
 	if stateDir == "" {
-		stateDir = expandHome("~/.ainn")
+		stateDir = "~/.ainn"
 	}
+	stateDir = expandHome(stateDir)
 	port := cfg.ListenPort
 	if port == 0 {
 		port = cfg.Port
