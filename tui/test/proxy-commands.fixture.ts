@@ -119,6 +119,8 @@ function createProxyHarness() {
     stopWorker: [] as number[],
     saveConfig: 0,
     getLogs: 0,
+    testUpstream: [] as string[],
+    testAllUpstreams: 0,
   }
 
   const fetch = createFetch((url) => {
@@ -275,6 +277,24 @@ function createProxyHarness() {
       return json({ upstream: name })
     }
 
+    if (url.pathname === "/api/upstreams/test" && method === "POST") {
+      calls.testAllUpstreams += 1
+      return json({
+        results: [...providers.values()].map((p) => ({
+          upstream: p.name,
+          ok: true,
+          status_code: 200,
+          latency_ms: 120,
+        })),
+      })
+    }
+
+    if (url.pathname.startsWith("/api/upstreams/") && url.pathname.endsWith("/test") && method === "POST") {
+      const name = url.pathname.slice("/api/upstreams/".length, -"/test".length)
+      calls.testUpstream.push(name)
+      return json({ upstream: name, ok: true, status_code: 200, latency_ms: 120 })
+    }
+
     if (url.pathname === "/api/config" && method === "PUT") {
       calls.saveConfig += 1
       config.status = { ...config.status, dirty: false }
@@ -410,6 +430,7 @@ export async function openUpstreamManager(app: ProxyApp) {
 
 export async function openUpstreamEditor(app: ProxyApp, name: string) {
   await openUpstreamManager(app)
+  await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.submit")
   await wait(async () => {

@@ -8,6 +8,15 @@ export type RedactedUpstream = {
   api_format?: string
 }
 
+export type UpstreamProbeResult = {
+  upstream: string
+  ok: boolean
+  degraded?: boolean
+  status_code: number
+  latency_ms: number
+  error?: string
+}
+
 export type ModuleConfig = {
   enabled: boolean
   params?: Record<string, unknown>

@@ -207,6 +207,9 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 	if !mgr.startHealthMonitorCalled {
 		t.Fatal("expected health monitor to start after worker startup failure")
 	}
+	if !mgr.startUpstreamProberCalled {
+		t.Fatal("expected upstream prober to start after worker startup failure")
+	}
 	if !server.listenCalled {
 		t.Fatal("expected manager API server to start after worker startup failure")
 	}
@@ -329,9 +332,10 @@ func TestFlockLockerRejectsSecondAcquireOnSamePath(t *testing.T) {
 }
 
 type fakeRootManager struct {
-	startErr                    error
+	startErr                     error
 	startConfiguredWorkersCalled bool
 	startHealthMonitorCalled     bool
+	startUpstreamProberCalled    bool
 	closeCalled                  bool
 }
 
@@ -348,6 +352,11 @@ func (m *fakeRootManager) StartConfiguredWorkers() error {
 
 func (m *fakeRootManager) StartHealthMonitor(_ time.Duration) func() {
 	m.startHealthMonitorCalled = true
+	return func() {}
+}
+
+func (m *fakeRootManager) StartUpstreamProber(_ time.Duration) func() {
+	m.startUpstreamProberCalled = true
 	return func() {}
 }
 

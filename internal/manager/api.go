@@ -518,6 +518,17 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 
 func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/upstreams/")
+	if name == "test" && r.Method == http.MethodPost {
+		m.handleUpstreamTestAll(rw, r)
+		return
+	}
+	if strings.HasSuffix(name, "/test") && r.Method == http.MethodPost {
+		parts := strings.Split(name, "/")
+		if len(parts) == 2 && parts[1] == "test" {
+			m.handleUpstreamTest(rw, r)
+			return
+		}
+	}
 	if name == "" || strings.Contains(name, "/") {
 		http.NotFound(rw, r)
 		return

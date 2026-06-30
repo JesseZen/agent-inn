@@ -148,6 +148,7 @@ test("proxy upstream editor deletes upstream after confirmation", async () => {
   try {
     await openUpstreamManager(app)
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await runCommand(app, "dialog.select.end")
     app.api.keymap.dispatchCommand("dialog.select.submit")
@@ -204,6 +205,43 @@ test("proxy upstream editor ESC closes dialog when stack depth is 1", async () =
       return !app.frame().includes("Manage Upstreams")
     })
     expect(app.frame()).not.toContain("Manage Upstreams")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream editor tests upstream reachability and shows toast", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamEditor(app, "openai")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.testUpstream.length === 1)
+    await app.render()
+
+    expect(app.calls.testUpstream).toEqual(["openai"])
+    expect(app.frame()).toContain("openai: OK 120ms")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream manager tests all upstreams and shows toast", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.testAllUpstreams === 1)
+    await app.render()
+
+    expect(app.calls.testAllUpstreams).toBe(1)
+    expect(app.frame()).toContain("Tested 2 upstreams")
   } finally {
     await app.cleanup()
   }

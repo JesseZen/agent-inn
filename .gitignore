@@ -9,6 +9,7 @@ ainn
 # Claude session & reference
 .claude/
 .ref/
+.trae/
 
 # Internal dev docs (kept local only)
 docs/

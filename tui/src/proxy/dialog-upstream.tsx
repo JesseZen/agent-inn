@@ -6,8 +6,9 @@ import { EscHint, useDialog } from "../ui/dialog"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
+import { useTheme } from "../context/theme"
 
-type UpstreamOption = { type: "create" } | { type: "edit"; name: string }
+type UpstreamOption = { type: "create" } | { type: "edit"; name: string } | { type: "test-all" }
 type FieldKey = "base_url" | "api_key" | "api_format"
 
 export type Draft = {
@@ -32,17 +33,27 @@ const FIELDS: Field[] = [
 
 export function DialogUpstream() {
   const sync = useSync()
+  const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { theme } = useTheme()
 
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
     { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
-    ...sync.data.upstreams.map((upstream) => ({
-      title: upstream.name,
-      value: { type: "edit" as const, name: upstream.name },
-      description: `${upstream.base_url}${upstream.has_api_key ? "" : " (no key)"}`,
-      category: "Configured upstreams",
-    })),
+    { title: "Test All Upstreams", value: { type: "test-all" as const }, description: "Probe every configured upstream", category: "Actions" },
+    ...sync.data.upstreams.map((upstream) => {
+      const probe = sync.data.upstreamProbes[upstream.name]
+      return {
+        title: upstream.name,
+        value: { type: "edit" as const, name: upstream.name },
+        description: `${upstream.base_url}${upstream.has_api_key ? "" : " (no key)"}`,
+        category: "Configured upstreams",
+        footer: !probe ? <span style={{ fg: theme.textMuted }}>—</span>
+          : probe.ok ? <span style={{ fg: theme.success }}>●{probe.latency_ms}ms</span>
+          : probe.degraded ? <span style={{ fg: theme.warning }}>▲{probe.error || `${probe.latency_ms}ms`}</span>
+          : <span style={{ fg: theme.error }}>✕{probe.error || probe.status_code}</span>,
+      }
+    }),
   ])
 
   return (
@@ -61,6 +72,19 @@ export function DialogUpstream() {
             return
           }
           dialog.push(() => <DialogUpstreamEditor name={upstreamName} draft={{ base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false }} mode="created" />)
+          return
+        }
+
+        if (opt.value.type === "test-all") {
+          try {
+            const results = await sdk.client.testAllUpstreams()
+            for (const result of results) {
+              sync.set("upstreamProbes", result.upstream, result)
+            }
+            toast.show({ message: `Tested ${results.length} upstreams`, variant: "success" })
+          } catch (err) {
+            toast.error(err)
+          }
           return
         }
 
@@ -127,8 +151,25 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
       dialog.clear()
     },
   }
+  const testAction: DialogSelectOption<string> = {
+    title: "Test Upstream",
+    value: "test",
+    description: "Probe reachability and auth",
+    onSelect: async () => {
+      try {
+        const result = await sdk.client.testUpstream(props.name)
+        sync.set("upstreamProbes", result.upstream, result)
+        const msg = result.ok
+          ? `${props.name}: OK ${result.latency_ms}ms`
+          : `${props.name}: FAIL ${result.error || result.status_code}`
+        toast.show({ message: msg, variant: result.ok ? "success" : "error" })
+      } catch (err) {
+        toast.error(err)
+      }
+    },
+  }
 
-  return <DialogSelect title={`Edit Upstream: ${props.name}`} options={[...options(), deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
+  return <DialogSelect title={`Edit Upstream: ${props.name}`} options={[...options(), testAction, deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
 }
 
 function describe(field: Field, draft: Draft) {
