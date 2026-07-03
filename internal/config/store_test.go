@@ -26,7 +26,8 @@ settings:
 plugins:
   image_filter:
     kind: request_middleware
-    source: builtin
+    source: external
+    path: plugins/request/image_filter/plugin.yaml
 workers:
   codex-app:
     port: 6767

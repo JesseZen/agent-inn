@@ -85,11 +85,13 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	proxyReq := &module.ProxyRequest{
 		Method:       r.Method,
 		Path:         r.URL.Path,
+		RawQuery:     r.URL.RawQuery,
 		Headers:      r.Header.Clone(),
+		ContentType:  r.Header.Get("Content-Type"),
 		OriginalPath: r.URL.Path,
 	}
 	contentEncoding := strings.ToLower(strings.TrimSpace(proxyReq.Headers.Get("Content-Encoding")))
-	bodyRequired := contentEncoding != "" && contentEncoding != "identity"
+	bodyRequired := false
 	for _, middleware := range snapshot.Modules {
 		plan := middleware.RequestBodyMode(module.ProxyRequestMeta{
 			Method:      proxyReq.Method,
@@ -109,15 +111,26 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		}
 		proxyReq.Body = body
 		proxyReq.ContentType = contentType
-		proxyReq.Headers.Del("Content-Encoding")
+		proxyReq.NormalizeBufferedBodyHeaders()
 	}
 	for _, middleware := range snapshot.Modules {
 		if err := middleware.ProcessRequest(ctx, proxyReq); err != nil {
 			return err
 		}
 	}
+	if !bodyRequired && contentEncoding != "" && contentEncoding != "identity" {
+		body, _, err := readRequestBody(r)
+		if err != nil {
+			return err
+		}
+		proxyReq.Body = body
+		bodyRequired = true
+	}
+	if bodyRequired {
+		proxyReq.NormalizeBufferedBodyHeaders()
+	}
 
-	upstreamURL, err := snapshot.CompiledUpstream.Join(proxyReq.Path, r.URL.RawQuery)
+	upstreamURL, err := snapshot.CompiledUpstream.Join(proxyReq.Path, proxyReq.RawQuery)
 	if err != nil {
 		return err
 	}

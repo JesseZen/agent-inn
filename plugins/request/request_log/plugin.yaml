@@ -1,0 +1,5 @@
+name: request_log
+kind: request_middleware
+version: 0.1.0
+protocol_version: "2"
+command: ./plugin

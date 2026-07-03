@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+
+request = json.load(sys.stdin)
+method = request.get("method", "")
+path = request.get("path", "")
+original_path = request.get("original_path", "")
+if original_path and original_path != path:
+    print(f"INFO {method} {original_path} -> {path}", file=sys.stderr)
+else:
+    print(f"INFO {method} {path}", file=sys.stderr)
+json.dump(request, sys.stdout, separators=(",", ":"))

@@ -60,7 +60,7 @@ func TestRunWorkerReadsExternalPluginRuntimeConfigFromFD(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reader.Close()
-	if _, err := writer.Write([]byte(`{"id":"codex-app","generation":1,"listen_port":6767,"upstream":{"id":"openai","base_url":"https://api.openai.com/v1"},"plugins":{"external_filter":{"kind":"request_middleware","source":"external","command":"/bin/cat","args":["--mode","strict"],"protocol_version":"1"}},"modules":{"external_filter":{"enabled":true}}}`)); err != nil {
+	if _, err := writer.Write([]byte(`{"id":"codex-app","generation":1,"listen_port":6767,"upstream":{"id":"openai","base_url":"https://api.openai.com/v1"},"plugins":{"external_filter":{"kind":"request_middleware","source":"external","command":"/bin/cat","args":["--mode","strict"],"protocol_version":"2"}},"modules":{"external_filter":{"enabled":true}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -71,7 +71,7 @@ func TestRunWorkerReadsExternalPluginRuntimeConfigFromFD(t *testing.T) {
 	restore := SetWorkerRunnerForTest(func(cfg WorkerRuntimeConfig) error {
 		called = true
 		plugin := cfg.Plugins["external_filter"]
-		if plugin.Command != "/bin/cat" || strings.Join(plugin.Args, ",") != "--mode,strict" || plugin.ProtocolVersion != "1" || !cfg.Modules["external_filter"].Enabled {
+		if plugin.Command != "/bin/cat" || strings.Join(plugin.Args, ",") != "--mode,strict" || plugin.ProtocolVersion != "2" || !cfg.Modules["external_filter"].Enabled {
 			t.Fatalf("bad external plugin runtime config: %#v", cfg)
 		}
 		return nil
@@ -171,13 +171,20 @@ func TestRunWorkerServerRejectsInvalidUpstreamWithoutPanic(t *testing.T) {
 	}
 }
 
-func TestRunWorkerServerPassesExternalRequestMiddlewareArgs(t *testing.T) {
+func TestRunWorkerServerPassesExternalRequestMiddlewareV2Context(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/arg" {
-			t.Fatalf("external middleware did not rewrite path: %s", r.URL.Path)
+		if r.URL.Path != "/arg" || r.URL.RawQuery != "from=plugin" {
+			t.Fatalf("external middleware did not rewrite URL: %s", r.URL.String())
 		}
-		if r.Header.Get("X-External-Arg") != "expected-token" {
-			t.Fatalf("external middleware arg header missing: %q", r.Header.Get("X-External-Arg"))
+		if r.Header.Get("X-External-Arg") != "expected-token" || r.Header.Get("X-Original-Path") != "/v1/responses" {
+			t.Fatalf("external middleware headers missing: arg=%q original_path=%q", r.Header.Get("X-External-Arg"), r.Header.Get("X-Original-Path"))
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "plugin:hello" {
+			t.Fatalf("external middleware did not rewrite body: %q", string(body))
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -187,10 +194,25 @@ func TestRunWorkerServerPassesExternalRequestMiddlewareArgs(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "external.sh")
 	if err := os.WriteFile(scriptPath, []byte(`#!/bin/sh
-if [ "$1" != "expected-token" ]; then
-  exit 42
-fi
-printf '%s' '{"method":"POST","path":"/arg","headers":{"X-External-Arg":["expected-token"]},"body":"payload","content_type":"text/plain"}'
+python3 -c 'import json,sys
+payload=json.load(sys.stdin)
+if sys.argv[1] != "expected-token":
+    raise SystemExit(42)
+if payload.get("params",{}).get("mode") != "strict":
+    raise SystemExit(43)
+if payload.get("raw_query") != "from=client":
+    raise SystemExit(44)
+if payload.get("original_path") != "/v1/responses":
+    raise SystemExit(45)
+if payload.get("body") != "hello":
+    raise SystemExit(46)
+payload["path"]="/arg"
+payload["raw_query"]="from=plugin"
+payload["headers"]["X-External-Arg"]=["expected-token"]
+payload["headers"]["X-Original-Path"]=[payload.get("original_path","")]
+payload["body"]="plugin:"+payload["body"]
+payload["content_type"]="text/plain"
+json.dump(payload, sys.stdout)' "$1"
 `), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +232,11 @@ printf '%s' '{"method":"POST","path":"/arg","headers":{"X-External-Arg":["expect
 				Source:          "external",
 				Command:         scriptPath,
 				Args:            []string{"expected-token"},
-				ProtocolVersion: "1",
+				ProtocolVersion: "2",
 			},
 		},
 		Modules: map[string]module.ModuleConfig{
-			"external_filter": {Enabled: true},
+			"external_filter": {Enabled: true, Params: map[string]any{"mode": "strict"}},
 		},
 	}, os.Stdin)
 	if err != nil {
@@ -536,7 +558,7 @@ type requestWorkerServer struct {
 
 func (s requestWorkerServer) ListenAndServe() error {
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/start", strings.NewReader("original"))
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses?from=client", strings.NewReader("hello"))
 	s.worker.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
 		return errors.New("unexpected worker response: " + res.Body.String())

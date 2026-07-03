@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+
+request = json.load(sys.stdin)
+model = request.get("params", {}).get("model")
+if not model:
+    json.dump(request, sys.stdout, separators=(",", ":"))
+    sys.exit(0)
+
+content_type = (request.get("content_type") or "").strip().lower()
+if content_type != "application/json" and not content_type.startswith("application/json;"):
+    json.dump(request, sys.stdout, separators=(",", ":"))
+    sys.exit(0)
+
+body = json.loads(request.get("body") or "null")
+if not isinstance(body, dict):
+    json.dump(request, sys.stdout, separators=(",", ":"))
+    sys.exit(0)
+
+body["model"] = model
+request["body"] = json.dumps(body, separators=(",", ":"))
+json.dump(request, sys.stdout, separators=(",", ":"))

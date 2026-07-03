@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -140,7 +141,7 @@ func TestRuntimeBuilderBuildsExternalRequestMiddlewareFromManifest(t *testing.T)
 	if !reflect.DeepEqual(got.Modules, want) {
 		t.Fatalf("external runtime modules mismatch:\ngot  %#v\nwant %#v", got.Modules, want)
 	}
-	if got.Plugins["external_filter"].Command == "" || got.Plugins["external_filter"].ProtocolVersion != "1" {
+	if got.Plugins["external_filter"].Command == "" || got.Plugins["external_filter"].ProtocolVersion != "2" {
 		t.Fatalf("external plugin runtime metadata missing: %#v", got.Plugins)
 	}
 }
@@ -153,7 +154,7 @@ func TestRuntimeBuilderBuildsExternalRequestMiddlewareManifestArgs(t *testing.T)
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(dir, "plugin.yaml")
-	if err := os.WriteFile(manifestPath, []byte("name: external_filter\nkind: request_middleware\nversion: 0.1.0\nprotocol_version: \"1\"\ncommand: python3\nargs:\n  - "+scriptPath+"\n"), 0600); err != nil {
+	if err := os.WriteFile(manifestPath, []byte("name: external_filter\nkind: request_middleware\nversion: 0.1.0\nprotocol_version: \"2\"\ncommand: python3\nargs:\n  - "+scriptPath+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Plugins["external_filter"] = config.PluginDefinition{
@@ -175,7 +176,7 @@ func TestRuntimeBuilderBuildsExternalRequestMiddlewareManifestArgs(t *testing.T)
 		Path:            manifestPath,
 		Command:         "python3",
 		Args:            []string{scriptPath},
-		ProtocolVersion: "1",
+		ProtocolVersion: "2",
 	}
 	if !reflect.DeepEqual(got.Plugins["external_filter"], want) {
 		t.Fatalf("bad external plugin runtime:\ngot  %#v\nwant %#v", got.Plugins["external_filter"], want)
@@ -242,7 +243,7 @@ func TestRuntimeBuilderRejectsExternalPluginManifestWithoutExecutable(t *testing
 	if err := os.WriteFile(manifestPath, []byte(`name: external_filter
 kind: request_middleware
 version: 0.1.0
-protocol_version: "1"
+protocol_version: "2"
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ protocol_version: "1"
 	}
 }
 
-func TestRuntimeBuilderRejectsExternalPluginManifestUnsupportedProtocolVersion(t *testing.T) {
+func TestRuntimeBuilderRejectsExternalRequestPluginManifestUnsupportedProtocolVersion(t *testing.T) {
 	cfg := runtimeBuilderConfig()
 	dir := t.TempDir()
 	executablePath := filepath.Join(dir, "plugin")
@@ -272,7 +273,7 @@ func TestRuntimeBuilderRejectsExternalPluginManifestUnsupportedProtocolVersion(t
 	if err := os.WriteFile(manifestPath, []byte(`name: external_filter
 kind: request_middleware
 version: 0.1.0
-protocol_version: "2"
+protocol_version: "1"
 command: ./plugin
 `), 0600); err != nil {
 		t.Fatal(err)
@@ -287,7 +288,38 @@ command: ./plugin
 	cfg.Workers["cli-openai"] = worker
 
 	_, err := (RuntimeBuilder{}).Build(cfg, "cli-openai", 1)
-	if err == nil || err.Error() != `external plugin "external_filter" manifest has unsupported protocol_version "2"` {
+	if err == nil || err.Error() != `external plugin "external_filter" manifest has unsupported protocol_version "1"` {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRuntimeBuilderRejectsExternalLifecycleHookManifestUnsupportedProtocolVersion(t *testing.T) {
+	cfg := runtimeBuilderConfig()
+	dir := t.TempDir()
+	executablePath := filepath.Join(dir, "plugin")
+	if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "plugin.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`name: external_hook
+kind: lifecycle_hook
+version: 0.1.0
+protocol_version: "2"
+command: ./plugin
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Plugins["external_hook"] = config.PluginDefinition{
+		Kind:   config.PluginKindLifecycleHook,
+		Source: config.PluginSourceExternal,
+		Path:   manifestPath,
+	}
+	worker := cfg.Workers["cli-openai"]
+	worker.Hooks["external_hook"] = config.ModuleConfig{Enabled: true}
+	cfg.Workers["cli-openai"] = worker
+
+	_, err := (RuntimeBuilder{}).Build(cfg, "cli-openai", 1)
+	if err == nil || err.Error() != `external plugin "external_hook" manifest has unsupported protocol_version "2"` {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -299,7 +331,7 @@ func TestRuntimeBuilderRejectsExternalPluginManifestUnavailableExecutable(t *tes
 	if err := os.WriteFile(manifestPath, []byte(`name: external_filter
 kind: request_middleware
 version: 0.1.0
-protocol_version: "1"
+protocol_version: "2"
 command: ./missing-plugin
 `), 0600); err != nil {
 		t.Fatal(err)
@@ -384,7 +416,11 @@ func writeExternalPluginManifest(t *testing.T, name string, kind string) string 
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(dir, "plugin.yaml")
-	data := []byte("name: " + name + "\nkind: " + kind + "\nversion: 0.1.0\nprotocol_version: \"1\"\ncommand: " + executablePath + "\n")
+	protocolVersion := "1"
+	if kind == config.PluginKindRequestMiddleware {
+		protocolVersion = "2"
+	}
+	data := []byte("name: " + name + "\nkind: " + kind + "\nversion: 0.1.0\nprotocol_version: \"" + protocolVersion + "\"\ncommand: " + executablePath + "\n")
 	if err := os.WriteFile(manifestPath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -399,15 +435,18 @@ func testPluginDefinitions() map[string]config.PluginDefinition {
 		},
 		"image_filter": {
 			Kind:   config.PluginKindRequestMiddleware,
-			Source: config.PluginSourceBuiltin,
+			Source: config.PluginSourceExternal,
+			Path:   repoRequestPluginManifest("image_filter"),
 		},
 		"model_override": {
 			Kind:   config.PluginKindRequestMiddleware,
-			Source: config.PluginSourceBuiltin,
+			Source: config.PluginSourceExternal,
+			Path:   repoRequestPluginManifest("model_override"),
 		},
 		"request_log": {
 			Kind:   config.PluginKindRequestMiddleware,
-			Source: config.PluginSourceBuiltin,
+			Source: config.PluginSourceExternal,
+			Path:   repoRequestPluginManifest("request_log"),
 		},
 		"debug_sse": {
 			Kind:   config.PluginKindRequestMiddleware,
@@ -418,4 +457,12 @@ func testPluginDefinitions() map[string]config.PluginDefinition {
 			Source: config.PluginSourceBuiltin,
 		},
 	}
+}
+
+func repoRequestPluginManifest(name string) string {
+	_, file, _, ok := goruntime.Caller(0)
+	if !ok {
+		panic("manager runtime_builder_test: caller path unavailable")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "plugins", "request", name, "plugin.yaml")
 }

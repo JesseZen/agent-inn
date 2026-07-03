@@ -41,6 +41,7 @@ type Middleware interface {
 type ProxyRequest struct {
 	Method       string
 	Path         string
+	RawQuery     string
 	Headers      http.Header
 	Body         []byte
 	ContentType  string
@@ -57,6 +58,14 @@ type ProxyResponse struct {
 type baseMiddleware struct {
 	name   string
 	config ModuleConfig
+}
+
+func (r *ProxyRequest) NormalizeBufferedBodyHeaders() {
+	r.Headers.Del("Content-Encoding")
+	r.Headers.Del("Content-Length")
+	if r.ContentType != "" {
+		r.Headers.Set("Content-Type", r.ContentType)
+	}
 }
 
 func (m *baseMiddleware) RequestBodyMode(req ProxyRequestMeta) RequestBodyMode {

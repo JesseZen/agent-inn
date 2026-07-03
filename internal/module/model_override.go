@@ -31,7 +31,6 @@ func (m *ModelOverride) ProcessRequest(ctx context.Context, req *ProxyRequest) e
 		return err
 	}
 	req.Body = encoded
-	req.Headers.Del("Content-Length")
 	return nil
 }
 

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -220,6 +222,9 @@ func TestWorkerRunsExternalRequestMiddleware(t *testing.T) {
 python3 -c 'import json,sys
 payload=json.load(sys.stdin)
 payload["headers"]["X-External"]=["yes"]
+payload["headers"]["X-Original-Path"]=[payload.get("original_path","")]
+payload["headers"]["X-Params-Mode"]=[payload.get("params",{}).get("mode","")]
+payload["path"]="/rewritten"
 payload["body"]="external:"+payload.get("body","")
 json.dump(payload, sys.stdout)'
 `), 0700); err != nil {
@@ -228,13 +233,20 @@ json.dump(payload, sys.stdout)'
 
 	var receivedBody string
 	var receivedHeader string
+	var receivedOriginalPath string
+	var receivedParamsMode string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rewritten" || r.URL.RawQuery != "x=1" {
+			t.Fatalf("unexpected rewritten URL %s", r.URL.String())
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
 		receivedBody = string(body)
 		receivedHeader = r.Header.Get("X-External")
+		receivedOriginalPath = r.Header.Get("X-Original-Path")
+		receivedParamsMode = r.Header.Get("X-Params-Mode")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -253,11 +265,11 @@ json.dump(payload, sys.stdout)'
 					Kind:            "request_middleware",
 					Source:          "external",
 					Command:         script,
-					ProtocolVersion: "1",
+					ProtocolVersion: "2",
 				},
 			},
 			Modules: map[string]appruntime.ModuleConfig{
-				"external_filter": {Enabled: true},
+				"external_filter": {Enabled: true, Params: map[string]any{"mode": "strict"}},
 			},
 		},
 	})
@@ -265,15 +277,28 @@ json.dump(payload, sys.stdout)'
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader("hello"))
+	var compressed bytes.Buffer
+	zw, err := zstd.NewWriter(&compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses?x=1", &compressed)
+	req.Header.Set("Content-Encoding", "zstd")
 	res := httptest.NewRecorder()
 	w.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	if receivedHeader != "yes" || receivedBody != "external:hello" {
-		t.Fatalf("external middleware did not mutate request: header=%q body=%q", receivedHeader, receivedBody)
+	if receivedHeader != "yes" || receivedBody != "external:hello" || receivedOriginalPath != "/v1/responses" || receivedParamsMode != "strict" {
+		t.Fatalf("external middleware did not mutate request: header=%q body=%q original_path=%q params_mode=%q", receivedHeader, receivedBody, receivedOriginalPath, receivedParamsMode)
 	}
 }
 
@@ -310,7 +335,7 @@ json.dump(payload, sys.stdout)
 					Source:          "external",
 					Command:         "python3",
 					Args:            []string{script},
-					ProtocolVersion: "1",
+					ProtocolVersion: "2",
 				},
 			},
 			Modules: map[string]appruntime.ModuleConfig{
@@ -330,6 +355,300 @@ json.dump(payload, sys.stdout)
 	}
 	if receivedHeader != "yes" {
 		t.Fatalf("external middleware args were not used: header=%q", receivedHeader)
+	}
+}
+
+func TestWorkerExternalImageFilterPassesThroughNonJSONRequest(t *testing.T) {
+	scriptPath := repoRequestPluginScript(t, "image_filter")
+	var receivedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receivedBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Runtime: appruntime.WorkerRuntime{
+			ID:         "cli-openai",
+			Generation: 1,
+			ListenPort: 11199,
+			Upstream: appruntime.UpstreamRuntime{
+				ID:      "openai",
+				BaseURL: server.URL,
+			},
+			Plugins: map[string]appruntime.PluginRuntime{
+				"image_filter": {
+					Kind:            "request_middleware",
+					Source:          "external",
+					Command:         "python3",
+					Args:            []string{scriptPath},
+					ProtocolVersion: "2",
+				},
+			},
+			Modules: map[string]appruntime.ModuleConfig{
+				"image_filter": {Enabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/files", strings.NewReader("hello"))
+	req.Header.Set("Content-Type", "text/plain")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if receivedBody != "hello" {
+		t.Fatalf("unexpected upstream body %q", receivedBody)
+	}
+}
+
+func TestWorkerExternalModelOverridePassesThroughNonJSONRequest(t *testing.T) {
+	scriptPath := repoRequestPluginScript(t, "model_override")
+	var receivedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receivedBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Runtime: appruntime.WorkerRuntime{
+			ID:         "cli-openai",
+			Generation: 1,
+			ListenPort: 11199,
+			Upstream: appruntime.UpstreamRuntime{
+				ID:      "openai",
+				BaseURL: server.URL,
+			},
+			Plugins: map[string]appruntime.PluginRuntime{
+				"model_override": {
+					Kind:            "request_middleware",
+					Source:          "external",
+					Command:         "python3",
+					Args:            []string{scriptPath},
+					ProtocolVersion: "2",
+				},
+			},
+			Modules: map[string]appruntime.ModuleConfig{
+				"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-test"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/files", strings.NewReader("hello"))
+	req.Header.Set("Content-Type", "text/plain")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if receivedBody != "hello" {
+		t.Fatalf("unexpected upstream body %q", receivedBody)
+	}
+}
+
+func TestWorkerExternalRequestLogPassesThroughBinaryUpload(t *testing.T) {
+	scriptPath := repoRequestPluginScript(t, "request_log")
+	body := []byte{0xff, 0xfe, 0x00, 'a', 0x80}
+	var receivedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Runtime: appruntime.WorkerRuntime{
+			ID:         "cli-openai",
+			Generation: 1,
+			ListenPort: 11199,
+			Upstream: appruntime.UpstreamRuntime{
+				ID:      "openai",
+				BaseURL: server.URL,
+			},
+			Plugins: map[string]appruntime.PluginRuntime{
+				"request_log": {
+					Kind:            "request_middleware",
+					Source:          "external",
+					Command:         "python3",
+					Args:            []string{scriptPath},
+					ProtocolVersion: "2",
+				},
+			},
+			Modules: map[string]appruntime.ModuleConfig{
+				"request_log": {Enabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/files", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if !bytes.Equal(receivedBody, body) {
+		t.Fatalf("unexpected upstream body %v", receivedBody)
+	}
+}
+
+func TestWorkerExternalRequestLogPassesThroughCompressedBinaryUpload(t *testing.T) {
+	scriptPath := repoRequestPluginScript(t, "request_log")
+	body := []byte{0xff, 0xfe, 0x00, 'a', 0x80}
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	if _, err := zw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	type upstreamRequest struct {
+		Body            []byte
+		ContentEncoding string
+	}
+	received := upstreamRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		received.Body, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		received.ContentEncoding = r.Header.Get("Content-Encoding")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Runtime: appruntime.WorkerRuntime{
+			ID:         "cli-openai",
+			Generation: 1,
+			ListenPort: 11199,
+			Upstream: appruntime.UpstreamRuntime{
+				ID:      "openai",
+				BaseURL: server.URL,
+			},
+			Plugins: map[string]appruntime.PluginRuntime{
+				"request_log": {
+					Kind:            "request_middleware",
+					Source:          "external",
+					Command:         "python3",
+					Args:            []string{scriptPath},
+					ProtocolVersion: "2",
+				},
+			},
+			Modules: map[string]appruntime.ModuleConfig{
+				"request_log": {Enabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/files", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	req.Header.Set("Content-Encoding", "gzip")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if received.ContentEncoding != "" || !bytes.Equal(received.Body, body) {
+		t.Fatalf("unexpected upstream request %#v", received)
+	}
+}
+
+func TestWorkerPreservesQueryWhenExternalPluginOmitsRawQuery(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "external-filter.py")
+	if err := os.WriteFile(script, []byte(`import json,sys
+payload=json.load(sys.stdin)
+payload.pop("raw_query", None)
+payload["path"]="/rewritten"
+json.dump(payload, sys.stdout)
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	type upstreamRequest struct {
+		Path     string
+		RawQuery string
+	}
+	received := upstreamRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = upstreamRequest{
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Runtime: appruntime.WorkerRuntime{
+			ID:         "cli-openai",
+			Generation: 1,
+			ListenPort: 11199,
+			Upstream: appruntime.UpstreamRuntime{
+				ID:      "openai",
+				BaseURL: server.URL,
+			},
+			Plugins: map[string]appruntime.PluginRuntime{
+				"external_filter": {
+					Kind:            "request_middleware",
+					Source:          "external",
+					Command:         "python3",
+					Args:            []string{script},
+					ProtocolVersion: "2",
+				},
+			},
+			Modules: map[string]appruntime.ModuleConfig{
+				"external_filter": {Enabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/files?x=1", strings.NewReader("hello"))
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if received != (upstreamRequest{Path: "/rewritten", RawQuery: "x=1"}) {
+		t.Fatalf("unexpected upstream request %#v", received)
 	}
 }
 
@@ -389,6 +708,15 @@ func TestWorkerClearsContentEncodingAfterBufferingCompressedRequest(t *testing.T
 	if received != (upstreamRequest{Body: `{"input":"hello"}`}) {
 		t.Fatalf("unexpected upstream request %#v", received)
 	}
+}
+
+func repoRequestPluginScript(t *testing.T, name string) string {
+	t.Helper()
+	_, file, _, ok := goruntime.Caller(0)
+	if !ok {
+		t.Fatal("worker proxy_test: caller path unavailable")
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "plugins", "request", name, "plugin")
 }
 
 func TestCopyResponseSkipsEmptyReads(t *testing.T) {

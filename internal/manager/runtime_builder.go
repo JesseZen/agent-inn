@@ -27,6 +27,11 @@ type externalPluginManifest struct {
 	Path            string   `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
+type resolvedExternalPlugin struct {
+	runtime  appruntime.PluginRuntime
+	manifest externalPluginManifest
+}
+
 func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation appruntime.Generation) (appruntime.WorkerRuntime, error) {
 	cfg.ApplyDefaults()
 	worker, ok := cfg.Workers[workerName]
@@ -114,58 +119,78 @@ func validateWorkerPluginBinding(workerName string, pluginName string, definitio
 		Path:   definition.Path,
 	}
 	if definition.Source == config.PluginSourceExternal {
-		manifestPath := expandHomePath(definition.Path)
-		data, err := os.ReadFile(manifestPath)
+		resolved, err := resolveExternalPlugin(pluginName, definition)
 		if err != nil {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest is not readable", pluginName)
+			return appruntime.PluginRuntime{}, err
 		}
-		var manifest externalPluginManifest
-		if err := yaml.Unmarshal(data, &manifest); err != nil {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest is invalid", pluginName)
-		}
-		if manifest.Name != pluginName {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest name is %q", pluginName, manifest.Name)
-		}
-		if manifest.Kind != config.PluginKindRequestMiddleware && manifest.Kind != config.PluginKindLifecycleHook {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest has invalid kind %q", pluginName, manifest.Kind)
-		}
-		if manifest.Kind != definition.Kind {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest kind is %s", pluginName, manifest.Kind)
-		}
-		if manifest.Version == "" {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest requires version", pluginName)
-		}
-		if manifest.ProtocolVersion == "" {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest requires protocol_version", pluginName)
-		}
-		if manifest.ProtocolVersion != "1" {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest has unsupported protocol_version %q", pluginName, manifest.ProtocolVersion)
-		}
-		executable := manifest.Command
-		if executable == "" {
-			executable = manifest.Path
-		}
-		if executable == "" {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q manifest requires command or path", pluginName)
-		}
-		if filepath.IsAbs(executable) || strings.ContainsRune(executable, os.PathSeparator) {
-			executablePath := executable
-			if !filepath.IsAbs(executablePath) {
-				executablePath = filepath.Join(filepath.Dir(manifestPath), executablePath)
-			}
-			info, err := os.Stat(executablePath)
-			if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
-				return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q executable is not available", pluginName)
-			}
-			executable = executablePath
-		} else if _, err := exec.LookPath(executable); err != nil {
-			return appruntime.PluginRuntime{}, fmt.Errorf("external plugin %q executable is not available", pluginName)
-		}
-		pluginRuntime.Command = executable
-		pluginRuntime.Args = append([]string(nil), manifest.Args...)
-		pluginRuntime.ProtocolVersion = manifest.ProtocolVersion
+		pluginRuntime = resolved.runtime
 	}
 	return pluginRuntime, nil
+}
+
+func resolveExternalPlugin(pluginName string, definition config.PluginDefinition) (resolvedExternalPlugin, error) {
+	manifestPath := expandHomePath(definition.Path)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest is not readable", pluginName)
+	}
+	var manifest externalPluginManifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest is invalid", pluginName)
+	}
+	if manifest.Name != pluginName {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest name is %q", pluginName, manifest.Name)
+	}
+	if manifest.Kind != config.PluginKindRequestMiddleware && manifest.Kind != config.PluginKindLifecycleHook {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest has invalid kind %q", pluginName, manifest.Kind)
+	}
+	if manifest.Kind != definition.Kind {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest kind is %s", pluginName, manifest.Kind)
+	}
+	if manifest.Version == "" {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest requires version", pluginName)
+	}
+	if manifest.ProtocolVersion == "" {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest requires protocol_version", pluginName)
+	}
+	expectedProtocolVersion := "1"
+	if definition.Kind == config.PluginKindRequestMiddleware {
+		expectedProtocolVersion = "2"
+	}
+	if manifest.ProtocolVersion != expectedProtocolVersion {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest has unsupported protocol_version %q", pluginName, manifest.ProtocolVersion)
+	}
+	executable := manifest.Command
+	if executable == "" {
+		executable = manifest.Path
+	}
+	if executable == "" {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q manifest requires command or path", pluginName)
+	}
+	if filepath.IsAbs(executable) || strings.ContainsRune(executable, os.PathSeparator) {
+		executablePath := executable
+		if !filepath.IsAbs(executablePath) {
+			executablePath = filepath.Join(filepath.Dir(manifestPath), executablePath)
+		}
+		info, err := os.Stat(executablePath)
+		if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+			return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q executable is not available", pluginName)
+		}
+		executable = executablePath
+	} else if _, err := exec.LookPath(executable); err != nil {
+		return resolvedExternalPlugin{}, fmt.Errorf("external plugin %q executable is not available", pluginName)
+	}
+	return resolvedExternalPlugin{
+		runtime: appruntime.PluginRuntime{
+			Kind:            definition.Kind,
+			Source:          definition.Source,
+			Path:            definition.Path,
+			Command:         executable,
+			Args:            append([]string(nil), manifest.Args...),
+			ProtocolVersion: manifest.ProtocolVersion,
+		},
+		manifest: manifest,
+	}, nil
 }
 
 func runtimeModuleConfig(cfg config.ModuleConfig) appruntime.ModuleConfig {
