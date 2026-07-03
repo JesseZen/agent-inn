@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"context"
@@ -87,7 +88,8 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		Headers:      r.Header.Clone(),
 		OriginalPath: r.URL.Path,
 	}
-	bodyRequired := false
+	contentEncoding := strings.ToLower(strings.TrimSpace(proxyReq.Headers.Get("Content-Encoding")))
+	bodyRequired := contentEncoding != "" && contentEncoding != "identity"
 	for _, middleware := range snapshot.Modules {
 		plan := middleware.RequestBodyMode(module.ProxyRequestMeta{
 			Method:      proxyReq.Method,
@@ -121,7 +123,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	}
 	var body io.Reader = r.Body
 	if bodyRequired {
-		body = strings.NewReader(string(proxyReq.Body))
+		body = bytes.NewReader(proxyReq.Body)
 	}
 	upstreamReq, err := http.NewRequestWithContext(ctx, proxyReq.Method, upstreamURL, body)
 	if err != nil {
