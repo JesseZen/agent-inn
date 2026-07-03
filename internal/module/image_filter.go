@@ -34,9 +34,7 @@ func (m *ImageFilter) ProcessRequest(ctx context.Context, req *ProxyRequest) err
 		return err
 	}
 	req.Body = encoded
-	req.Headers.Del("Content-Length")
 	req.Headers.Set("Content-Type", "application/json")
-	req.Headers.Del("Content-Encoding")
 	req.ContentType = "application/json"
 	return nil
 }

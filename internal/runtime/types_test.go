@@ -27,7 +27,7 @@ func TestWorkerRuntimeJSONContract(t *testing.T) {
 				Path:            "/tmp/plugin.yaml",
 				Command:         "/tmp/plugin",
 				Args:            []string{"--mode", "strict"},
-				ProtocolVersion: "1",
+				ProtocolVersion: "2",
 			},
 		},
 		Modules: map[string]ModuleConfig{

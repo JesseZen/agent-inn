@@ -15,6 +15,7 @@ func buildRuntimeModules(configs map[string]module.ModuleConfig, plugins map[str
 				Command:         plugin.Command,
 				Args:            append([]string(nil), plugin.Args...),
 				ProtocolVersion: plugin.ProtocolVersion,
+				Stderr:          os.Stderr,
 			}
 		}
 	}

@@ -15,6 +15,18 @@ plugins:
         source: builtin
     image_filter:
         kind: request_middleware
+        source: external
+        path: plugins/request/image_filter/plugin.yaml
+    model_override:
+        kind: request_middleware
+        source: external
+        path: plugins/request/model_override/plugin.yaml
+    request_log:
+        kind: request_middleware
+        source: external
+        path: plugins/request/request_log/plugin.yaml
+    debug_sse:
+        kind: request_middleware
         source: builtin
     config_patch:
         kind: lifecycle_hook
@@ -28,6 +40,11 @@ workers:
             api_translate:
                 enabled: true
             image_filter:
+                enabled: true
+            model_override:
+                enabled: false
+                model: gpt-4o
+            request_log:
                 enabled: true
         hooks:
             config_patch:

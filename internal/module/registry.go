@@ -94,11 +94,15 @@ func BuildRequestMiddlewares(configs map[string]ModuleConfig, deps BuildDependen
 			cfg = definition.normalize(cfg, deps)
 		}
 		normalized[definition.name] = cfg
+		if runtime, ok := deps.ExternalRequest[definition.name]; ok {
+			modules = append(modules, NewExternalRequestMiddleware(definition.name, cfg, runtime))
+			continue
+		}
 		modules = append(modules, definition.build(cfg, deps))
 	}
 	externalNames := make([]string, 0, len(deps.ExternalRequest))
 	for name := range deps.ExternalRequest {
-		if _, ok := configs[name]; ok {
+		if _, ok := configs[name]; ok && !IsRequestMiddleware(name) {
 			externalNames = append(externalNames, name)
 		}
 	}

@@ -116,8 +116,8 @@ function createProxyHarness() {
     },
     plugins: {
       api_translate: { kind: "request_middleware", source: "builtin" },
-      model_override: { kind: "request_middleware", source: "builtin" },
-      request_log: { kind: "request_middleware", source: "builtin" },
+      model_override: { kind: "request_middleware", source: "external", path: "plugins/request/model_override/plugin.yaml" },
+      request_log: { kind: "request_middleware", source: "external", path: "plugins/request/request_log/plugin.yaml" },
       config_patch: { kind: "lifecycle_hook", source: "builtin" },
     },
   }

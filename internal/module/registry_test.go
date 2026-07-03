@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"io"
 	"reflect"
 	"testing"
@@ -70,6 +71,36 @@ func TestBuildRequestMiddlewaresBuildsExternalRequestMiddleware(t *testing.T) {
 	}
 	if !reflect.DeepEqual(configs, want) {
 		t.Fatalf("bad configs:\ngot  %#v\nwant %#v", configs, want)
+	}
+}
+
+func TestBuildRequestMiddlewaresReplacesBuiltinWithExternalRuntime(t *testing.T) {
+	modules, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+		"image_filter": {Enabled: true},
+	}, BuildDependencies{
+		Stderr: io.Discard,
+		ExternalRequest: map[string]ExternalRequestRuntime{
+			"image_filter": {Command: "/bin/cat", ProtocolVersion: "2"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"image_filter", "debug_sse", "api_translate", "model_override", "request_log"}) {
+		t.Fatalf("bad middleware order: %#v", requestMiddlewareNames(modules))
+	}
+	req := &ProxyRequest{
+		Method:      "POST",
+		Path:        "/v1/responses",
+		Headers:     map[string][]string{"Content-Type": {"application/json"}},
+		Body:        []byte(`{"tools":[{"type":"image_generation"},{"type":"function","name":"keep"}]}`),
+		ContentType: "application/json",
+	}
+	if err := modules[0].ProcessRequest(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if string(req.Body) != `{"tools":[{"type":"image_generation"},{"type":"function","name":"keep"}]}` {
+		t.Fatalf("builtin image_filter was not replaced by external runtime: %s", req.Body)
 	}
 }
 

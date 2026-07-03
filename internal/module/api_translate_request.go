@@ -42,8 +42,6 @@ func (m *APITranslate) ProcessRequest(ctx context.Context, req *ProxyRequest) er
 	req.Headers.Set("Accept", "text/event-stream")
 	req.Headers.Set("Accept-Encoding", "identity")
 	req.Headers.Set("Cache-Control", "no-cache")
-	req.Headers.Del("Content-Length")
-	req.Headers.Del("Content-Encoding")
 	return nil
 }
 

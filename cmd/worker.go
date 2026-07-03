@@ -70,6 +70,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 				Command:         plugin.Command,
 				Args:            append([]string(nil), plugin.Args...),
 				ProtocolVersion: plugin.ProtocolVersion,
+				Stderr:          os.Stderr,
 			}
 		}
 	}
