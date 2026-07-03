@@ -62,6 +62,61 @@ func TestWorkerPassesThroughWithNoModulesAndInjectsAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkerDecompressesEncodedRequestWithoutModules(t *testing.T) {
+	type upstreamRequest struct {
+		Body            string
+		ContentEncoding string
+	}
+	received := upstreamRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		received = upstreamRequest{
+			Body:            string(body),
+			ContentEncoding: r.Header.Get("Content-Encoding"),
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var compressed bytes.Buffer
+	zw, err := zstd.NewWriter(&compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write([]byte(`{"input":"hello"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", &compressed)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "zstd")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if received != (upstreamRequest{Body: `{"input":"hello"}`}) {
+		t.Fatalf("unexpected upstream request %#v", received)
+	}
+}
+
 func TestWorkerUsesOneSnapshotForWholeRequest(t *testing.T) {
 	firstReady := make(chan struct{})
 	releaseFirst := make(chan struct{})
