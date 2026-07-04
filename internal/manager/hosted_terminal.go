@@ -65,7 +65,7 @@ func TmuxStartHostWithWindowCommandForSettings(settings config.Settings, windowN
 		tmuxPrefixForSettings(settings),
 		"new-session", "-d", "-s", tmuxHostSessionForSettings(settings),
 		"-n", windowName,
-		"-P", "-F", "#{window_id}",
+		"-P", "-F", "#{window_id}\t#{window_index}",
 	)
 	return append(args, command...)
 }
