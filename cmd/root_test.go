@@ -542,6 +542,19 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", "main-tui-window")
 
 	installFakeTmuxOnPath(t)
+	inheritedTracePath := os.Getenv(tmuxDebugLogEnvVar)
+	var inheritedTrace []byte
+	inheritedTraceMissing := false
+	if inheritedTracePath != "" {
+		trace, err := os.ReadFile(inheritedTracePath)
+		if err == nil {
+			inheritedTrace = trace
+		} else if errors.Is(err, os.ErrNotExist) {
+			inheritedTraceMissing = true
+		} else {
+			t.Fatal(err)
+		}
+	}
 	homeDir := filepath.Join(sandboxDir, "home")
 	runtimeDir := filepath.Join(sandboxDir, "runtime")
 	tmpDir := filepath.Join(sandboxDir, "tmp")
@@ -553,6 +566,8 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	t.Setenv("TMPDIR", tmpDir)
+	t.Setenv(tmuxDebugEnvVar, "")
+	t.Setenv(tmuxDebugLogEnvVar, "")
 	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
 
 	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
@@ -567,6 +582,21 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	code := Run([]string{"--config-dir", configDir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if inheritedTracePath != "" {
+		got, err := os.ReadFile(inheritedTracePath)
+		if inheritedTraceMissing {
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("expected inherited trace path %q to stay absent, got err=%v", inheritedTracePath, err)
+			}
+		} else {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, inheritedTrace) {
+				t.Fatalf("expected inherited trace path %q to stay unchanged", inheritedTracePath)
+			}
+		}
 	}
 
 	var files []string
