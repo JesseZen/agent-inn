@@ -7,6 +7,12 @@ const (
 	ConfigFileName   = "config.yaml"
 )
 
+const (
+	TmuxHostStartModeNewWindow        = "new-window"
+	TmuxHostStartModeReuseFirstWindow = "reuse-first-window"
+	TmuxHostStartModeMainTUIWindow    = "main-tui-window"
+)
+
 type Config struct {
 	Settings  Settings                    `yaml:"settings"`
 	Plugins   map[string]PluginDefinition `yaml:"plugins" json:"plugins,omitempty"`
@@ -46,8 +52,9 @@ type TerminalSettings struct {
 }
 
 type TmuxSettings struct {
-	SocketName  string `yaml:"socket_name" json:"socket_name"`
-	HostSession string `yaml:"host_session" json:"host_session"`
+	SocketName    string `yaml:"socket_name" json:"socket_name"`
+	HostSession   string `yaml:"host_session" json:"host_session"`
+	HostStartMode string `yaml:"host_start_mode" json:"host_start_mode"`
 }
 
 type WorkerConfig struct {
@@ -91,6 +98,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Settings.Terminal.Tmux.HostSession == "" {
 		c.Settings.Terminal.Tmux.HostSession = "ainn-host"
+	}
+	if c.Settings.Terminal.Tmux.HostStartMode == "" {
+		c.Settings.Terminal.Tmux.HostStartMode = TmuxHostStartModeNewWindow
 	}
 	if c.Workers == nil {
 		c.Workers = map[string]WorkerConfig{}

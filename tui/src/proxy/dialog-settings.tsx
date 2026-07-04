@@ -14,6 +14,7 @@ type SettingsField = {
   category: string
   value: (settings: ProxySettings) => string
   patch: (value: string) => Partial<ProxySettings>
+  presets?: string[]
 }
 
 const FIELDS: SettingsField[] = [
@@ -44,6 +45,7 @@ const FIELDS: SettingsField[] = [
     category: "Terminal",
     value: (settings) => settings.terminal.opener,
     patch: (value) => ({ terminal: { opener: value } } as Partial<ProxySettings>),
+    presets: ["default", "terminal_app", "iterm2", "wezterm", "kitty"],
   },
   {
     key: "terminal.tmux.socket_name",
@@ -58,6 +60,14 @@ const FIELDS: SettingsField[] = [
     category: "Terminal",
     value: (settings) => settings.terminal.tmux.host_session,
     patch: (value) => ({ terminal: { tmux: { host_session: value } } } as Partial<ProxySettings>),
+  },
+  {
+    key: "terminal.tmux.host_start_mode",
+    title: "Tmux Host Start Mode",
+    category: "Terminal",
+    value: (settings) => settings.terminal.tmux.host_start_mode,
+    patch: (value) => ({ terminal: { tmux: { host_start_mode: value } } } as Partial<ProxySettings>),
+    presets: ["new-window", "reuse-first-window", "main-tui-window"],
   },
 ]
 
@@ -89,16 +99,15 @@ export function DialogSettings() {
         category: field.category,
         onSelect: async () => {
           if (!current) return
-          if (field.key === "terminal.opener") {
-            const presets = ["default", "terminal_app", "iterm2", "wezterm", "kitty"]
+          if (field.presets) {
             const result = await DialogPrompt.show(dialog, field.title, {
               value: field.value(current),
               selectAll: true,
-              placeholder: presets.join(", "),
+              placeholder: field.presets.join(", "),
             })
             if (result === null) return
-            if (!presets.includes(result)) {
-              await DialogAlert.show(dialog, "Invalid terminal opener", `Choose one of: ${presets.join(", ")}`)
+            if (!field.presets.includes(result)) {
+              await DialogAlert.show(dialog, `Invalid ${field.title.toLowerCase()}`, `Choose one of: ${field.presets.join(", ")}`)
               return
             }
             try {
@@ -106,6 +115,17 @@ export function DialogSettings() {
               setSettings(response.settings)
               await sync.bootstrap({ fatal: false })
               toast.show({ message: `Saved ${field.title}`, variant: "success" })
+              if (field.key === "terminal.tmux.host_start_mode" && result === "reuse-first-window") {
+                const hostedSessions = await sdk.client.listHostedSessions()
+                if (hostedSessions.length > 0) {
+                  setTimeout(() => {
+                    toast.show({
+                      message: "Host start mode applies only to newly created tmux hosts. Remove existing hosted terminal sessions to recreate the host.",
+                      variant: "info",
+                    })
+                  }, 0)
+                }
+              }
             } catch (err) {
               toast.error(err)
             }

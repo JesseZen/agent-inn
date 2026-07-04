@@ -9,6 +9,7 @@ settings:
         tmux:
             socket_name: ainn
             host_session: ainn-host
+            host_start_mode: new-window
 plugins:
     api_translate:
         kind: request_middleware

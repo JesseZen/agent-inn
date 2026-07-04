@@ -93,6 +93,7 @@ export type ProxySettings = {
     tmux: {
       socket_name: string
       host_session: string
+      host_start_mode: string
     }
   }
 }

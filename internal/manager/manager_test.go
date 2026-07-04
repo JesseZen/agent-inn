@@ -126,8 +126,8 @@ func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
 	oldRunner := hostedTMuxRunnerFactory
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
-			if strings.Join(args, " ") == strings.Join(TmuxListWindowsCommand(), " ") {
-				return "ainn:worker-1\n", nil
+			if strings.Join(args, " ") == strings.Join(TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings()), " ") {
+				return "ainn:worker-1\tworker 1\n", nil
 			}
 			return "", nil
 		})
@@ -150,6 +150,122 @@ func TestManagerAPISetsHostedSessionStatusFromTmuxState(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), `"status":"stale"`) {
 		t.Fatalf("missing stale status: %s", res.Body.String())
+	}
+}
+
+func TestManagerAPIHostedSessionsUseTmuxSettingsForStatus(t *testing.T) {
+	dir := t.TempDir()
+	settings := config.Settings{
+		StateDir: dir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	m := New(Config{Config: config.Config{Settings: settings}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(dir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			got = append(got, append([]string{}, args...))
+			switch {
+			case strings.Join(args, " ") == strings.Join(TmuxHasSessionCommandForSettings(settings), " "):
+				return "", nil
+			case strings.Join(args, " ") == strings.Join(TmuxListWindowDetailsCommandForSettings(settings), " "):
+				return "@12\tworker 1\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/hosted-sessions", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"session_id":"`+created.SessionID+`"`) {
+		t.Fatalf("missing session: %s", res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"status":"active"`) {
+		t.Fatalf("missing active status: %s", res.Body.String())
+	}
+	want := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected tmux calls: got %#v want %#v", got, want)
+	}
+}
+
+func TestManagerAPIDeleteHostedSessionUsesTmuxSettings(t *testing.T) {
+	dir := t.TempDir()
+	settings := config.Settings{
+		StateDir: dir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	m := New(Config{Config: config.Config{Settings: settings}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(dir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			got = append(got, append([]string{}, args...))
+			switch {
+			case strings.Join(args, " ") == strings.Join(TmuxHasSessionCommandForSettings(settings), " "):
+				return "", nil
+			case strings.Join(args, " ") == strings.Join(TmuxListWindowDetailsCommandForSettings(settings), " "):
+				return "@12\tworker 1\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "http://manager.local/api/hosted-sessions/"+created.SessionID, nil)
+	m.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	want := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+		TmuxKillWindowCommandForSettings(settings, "@12"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected tmux calls: got %#v want %#v", got, want)
 	}
 }
 
@@ -1451,8 +1567,9 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 				LogDir:   filepath.Join(dir, "logs"),
 				Terminal: config.TerminalSettings{
 					Tmux: config.TmuxSettings{
-						SocketName:  "custom-socket",
-						HostSession: "custom-host",
+						SocketName:    "custom-socket",
+						HostSession:   "custom-host",
+						HostStartMode: "new-window",
 					},
 				},
 			},
@@ -1481,7 +1598,7 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 		httptest.NewRequest(
 			http.MethodPatch,
 			"http://manager.local/api/settings",
-			strings.NewReader(`{"state_dir":"`+filepath.Join(dir, "next-state")+`","log_dir":"`+filepath.Join(dir, "next-logs")+`"}`),
+			strings.NewReader(`{"state_dir":"`+filepath.Join(dir, "next-state")+`","log_dir":"`+filepath.Join(dir, "next-logs")+`","terminal":{"tmux":{"host_start_mode":"reuse-first-window"}}}`),
 		),
 	)
 	if res.Code != http.StatusOK {
@@ -1500,6 +1617,9 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 	}
 	if loaded.Settings.Terminal.Tmux.SocketName != "custom-socket" || loaded.Settings.Terminal.Tmux.HostSession != "custom-host" {
 		t.Fatalf("settings patch should preserve omitted terminal settings: %#v", loaded.Settings.Terminal.Tmux)
+	}
+	if loaded.Settings.Terminal.Tmux.HostStartMode != "reuse-first-window" {
+		t.Fatalf("settings patch should persist host start mode: %#v", loaded.Settings.Terminal.Tmux)
 	}
 	if loaded.Settings.Terminal.Opener != "default" {
 		t.Fatalf("settings patch should preserve omitted terminal opener: %#v", loaded.Settings.Terminal)
