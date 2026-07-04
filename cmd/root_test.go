@@ -450,6 +450,92 @@ func TestRunRootMainTUIWindowFailsWhenTraceWriteFails(t *testing.T) {
 	}
 }
 
+func TestRunRootMainTUIWindowAbortsWhenHasSessionTraceWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_PATH", tracePath)
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_ON_COMMAND", "has-session")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "write tmux trace "+tracePath) {
+		t.Fatalf("expected trace write failure in stderr, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "failed to start tmux host") {
+		t.Fatalf("expected direct trace write failure, got %q", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n"
+	if string(got) != want {
+		t.Fatalf("expected bootstrap to stop after has-session, got %q want %q", string(got), want)
+	}
+}
+
+func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_PATH", tracePath)
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_ON_COMMAND", "select-window")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "write tmux trace "+tracePath) {
+		t.Fatalf("expected trace write failure in stderr, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "failed to recreate main tmux window") {
+		t.Fatalf("expected direct trace write failure, got %q", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test select-window -t ainn-test-host:ainn\n"
+	if string(got) != want {
+		t.Fatalf("expected bootstrap to stop after select-window, got %q want %q", string(got), want)
+	}
+}
+
 func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
@@ -1129,6 +1215,9 @@ case "$cmd" in
     if [[ "${FAKE_TMUX_HAS_SESSION:-0}" == "1" ]]; then
       printf '%s' "${FAKE_TMUX_HAS_SESSION_STDOUT:-}"
       printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-}" >&2
+      if [[ "${FAKE_TMUX_CHMOD_TRACE_ON_COMMAND:-}" == "has-session" && -n "${FAKE_TMUX_CHMOD_TRACE_PATH:-}" ]]; then
+        chmod 0400 "$FAKE_TMUX_CHMOD_TRACE_PATH"
+      fi
       exit 0
     fi
     printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-missing host\n}" >&2
@@ -1143,6 +1232,9 @@ case "$cmd" in
   select-window)
     printf '%s' "${FAKE_TMUX_SELECT_WINDOW_STDOUT:-}"
     printf '%s' "${FAKE_TMUX_SELECT_WINDOW_STDERR:-}" >&2
+    if [[ "${FAKE_TMUX_CHMOD_TRACE_ON_COMMAND:-}" == "select-window" && -n "${FAKE_TMUX_CHMOD_TRACE_PATH:-}" ]]; then
+      chmod 0400 "$FAKE_TMUX_CHMOD_TRACE_PATH"
+    fi
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "select-window" ]] && exit 1
     exit 0
     ;;
