@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -362,6 +366,159 @@ providers:
 	}
 }
 
+func TestRunRootAllowsDifferentCanonicalConfigDirs(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+
+	firstConfigDir := t.TempDir()
+	secondConfigDir := t.TempDir()
+	writeRootConfig(t, firstConfigDir, "ainn-first", "ainn-first-host", config.TmuxHostStartModeNewWindow)
+	writeRootConfig(t, secondConfigDir, "ainn-second", "ainn-second-host", config.TmuxHostStartModeNewWindow)
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var once sync.Once
+
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		if opts.ConfigDir == firstConfigDir {
+			once.Do(func() { close(firstStarted) })
+			<-releaseFirst
+		}
+		return nil
+	})
+	defer restore()
+
+	firstDone := make(chan struct{})
+	var firstCode int
+	var firstStderr bytes.Buffer
+	go func() {
+		firstCode = Run([]string{"--config-dir", firstConfigDir, "--manager-port", "19090"}, &bytes.Buffer{}, &firstStderr)
+		close(firstDone)
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first root run to acquire lock")
+	}
+
+	var secondStderr bytes.Buffer
+	secondCode := Run([]string{"--config-dir", secondConfigDir, "--manager-port", "19091"}, &bytes.Buffer{}, &secondStderr)
+	close(releaseFirst)
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first root run to finish")
+	}
+
+	if firstCode != 0 {
+		t.Fatalf("expected first root run to succeed, got %d: %s", firstCode, firstStderr.String())
+	}
+	if secondCode != 0 {
+		t.Fatalf("expected second root run with different config dir to succeed, got %d: %s", secondCode, secondStderr.String())
+	}
+}
+
+func TestRootLockPathUsesCanonicalConfigDir(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+
+	configDir := t.TempDir()
+	linkPath := filepath.Join(t.TempDir(), "config-link")
+	if err := os.Symlink(configDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeConfigDir, err := os.MkdirTemp(homeDir, "ainn-root-lock-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(homeConfigDir) })
+
+	homeAlias := "~/" + strings.TrimPrefix(homeConfigDir, homeDir+"/")
+	canonicalConfigDir, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalHomeConfigDir, err := filepath.EvalSymlinks(homeConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotCanonical, err := rootLockPath(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSymlink, err := rootLockPath(linkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotHomeAlias, err := rootLockPath(homeAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotHomeAbsolute, err := rootLockPath(homeConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantCanonical := filepath.Join(runtimeDir, fmt.Sprintf("ainn-%x.lock", sha256.Sum256([]byte(canonicalConfigDir))))
+	wantHome := filepath.Join(runtimeDir, fmt.Sprintf("ainn-%x.lock", sha256.Sum256([]byte(canonicalHomeConfigDir))))
+
+	if gotCanonical != wantCanonical {
+		t.Fatalf("expected canonical lock path %q, got %q", wantCanonical, gotCanonical)
+	}
+	if gotSymlink != gotCanonical {
+		t.Fatalf("expected symlink lock path %q, got %q", gotCanonical, gotSymlink)
+	}
+	if gotHomeAlias != wantHome {
+		t.Fatalf("expected home alias lock path %q, got %q", wantHome, gotHomeAlias)
+	}
+	if gotHomeAbsolute != wantHome {
+		t.Fatalf("expected absolute home lock path %q, got %q", wantHome, gotHomeAbsolute)
+	}
+}
+
+func TestRootLockPathFormatsFilesystemSafeName(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+
+	firstConfigDir := t.TempDir()
+	secondConfigDir := t.TempDir()
+
+	firstLockPath, err := rootLockPath(firstConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstLockPathAgain, err := rootLockPath(firstConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondLockPath, err := rootLockPath(secondConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockNamePattern := regexp.MustCompile(`^ainn-[0-9a-f]+\.lock$`)
+	if !lockNamePattern.MatchString(filepath.Base(firstLockPath)) {
+		t.Fatalf("expected lock filename to match %q, got %q", lockNamePattern.String(), filepath.Base(firstLockPath))
+	}
+	if strings.Contains(filepath.Base(firstLockPath), string(os.PathSeparator)) {
+		t.Fatalf("expected filesystem-safe lock filename, got %q", filepath.Base(firstLockPath))
+	}
+	if firstLockPath != firstLockPathAgain {
+		t.Fatalf("expected stable lock path %q, got %q", firstLockPath, firstLockPathAgain)
+	}
+	if firstLockPath == secondLockPath {
+		t.Fatalf("expected different config dirs to produce different lock paths, got %q", firstLockPath)
+	}
+}
+
 func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 	startErr := errors.New("app: config_patch recovery state unresolved must be resolved before enabling")
 	mgr := &fakeRootManager{startErr: startErr}
@@ -489,11 +646,11 @@ func TestRootRunnerDoesNotWriteConfiguredWorkerStartupFailureToTerminal(t *testi
 	}
 }
 
-// holdLockForTest 替换 rootLockerFactory 让 Run 抢锁失败，模拟第二实例启动。
+// holdLockForTest 替换 rootLockerFactory 让 Run 抢锁失败，模拟同一实例的第二次启动。
 func holdLockForTest(t *testing.T) {
 	t.Helper()
 	previous := rootLockerFactory
-	rootLockerFactory = func() rootLocker {
+	rootLockerFactory = func(string) rootLocker {
 		return lockedLocker{}
 	}
 	t.Cleanup(func() { rootLockerFactory = previous })
@@ -505,7 +662,7 @@ func (lockedLocker) Acquire() (func(), error) {
 	return nil, errAlreadyLocked
 }
 
-// noopLocker 总是成功抢锁，用于走 runRoot 的测试避免依赖真 /tmp/ainn.lock。
+// noopLocker 总是成功抢锁，用于走 runRoot 的测试避免依赖真实文件锁。
 type noopLocker struct{}
 
 func (noopLocker) Acquire() (func(), error) {
