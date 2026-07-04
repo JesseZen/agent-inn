@@ -46,9 +46,57 @@ host_session="ar-host-$RANDOM-$$"
 manager_port="$((20000 + ((RANDOM << 1) + RANDOM) % 30000))"
 launcher_pid=""
 launcher_status=""
+trace_parse_failure=""
 
 tmux_cmd() {
   TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" "$@"
+}
+
+parse_jsonl_trace() {
+  if trace_parse_failure="$(TRACE_PATH="$trace_path" python3 - <<'PY'
+import json
+import os
+import sys
+
+path = os.environ["TRACE_PATH"]
+required_keys = ("argv", "stdout", "stderr", "err", "duration_ms")
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.readlines()
+except FileNotFoundError:
+    print(f"trace file missing (trace_path: {path})")
+    sys.exit(1)
+
+if not lines:
+    print(f"trace file empty (trace_path: {path})")
+    sys.exit(1)
+
+for line_number, line in enumerate(lines, start=1):
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError as exc:
+        print(
+            f"trace JSONL line {line_number} failed to parse: {exc.msg} "
+            f"at column {exc.colno} (trace_path: {path})"
+        )
+        sys.exit(1)
+    if not isinstance(record, dict):
+        print(f"trace JSONL line {line_number} is not an object (trace_path: {path})")
+        sys.exit(1)
+    missing_keys = [key for key in required_keys if key not in record]
+    if missing_keys:
+        print(
+            f"trace JSONL line {line_number} missing keys: {', '.join(missing_keys)} "
+            f"(trace_path: {path})"
+        )
+        sys.exit(1)
+PY
+  )"; then
+    trace_parse_failure=""
+    return 0
+  fi
+  return 1
 }
 
 show_diagnostics() {
@@ -153,6 +201,25 @@ fi
 TERM="$term_name" script -q "$transcript_path" env -u TMUX -u TMUX_PANE TERM="$term_name" TMUX_TMPDIR="$tmux_tmpdir" XDG_RUNTIME_DIR="$runtime_dir" AINN_TMUX_DEBUG_LOG="$trace_path" "$binary_path" --config-dir "$config_dir" --manager-port "$manager_port" >"$script_stdout_path" 2>"$script_stderr_path" &
 launcher_pid="$!"
 
+trace_parsed=0
+attempt=0
+while [ "$attempt" -lt "$wait_attempts" ]; do
+  if parse_jsonl_trace; then
+    trace_parsed=1
+    break
+  fi
+  if ! kill -0 "$launcher_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep "$wait_sleep_seconds"
+  attempt="$((attempt + 1))"
+done
+
+if [ "$trace_parsed" -ne 1 ]; then
+  show_diagnostics "${trace_parse_failure:-trace JSONL did not parse (trace_path: $trace_path)}"
+  exit 1
+fi
+
 host_seen=0
 attempt=0
 while [ "$attempt" -lt "$wait_attempts" ]; do
@@ -178,14 +245,11 @@ while [ "$attempt" -lt "$wait_attempts" ]; do
   windows_output="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}' 2>/dev/null || true)"
   clients_output="$(tmux_cmd list-clients -t "$host_session" -F "$client_format" 2>/dev/null || true)"
   pane_output="$(tmux_cmd list-panes -t "$host_session:0" -F '#{pane_start_command}' 2>/dev/null || true)"
-  trace_line_count="$(awk 'END { print NR }' "$trace_path" 2>/dev/null || printf '0')"
 
   if printf '%s\n' "$windows_output" | grep -q '^0:' \
     && printf '%s\n' "$clients_output" | awk -F '|' '$3 == "0" { found = 1 } END { exit found ? 0 : 1 }' \
     && printf '%s\n' "$pane_output" | grep -Fq "$binary_path" \
-    && printf '%s\n' "$pane_output" | grep -Fq 'AINN_TMUX_ROOT_CHILD=1' \
-    && [ "$trace_line_count" -gt 0 ] \
-    && awk '/"argv":/ && /"stdout":/ && /"stderr":/ && /"err":/ && /"duration_ms":/ { next } { exit 1 } END { exit NR == 0 }' "$trace_path"; then
+    && printf '%s\n' "$pane_output" | grep -Fq 'AINN_TMUX_ROOT_CHILD=1'; then
     postcondition_met=1
     break
   fi
