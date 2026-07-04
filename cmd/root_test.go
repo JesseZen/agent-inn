@@ -401,11 +401,65 @@ func TestRunRootMainTUIWindowRejectsInsideTmuxDifferentSocket(t *testing.T) {
 
 	want := [][]string{
 		{"tmux", "-V"},
-		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowRejectsInsideTmuxDifferentSocketBeforeCreatingMissingHost(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	t.Setenv("TMUX", "/tmp/tmux-1000/user-default,123,0")
+	t.Setenv("TMUX_PANE", "%1")
+
+	var got [][]string
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "new-session" {
+					return "0\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for mismatched tmux socket, got 0")
+	}
+	for _, want := range []string{"unsupported tmux startup state", "user-default", "ainn-test"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected stderr to contain %q, got %q", want, stderr.String())
+		}
+	}
+	mutatingCommands := map[string]bool{
+		"new-session":  true,
+		"new-window":   true,
+		"move-window":  true,
+		"respawn-pane": true,
+	}
+	for _, call := range got {
+		if len(call) > 3 && mutatingCommands[call[3]] {
+			t.Fatalf("cross-socket validation should run before mutating tmux commands, got %#v", got)
+		}
 	}
 }
 
@@ -732,6 +786,29 @@ func TestRootTmuxRunnerStreamsAttachSessionToTerminalWriters(t *testing.T) {
 	}
 	if stderr.String() != "attach stderr\n" {
 		t.Fatalf("expected attach-session stderr to stream to terminal writer, got %q", stderr.String())
+	}
+}
+
+func TestRootTmuxRunnerBuffersNewSessionWhenWindowNameIsAttachSession(t *testing.T) {
+	installFakeTmuxOnPath(t)
+	t.Setenv(tmuxDebugEnvVar, "")
+	t.Setenv(tmuxDebugLogEnvVar, "")
+	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "0\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	got, err := rootTmuxRunnerFactory(&stdout, &stderr).Run([]string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "attach-session", "-P", "-F", "#{window_index}"})
+	if err != nil {
+		t.Fatalf("expected new-session success, got %v", err)
+	}
+	if got != "0\n" {
+		t.Fatalf("expected new-session output to be buffered, got %q", got)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("expected new-session stdout not to stream to terminal writer, got %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("expected new-session stderr not to stream to terminal writer, got %q", stderr.String())
 	}
 }
 
@@ -1631,7 +1708,7 @@ fi
 cmd=""
 for arg in "$@"; do
   case "$arg" in
-    has-session|new-session|list-panes|select-window|new-window|respawn-pane|move-window|display-message|switch-client|attach-session)
+    has-session|new-session|list-panes|select-window|new-window|respawn-pane|move-window|display-message|switch-client|attach-session|show|set-option)
       cmd="$arg"
       break
       ;;
@@ -1709,6 +1786,18 @@ case "$cmd" in
     printf '%s' "${FAKE_TMUX_ATTACH_STDOUT:-}"
     printf '%s' "${FAKE_TMUX_ATTACH_STDERR:-}" >&2
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "attach-session" ]] && exit 1
+    exit 0
+    ;;
+  show)
+    printf '%s' "${FAKE_TMUX_SHOW_STDOUT:-on\n}"
+    printf '%s' "${FAKE_TMUX_SHOW_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "show" ]] && exit 1
+    exit 0
+    ;;
+  set-option)
+    printf '%s' "${FAKE_TMUX_SET_OPTION_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_SET_OPTION_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "set-option" ]] && exit 1
     exit 0
     ;;
   *)

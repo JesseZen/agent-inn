@@ -108,13 +108,7 @@ var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRun
 	debugLogPath := os.Getenv(tmuxDebugLogEnvVar)
 	return rootTmuxRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
-		attachSession := false
-		for _, arg := range args {
-			if arg == "attach-session" {
-				attachSession = true
-				break
-			}
-		}
+		attachSession := tmuxSubcommand(args) == "attach-session"
 		var stdoutBuf bytes.Buffer
 		var stderrBuf bytes.Buffer
 		if attachSession {
@@ -389,6 +383,16 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "tmux is required for main-tui-window mode: %v\n", err)
 			return 1
 		}
+		insideTmux := os.Getenv("TMUX") != "" && os.Getenv("TMUX_PANE") != ""
+		currentSocketPath, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
+		if insideTmux {
+			currentSocketName := filepath.Base(currentSocketPath)
+			configuredSocketName := cfg.Settings.Terminal.Tmux.SocketName
+			if currentSocketName != configuredSocketName {
+				fmt.Fprintf(stderr, "unsupported tmux startup state: current tmux socket %q differs from configured tmux socket %q\n", currentSocketName, configuredSocketName)
+				return 1
+			}
+		}
 		exe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to locate executable: %v\n", err)
@@ -439,14 +443,7 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 1
 			}
 		}
-		if os.Getenv("TMUX") != "" && os.Getenv("TMUX_PANE") != "" {
-			currentSocketPath, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
-			currentSocketName := filepath.Base(currentSocketPath)
-			configuredSocketName := cfg.Settings.Terminal.Tmux.SocketName
-			if currentSocketName != configuredSocketName {
-				fmt.Fprintf(stderr, "unsupported tmux startup state: current tmux socket %q differs from configured tmux socket %q\n", currentSocketName, configuredSocketName)
-				return 1
-			}
+		if insideTmux {
 			clientName, err := runner.Run(manager.TmuxCurrentClientCommand(currentSocketPath))
 			if err != nil {
 				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
