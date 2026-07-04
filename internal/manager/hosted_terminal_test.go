@@ -163,9 +163,9 @@ func TestTmuxRespawnMainWindowCommandForSettings(t *testing.T) {
 	}
 }
 
-func TestTmuxCurrentClientCommand(t *testing.T) {
-	got := TmuxCurrentClientCommand("/tmp/tmux-501/ainn")
-	want := []string{"tmux", "-S", "/tmp/tmux-501/ainn", "display-message", "-p", "#{client_name}"}
+func TestTmuxListClientPanesCommand(t *testing.T) {
+	got := TmuxListClientPanesCommand("/tmp/tmux-501/ainn")
+	want := []string{"tmux", "-S", "/tmp/tmux-501/ainn", "list-clients", "-F", "#{client_name}\t#{pane_id}"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
