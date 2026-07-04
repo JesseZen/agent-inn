@@ -50,13 +50,7 @@ func (m *multiString) Set(value string) error {
 var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
 	return launchRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
-		attachSession := false
-		for _, arg := range args {
-			if arg == "attach-session" {
-				attachSession = true
-				break
-			}
-		}
+		attachSession := tmuxSubcommand(args) == "attach-session"
 		var stdoutBuf bytes.Buffer
 		var stderrBuf bytes.Buffer
 		if attachSession {
