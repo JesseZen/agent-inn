@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
@@ -118,11 +119,24 @@ type flockLocker struct {
 	path string
 }
 
-func defaultLockPath() string {
+func rootLockDir() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, constants.LockFileName)
+		return dir
 	}
-	return filepath.Join(os.TempDir(), constants.LockFileName)
+	return os.TempDir()
+}
+
+func rootLockPath(configDir string) (string, error) {
+	canonicalConfigDir, err := filepath.Abs(filepath.Clean(expandHome(configDir)))
+	if err != nil {
+		return "", fmt.Errorf("canonicalize config dir %s: %w", configDir, err)
+	}
+	canonicalConfigDir, err = filepath.EvalSymlinks(canonicalConfigDir)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize config dir %s: %w", configDir, err)
+	}
+	hash := sha256.Sum256([]byte(canonicalConfigDir))
+	return filepath.Join(rootLockDir(), fmt.Sprintf("ainn-%x.lock", hash)), nil
 }
 
 func (l flockLocker) Acquire() (func(), error) {
@@ -137,14 +151,14 @@ func (l flockLocker) Acquire() (func(), error) {
 	return func() { _ = f.Close() }, nil
 }
 
-var rootLockerFactory = func() rootLocker {
-	return flockLocker{path: defaultLockPath()}
+var rootLockerFactory = func(lockPath string) rootLocker {
+	return flockLocker{path: lockPath}
 }
 
 // setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/ainn.lock。
 func setRootLockerFactoryForTest(locker rootLocker) func() {
 	previous := rootLockerFactory
-	rootLockerFactory = func() rootLocker { return locker }
+	rootLockerFactory = func(string) rootLocker { return locker }
 	return func() { rootLockerFactory = previous }
 }
 
@@ -326,7 +340,12 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 0
 	}
 
-	release, err := rootLockerFactory().Acquire()
+	lockPath, err := rootLockPath(*configDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to start: %v\n", err)
+		return 1
+	}
+	release, err := rootLockerFactory(lockPath).Acquire()
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
