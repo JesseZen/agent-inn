@@ -433,6 +433,45 @@ func TestRunRootMainTUIWindowAbortsWhenMainWindowInspectFailsWithoutMissingWindo
 	}
 }
 
+func TestRunRootMainTUIWindowAbortsWhenHasSessionFailsUnexpectedly(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "permission denied\n")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Errorf("expected non-zero exit, got 0")
+	}
+	if !strings.Contains(stderr.String(), "failed to inspect tmux host session") {
+		t.Errorf("expected has-session step failure in stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("expected has-session stderr in failure output, got %q", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n"
+	if string(got) != want {
+		t.Fatalf("expected bootstrap to stop after has-session, got %q want %q", string(got), want)
+	}
+}
+
 func TestRunRootMainTUIWindowChildRunsRootRunnerDirectly(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
@@ -480,7 +519,7 @@ func TestRunRootMainTUIWindowWritesJSONLTracePerTmuxCommand(t *testing.T) {
 	installFakeTmuxOnPath(t)
 	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
 	t.Setenv("FAKE_TMUX_HAS_SESSION", "0")
-	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "missing host\n")
+	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "can't find session\n")
 	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "@1\n")
 	t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "attached\n")
 
@@ -505,7 +544,7 @@ func TestRunRootMainTUIWindowWritesJSONLTracePerTmuxCommand(t *testing.T) {
 	got := readTmuxTraceViews(t, tracePath)
 	want := []tmuxTraceView{
 		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
-		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "missing host\n", Err: "exit status 1", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "can't find session\n", Err: "exit status 1", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"}, Stdout: "@1\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "attached\n", Stderr: "", Err: "", HasDuration: true},
@@ -1462,7 +1501,7 @@ case "$cmd" in
       fi
       exit 0
     fi
-    printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-missing host\n}" >&2
+    printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-no server running\n}" >&2
     exit 1
     ;;
   new-session)
