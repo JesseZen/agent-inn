@@ -537,11 +537,22 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 }
 
 func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
-	dir := t.TempDir()
-	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	sandboxDir := t.TempDir()
+	configDir := filepath.Join(sandboxDir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", "main-tui-window")
 
-	traceDir := t.TempDir()
 	installFakeTmuxOnPath(t)
+	homeDir := filepath.Join(sandboxDir, "home")
+	runtimeDir := filepath.Join(sandboxDir, "runtime")
+	tmpDir := filepath.Join(sandboxDir, "tmp")
+	for _, dir := range []string{homeDir, runtimeDir, tmpDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	t.Setenv("TMPDIR", tmpDir)
 	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
 
 	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
@@ -553,17 +564,32 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	defer restoreLocker()
 
 	var stderr bytes.Buffer
-	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	code := Run([]string{"--config-dir", configDir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
 
-	entries, err := os.ReadDir(traceDir)
+	var files []string
+	err := filepath.Walk(sandboxDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(sandboxDir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("expected no trace files, got %#v", entries)
+	want := []string{"config/config.yaml"}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("expected sandbox files %#v, got %#v", want, files)
 	}
 }
 
