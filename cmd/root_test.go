@@ -420,6 +420,69 @@ func TestRunRootAllowsDifferentCanonicalConfigDirs(t *testing.T) {
 	}
 }
 
+func TestRunRootRejectsSecondInstanceForSameCanonicalConfigDir(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+
+	configDir := t.TempDir()
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+
+	aliasDir := filepath.Join(t.TempDir(), "config-link")
+	if err := os.Symlink(configDir, aliasDir); err != nil {
+		t.Fatal(err)
+	}
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var once sync.Once
+
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		if opts.ConfigDir == aliasDir {
+			t.Fatalf("root runner should not run for alias path while canonical lock is held: %#v", opts)
+		}
+		if opts.ConfigDir == configDir {
+			once.Do(func() { close(firstStarted) })
+			<-releaseFirst
+		}
+		return nil
+	})
+	defer restore()
+
+	firstDone := make(chan struct{})
+	var firstCode int
+	var firstStderr bytes.Buffer
+	go func() {
+		firstCode = Run([]string{"--config-dir", configDir, "--manager-port", "19090"}, &bytes.Buffer{}, &firstStderr)
+		close(firstDone)
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first root run to acquire lock")
+	}
+
+	var secondStderr bytes.Buffer
+	secondCode := Run([]string{"--config-dir", aliasDir, "--manager-port", "19091"}, &bytes.Buffer{}, &secondStderr)
+	close(releaseFirst)
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first root run to finish")
+	}
+
+	if firstCode != 0 {
+		t.Fatalf("expected first root run to succeed, got %d: %s", firstCode, firstStderr.String())
+	}
+	if secondCode == 0 {
+		t.Fatalf("expected second root run with same canonical config dir to fail, got 0: %s", secondStderr.String())
+	}
+	if !strings.Contains(secondStderr.String(), "another instance") {
+		t.Fatalf("expected 'another instance' error, got: %s", secondStderr.String())
+	}
+}
+
 func TestRootLockPathUsesCanonicalConfigDir(t *testing.T) {
 	runtimeDir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
