@@ -252,19 +252,40 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 		fmt.Fprintf(stderr, "failed to create hosted session: %v\n", err)
 		return 1
 	}
+	cleanupIncompleteSession := func() {
+		if err := registry.Delete(session.SessionID); err != nil {
+			fmt.Fprintf(stderr, "failed to clean up incomplete hosted session: %v\n", err)
+		}
+	}
 	windowName := session.SessionLabel
 	codexCmd := manager.BuildCodexLaunchCommand(opts)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
-		windowID, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, codexCmd))
+		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, codexCmd))
 		if err != nil {
+			cleanupIncompleteSession()
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 			return 1
 		}
-		windowName = strings.TrimSpace(windowID)
+		parts := strings.Split(strings.TrimSpace(windowDetails), "\t")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			cleanupIncompleteSession()
+			fmt.Fprintf(stderr, "failed to inspect tmux host window: %q\n", strings.TrimSpace(windowDetails))
+			return 1
+		}
+		windowName = strings.TrimSpace(parts[0])
+		windowIndex := strings.TrimSpace(parts[1])
+		if windowIndex != "0" {
+			if _, err := runner.Run(manager.TmuxMoveWindowToMainWindowCommandForSettings(settings, windowIndex)); err != nil {
+				cleanupIncompleteSession()
+				fmt.Fprintf(stderr, "failed to move tmux window to index 0: %v\n", err)
+				return 1
+			}
+		}
 	} else {
 		if hostCreated {
 			if _, err := runner.Run(manager.TmuxStartHostCommandForSettings(settings)); err != nil {
+				cleanupIncompleteSession()
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
@@ -272,16 +293,19 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 	}
 	mouse, err := runner.Run(manager.TmuxShowMouseCommandForSettings(settings))
 	if err != nil {
+		cleanupIncompleteSession()
 		fmt.Fprintf(stderr, "failed to inspect tmux mouse setting: %v\n", err)
 		return 1
 	}
 	if strings.TrimSpace(mouse) != "on" {
 		if _, err := runner.Run(manager.TmuxEnableMouseCommandForSettings(settings)); err != nil {
+			cleanupIncompleteSession()
 			fmt.Fprintf(stderr, "failed to enable tmux mouse support: %v\n", err)
 			return 1
 		}
 	}
 	if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
+		cleanupIncompleteSession()
 		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 		return 1
 	}
@@ -289,6 +313,7 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
 			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, codexCmd))
 			if err != nil {
+				cleanupIncompleteSession()
 				fmt.Fprintf(stderr, "failed to create tmux window: %v\n", err)
 				return 1
 			}
@@ -296,6 +321,7 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 		}
 	}
 	if err := registry.UpdateWindowID(session.SessionID, windowName); err != nil {
+		cleanupIncompleteSession()
 		fmt.Fprintf(stderr, "failed to persist hosted session: %v\n", err)
 		return 1
 	}

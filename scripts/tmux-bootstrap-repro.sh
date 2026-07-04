@@ -215,7 +215,7 @@ AINN_CLIENT_TTY_PATH="$client_tty_path" \
 AINN_BINARY_PATH="$binary_path" \
 AINN_CONFIG_DIR="$config_dir" \
 AINN_MANAGER_PORT="$manager_port" \
-env -u TMUX -u TMUX_PANE \
+env -u TMUX -u TMUX_PANE -u AINN_TMUX_ROOT_CHILD \
 script -q "$transcript_path" sh -lc 'tty > "$AINN_CLIENT_TTY_PATH"; exec "$AINN_BINARY_PATH" --config-dir "$AINN_CONFIG_DIR" --manager-port "$AINN_MANAGER_PORT"' >"$script_stdout_path" 2>"$script_stderr_path" &
 launcher_pid="$!"
 

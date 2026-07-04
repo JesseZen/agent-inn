@@ -42,7 +42,7 @@ func TestTmuxStartHostWithWindowCommandForSettings(t *testing.T) {
 			},
 		},
 	}, "solve problem A", []string{"codex", "--profile", "cli-openai"})
-	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai"}
+	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}", "codex", "--profile", "cli-openai"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
