@@ -25,6 +25,7 @@ const (
 	tmuxMainWindowName  = "ainn"
 	tmuxDebugEnvVar     = "AINN_TMUX_DEBUG"
 	tmuxDebugLogEnvVar  = "AINN_TMUX_DEBUG_LOG"
+	tmuxTraceWriteError = "write tmux trace "
 )
 
 type rootManager interface {
@@ -358,6 +359,10 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	if cfg.Settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeMainTUIWindow && os.Getenv(tmuxRootChildEnvVar) == "" {
 		runner := rootTmuxRunnerFactory(stdout, stderr)
 		if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
+			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 			fmt.Fprintf(stderr, "tmux is required for main-tui-window mode: %v\n", err)
 			return 1
 		}
