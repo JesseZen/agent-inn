@@ -1,8 +1,11 @@
 package manager
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 func TestTmuxDetectCommand(t *testing.T) {
@@ -25,6 +28,22 @@ func TestTmuxStartHostCommand(t *testing.T) {
 	got := TmuxStartHostCommand()
 	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxStartHostWithWindowCommandForSettings(t *testing.T) {
+	got := TmuxStartHostWithWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:    "ainn",
+				HostSession:   "ainn-host",
+				HostStartMode: "reuse-first-window",
+			},
+		},
+	}, "solve problem A", []string{"codex", "--profile", "cli-openai"})
+	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai"}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }

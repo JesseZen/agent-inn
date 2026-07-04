@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 const hostedSessionsFileName = "hosted-terminal-sessions.json"
@@ -42,7 +44,11 @@ type HostedSessionSummary struct {
 }
 
 func (r *HostedSessionRegistry) Summaries() ([]HostedSessionSummary, error) {
-	return r.summaries(hostedTMuxRunnerFactory())
+	return r.SummariesForSettings(defaultTmuxSettings())
+}
+
+func (r *HostedSessionRegistry) SummariesForSettings(settings config.Settings) ([]HostedSessionSummary, error) {
+	return r.summaries(settings, hostedTMuxRunnerFactory())
 }
 
 type hostedSessionFile struct {
@@ -80,18 +86,18 @@ func (r *HostedSessionRegistry) List() ([]HostedSessionRecord, error) {
 	return records, err
 }
 
-func (r *HostedSessionRegistry) summaries(runner hostedTMuxRunner) ([]HostedSessionSummary, error) {
+func (r *HostedSessionRegistry) summaries(settings config.Settings, runner hostedTMuxRunner) ([]HostedSessionSummary, error) {
 	records, err := r.List()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]HostedSessionSummary, 0, len(records))
-		windowSet, err := hostedWindowSetFromRunner(runner)
+	windows, err := hostedWindowDetailsFromRunnerForSettings(settings, runner)
 	if err != nil {
 		return nil, err
 	}
 	for _, session := range records {
-		status := hostedSessionStatusForWindow(windowSet, session.TmuxWindowID)
+		status := hostedSessionStatusForWindow(windows, session)
 		out = append(out, HostedSessionSummary{
 			HostedSessionRecord: session,
 			Status:              status,
@@ -102,6 +108,30 @@ func (r *HostedSessionRegistry) summaries(runner hostedTMuxRunner) ([]HostedSess
 
 func (r *HostedSessionRegistry) RemoveWithRunner(sessionID string, runner hostedTMuxRunner) error {
 	return r.Remove(sessionID, runner)
+}
+
+func (r *HostedSessionRegistry) RemoveForSettings(sessionID string, settings config.Settings, runner hostedTMuxRunner) error {
+	return r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+		if session.TmuxWindowID == "" {
+			delete(file.Sessions, sessionID)
+			return nil
+		}
+		windows, err := hostedWindowDetailsFromRunnerForSettings(settings, runner)
+		if err != nil {
+			return err
+		}
+		if status := hostedSessionStatusForWindow(windows, session); status == hostedSessionStatusActive {
+			if _, err := runner.Run(TmuxKillWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
+				return err
+			}
+		}
+		delete(file.Sessions, sessionID)
+		return nil
+	})
 }
 
 func (r *HostedSessionRegistry) Get(sessionID string) (HostedSessionRecord, bool, error) {
@@ -202,27 +232,7 @@ func (r *HostedSessionRegistry) Delete(sessionID string) error {
 }
 
 func (r *HostedSessionRegistry) Remove(sessionID string, runner hostedTMuxRunner) error {
-	return r.withLockedFile(func(file *hostedSessionFile) error {
-		session, ok := file.Sessions[sessionID]
-		if !ok {
-			return fmt.Errorf("hosted session %q not found", sessionID)
-		}
-		if session.TmuxWindowID == "" {
-			delete(file.Sessions, sessionID)
-			return nil
-		}
-		windowSet, err := hostedWindowSetFromRunner(runner)
-		if err != nil {
-			return err
-		}
-		if status := hostedSessionStatusForWindow(windowSet, session.TmuxWindowID); status == hostedSessionStatusActive {
-			if _, err := runner.Run(TmuxKillWindowCommand(session.TmuxWindowID)); err != nil {
-				return err
-			}
-		}
-		delete(file.Sessions, sessionID)
-		return nil
-	})
+	return r.RemoveForSettings(sessionID, defaultTmuxSettings(), runner)
 }
 
 func (r *HostedSessionRegistry) withLockedFile(fn func(*hostedSessionFile) error) error {

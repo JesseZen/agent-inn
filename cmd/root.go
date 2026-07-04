@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +15,11 @@ import (
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
 	"github.com/jesse/agent-inn/internal/manager"
+)
+
+const (
+	tmuxRootChildEnvVar = "AINN_TMUX_ROOT_CHILD"
+	tmuxMainWindowName  = "ainn"
 )
 
 type rootManager interface {
@@ -34,6 +40,16 @@ type rootProgram interface {
 	CommandLine() []string
 	WorkingDir() string
 	Env() map[string]string
+}
+
+type rootTmuxRunner interface {
+	Run(args []string) (string, error)
+}
+
+type rootTmuxRunnerFunc func([]string) (string, error)
+
+func (f rootTmuxRunnerFunc) Run(args []string) (string, error) {
+	return f(args)
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -76,6 +92,18 @@ var rootServerFactory = func(addr string, handler http.Handler) rootServer {
 
 var rootProgramFactory = func(addr string, startupStatus string, configDir string) rootProgram {
 	return newTUIProgram(addr, startupStatus, configDir)
+}
+
+var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+	return rootTmuxRunnerFunc(func(args []string) (string, error) {
+		cmd := exec.Command(args[0], args[1:]...)
+		var stdoutBuf bytes.Buffer
+		cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
+		cmd.Stderr = stderr
+		cmd.Stdin = os.Stdin
+		err := cmd.Run()
+		return stdoutBuf.String(), err
+	})
 }
 
 var rootLogWriter io.Writer = os.Stderr
@@ -263,18 +291,47 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	configPath := filepath.Join(*configDir, config.ConfigFileName)
 
+	cfg, err := config.LoadFile(configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
+		return 1
+	}
+	if cfg.Settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeMainTUIWindow && os.Getenv(tmuxRootChildEnvVar) == "" {
+		runner := rootTmuxRunnerFactory(stdout, stderr)
+		if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
+			fmt.Fprintf(stderr, "tmux is required for main-tui-window mode: %v\n", err)
+			return 1
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to locate executable: %v\n", err)
+			return 1
+		}
+		rootCmd := []string{"env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", *configDir, "--manager-port", strconv.Itoa(*managerPort)}
+		if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(cfg.Settings)); err != nil {
+			if _, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
+				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
+				return 1
+			}
+		} else if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(cfg.Settings, tmuxMainWindowName)); err != nil {
+			if _, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
+				fmt.Fprintf(stderr, "failed to recreate main tmux window: %v\n", err)
+				return 1
+			}
+		}
+		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(cfg.Settings)); err != nil {
+			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	release, err := rootLockerFactory().Acquire()
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
 	defer release()
-
-	cfg, err := config.LoadFile(configPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
-		return 1
-	}
 	if err := rootRunner(RootOptions{ConfigDir: *configDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1

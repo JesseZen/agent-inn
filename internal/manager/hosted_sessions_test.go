@@ -34,8 +34,8 @@ func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 	oldFactory := hostedTMuxRunnerFactory
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
-			if len(args) == len(TmuxListWindowsCommand()) {
-				return "ainn:worker-1\n", nil
+			if len(args) == len(TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())) && args[7] == "#{window_id}\t#{window_name}" {
+				return "ainn:worker-1\tworker 1\n", nil
 			}
 			return "", nil
 		})
@@ -78,10 +78,8 @@ func TestHostedSessionRegistrySummariesMatchRealTmuxWindowIDs(t *testing.T) {
 			switch {
 			case reflect.DeepEqual(args, TmuxHasSessionCommand()):
 				return "", nil
-			case len(args) == 8 && args[7] == "#{window_name}":
-				return "solve problem A\n", nil
-			case len(args) == 8 && args[7] == "#{window_id}":
-				return "@12\n", nil
+			case reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())):
+				return "@12\tsolve problem A\n", nil
 			default:
 				return "", nil
 			}
@@ -122,8 +120,8 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 			got = append(got, append([]string{}, args...))
-			if len(args) == len(TmuxListWindowsCommand()) {
-				return "ainn:worker-1\n", nil
+			if reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())) {
+				return "ainn:worker-1\tworker 1\n", nil
 			}
 			return "", nil
 		})
@@ -135,7 +133,7 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	}
 	want := [][]string{
 		TmuxHasSessionCommand(),
-		TmuxListWindowsCommand(),
+		TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings()),
 		TmuxKillWindowCommand("ainn:worker-1"),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -212,5 +210,48 @@ func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxHostMissing(t *testing.T
 	want := [][]string{TmuxHasSessionCommand()}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tmux calls: %#v", got)
+	}
+}
+
+func TestHostedSessionRegistrySummariesTreatsReusedWindowIDAsStale(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "cc",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldFactory := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			switch {
+			case reflect.DeepEqual(args, TmuxHasSessionCommand()):
+				return "", nil
+			case reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())):
+				return "@2\tcoleet\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldFactory }()
+
+	got, err := registry.Summaries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []HostedSessionSummary{{
+		HostedSessionRecord: created,
+		Status:              hostedSessionStatusStale,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }

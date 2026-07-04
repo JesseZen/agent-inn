@@ -11,6 +11,7 @@ import { createEventSource, createFetch, directory, json } from "./fixture/tui-s
 import { registerProxyCommands } from "../src/proxy/commands"
 import {
   toAinnUpstreams,
+  type HostedSessionSummary,
   type ProxyConfigStatus,
   type ProxySettings,
   type PluginDefinition,
@@ -91,6 +92,7 @@ function createProxyHarness() {
   ])
 
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
+  const hostedSessions: HostedSessionSummary[] = []
   const config: {
     status: ProxyConfigStatus
     settings: ProxySettings
@@ -111,6 +113,7 @@ function createProxyHarness() {
         tmux: {
           socket_name: "ainn",
           host_session: "ainn-host",
+          host_start_mode: "new-window",
         },
       },
     },
@@ -132,6 +135,7 @@ function createProxyHarness() {
     stopWorker: [] as number[],
     saveConfig: 0,
     getLogs: 0,
+    listHostedSessions: 0,
     testUpstream: [] as string[],
     testAllUpstreams: 0,
   }
@@ -189,6 +193,10 @@ function createProxyHarness() {
         settings: config.settings,
         status: config.status,
       })
+    }
+    if (url.pathname === "/api/hosted-sessions") {
+      calls.listHostedSessions += 1
+      return json({ sessions: hostedSessions })
     }
     if (url.pathname === "/api/workers/6767/logs") {
       calls.getLogs += 1
@@ -340,7 +348,7 @@ function createProxyHarness() {
     return fetch.fetch(input, init)
   }) as typeof fetch.fetch
 
-  return { calls, fetch: override }
+  return { calls, fetch: override, hostedSessions }
 }
 
 export async function mountProxyApp() {
@@ -404,6 +412,7 @@ export async function mountProxyApp() {
   return {
     api,
     calls: proxy.calls,
+    hostedSessions: proxy.hostedSessions,
     setup,
     frame() {
       return setup.captureCharFrame()

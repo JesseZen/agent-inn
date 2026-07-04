@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
+
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 type hostedTMuxRunner interface {
@@ -28,22 +30,38 @@ func (f hostedTMuxRunnerFunc) Run(args []string) (string, error) {
 }
 
 func TmuxListWindowsCommand() []string {
-	return append(tmuxPrefix(), "list-windows", "-t", tmuxHostSession, "-F", "#{window_id}")
+	return TmuxListWindowsCommandForSettings(defaultTmuxSettings())
+}
+
+func TmuxListWindowsCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "list-windows", "-t", tmuxHostSessionForSettings(settings), "-F", "#{window_id}")
+}
+
+func TmuxListWindowDetailsCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "list-windows", "-t", tmuxHostSessionForSettings(settings), "-F", "#{window_id}\t#{window_name}")
 }
 
 func TmuxKillWindowCommand(windowID string) []string {
-	target := tmuxHostSession + ":" + windowID
-	return append(tmuxPrefix(), "kill-window", "-t", target)
+	return TmuxKillWindowCommandForSettings(defaultTmuxSettings(), windowID)
 }
 
-func hostedSessionStatusForWindow(windowSet map[string]struct{}, windowID string) string {
-	if windowID == "" {
+func TmuxKillWindowCommandForSettings(settings config.Settings, windowID string) []string {
+	target := tmuxHostSessionForSettings(settings) + ":" + windowID
+	return append(tmuxPrefixForSettings(settings), "kill-window", "-t", target)
+}
+
+func hostedSessionStatusForWindow(windows map[string]string, session HostedSessionRecord) string {
+	if session.TmuxWindowID == "" {
 		return hostedSessionStatusStale
 	}
-	if _, ok := windowSet[windowID]; ok {
-		return hostedSessionStatusActive
+	windowName, ok := windows[session.TmuxWindowID]
+	if !ok {
+		return hostedSessionStatusStale
 	}
-	return hostedSessionStatusStale
+	if windowName != session.SessionLabel {
+		return hostedSessionStatusStale
+	}
+	return hostedSessionStatusActive
 }
 
 func hostedWindowSet(out string) map[string]struct{} {
@@ -58,16 +76,48 @@ func hostedWindowSet(out string) map[string]struct{} {
 	return windowSet
 }
 
-func hostedWindowSetFromRunner(runner hostedTMuxRunner) (map[string]struct{}, error) {
+func hostedWindowDetails(out string) map[string]string {
+	windows := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		windows[parts[0]] = parts[1]
+	}
+	return windows
+}
+
+func hostedWindowDetailsFromRunnerForSettings(settings config.Settings, runner hostedTMuxRunner) (map[string]string, error) {
 	if runner == nil {
-		return map[string]struct{}{}, nil
+		return map[string]string{}, nil
 	}
-	if _, err := runner.Run(TmuxHasSessionCommand()); err != nil {
-		return map[string]struct{}{}, nil
+	if _, err := runner.Run(TmuxHasSessionCommandForSettings(settings)); err != nil {
+		return map[string]string{}, nil
 	}
-	stdout, err := runner.Run(TmuxListWindowsCommand())
+	stdout, err := runner.Run(TmuxListWindowDetailsCommandForSettings(settings))
 	if err != nil {
 		return nil, err
 	}
-	return hostedWindowSet(stdout), nil
+	return hostedWindowDetails(stdout), nil
+}
+
+func hostedWindowSetFromRunnerForSettings(settings config.Settings, runner hostedTMuxRunner) (map[string]struct{}, error) {
+	windows, err := hostedWindowDetailsFromRunnerForSettings(settings, runner)
+	if err != nil {
+		return nil, err
+	}
+	windowSet := map[string]struct{}{}
+	for windowID := range windows {
+		windowSet[windowID] = struct{}{}
+	}
+	return windowSet, nil
+}
+
+func hostedWindowSetFromRunner(runner hostedTMuxRunner) (map[string]struct{}, error) {
+	return hostedWindowSetFromRunnerForSettings(defaultTmuxSettings(), runner)
 }

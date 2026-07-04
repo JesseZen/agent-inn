@@ -76,6 +76,99 @@ test("proxy settings editor patches settings through manager API", async () => {
   }
 })
 
+test("proxy settings host start mode save shows note when hosted sessions already exist", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.hostedSessions.splice(0, app.hostedSessions.length, {
+      session_id: "hs_1",
+      session_label: "solve problem A",
+      worker_name: "cli-openrouter",
+      worker_port: 11199,
+      created_at: "2026-07-03T00:00:00Z",
+      last_opened_at: "2026-07-03T00:00:00Z",
+      status: "active",
+    })
+
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir ~/.ainn")
+    })
+
+    for (let i = 0; i < 6; i++) {
+      app.api.keymap.dispatchCommand("dialog.select.next")
+      await app.render()
+    }
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    await app.render()
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("reuse-first-window")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.listHostedSessions === 1
+    }, 5000)
+    await wait(async () => {
+      await Bun.sleep(10)
+      await app.render()
+      const frame = app.frame().replace(/\s+/g, " ")
+      return frame.includes("Host start mode applies only to newly created tmux")
+    }, 5000)
+
+    expect(app.calls.patchSettings).toContainEqual({
+      terminal: { tmux: { host_start_mode: "reuse-first-window" } },
+    })
+    expect(app.calls.listHostedSessions).toBe(1)
+    const frame = app.frame().replace(/\s+/g, " ")
+    expect(frame).toContain("Host start mode applies only to newly created tmux")
+    expect(frame).toContain("hosts. Remove existing hosted terminal sessions to")
+    expect(frame).toContain("recreate the host.")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy settings host start mode accepts main-tui-window", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir ~/.ainn")
+    })
+
+    for (let i = 0; i < 6; i++) {
+      app.api.keymap.dispatchCommand("dialog.select.next")
+      await app.render()
+    }
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    await app.render()
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("main-tui-window")
+    await app.render()
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchSettings.some((entry) => entry.terminal?.tmux?.host_start_mode === "main-tui-window")
+    })
+
+    expect(app.calls.patchSettings).toContainEqual({
+      terminal: { tmux: { host_start_mode: "main-tui-window" } },
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy settings command is registered and config command is removed", async () => {
   const app = await mountProxyApp()
 

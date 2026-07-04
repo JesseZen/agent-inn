@@ -23,6 +23,7 @@ settings:
     tmux:
       socket_name: ainn-test
       host_session: ainn-test-host
+      host_start_mode: reuse-first-window
 plugins:
   image_filter:
     kind: request_middleware
@@ -60,6 +61,9 @@ upstreams:
 	}
 	if cfg.Settings.Terminal.Tmux.SocketName != "ainn-test" || cfg.Settings.Terminal.Tmux.HostSession != "ainn-test-host" {
 		t.Fatalf("expected tmux settings to load, got %#v", cfg.Settings.Terminal.Tmux)
+	}
+	if cfg.Settings.Terminal.Tmux.HostStartMode != "reuse-first-window" {
+		t.Fatalf("expected host start mode to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
@@ -102,8 +106,9 @@ upstreams:
 			Host:   "tmux",
 			Opener: "default",
 			Tmux: TmuxSettings{
-				SocketName:  "ainn",
-				HostSession: "ainn-host",
+				SocketName:    "ainn",
+				HostSession:   "ainn-host",
+				HostStartMode: "new-window",
 			},
 		},
 	}

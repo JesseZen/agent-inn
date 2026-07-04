@@ -142,6 +142,7 @@ settings:
     tmux:
       socket_name: ainn
       host_session: ainn-host
+      host_start_mode: new-window
 
 # Worker definitions
 workers:
@@ -183,6 +184,14 @@ upstreams:
 `role` 默认为 `"cli"`；`role: app` 的 Worker 不会出现在 `/launch` 选择器中。`log_level` 默认为 `"simple"`。
 
 `settings.state_dir` 用于存放 AINN 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
+
+`settings.terminal.tmux.host_start_mode` 默认是 `new-window`。
+
+- `new-window`：保持当前行为
+- `reuse-first-window`：在全新 hosted tmux host 上，让第一个 hosted session 直接使用 window `0`
+- `main-tui-window`：让 `./ainn` 本身运行在 tmux host 里，并把主 TUI 固定在 window `0`
+
+`reuse-first-window` 只影响新创建的 hosted tmux host。`main-tui-window` 会改变根命令 `./ainn` 的启动方式，并在后续启动时复用配置好的 tmux host。
 
 ### API Key 解析
 

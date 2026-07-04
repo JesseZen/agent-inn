@@ -111,7 +111,8 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 
 func (m *Manager) handleHostedSessions(rw http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		sessions, err := m.hostedSessions.Summaries()
+		cfg, _ := m.syncConfigFromStore()
+		sessions, err := m.hostedSessions.SummariesForSettings(cfg.Settings)
 		if err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
@@ -156,7 +157,8 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 		return
 	}
 	if r.Method == http.MethodDelete {
-		if err := m.hostedSessions.Remove(id, hostedTMuxRunnerFactory()); err != nil {
+		cfg, _ := m.syncConfigFromStore()
+		if err := m.hostedSessions.RemoveForSettings(id, cfg.Settings, hostedTMuxRunnerFactory()); err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
@@ -796,8 +798,9 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		DefaultMode *string `json:"default_mode"`
 	}
 	type tmuxPatch struct {
-		SocketName  *string `json:"socket_name"`
-		HostSession *string `json:"host_session"`
+		SocketName    *string `json:"socket_name"`
+		HostSession   *string `json:"host_session"`
+		HostStartMode *string `json:"host_start_mode"`
 	}
 	type terminalPatch struct {
 		Host   *string    `json:"host"`
@@ -841,6 +844,9 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 				}
 				if patch.Terminal.Tmux.HostSession != nil {
 					cfgRoot.Settings.Terminal.Tmux.HostSession = *patch.Terminal.Tmux.HostSession
+				}
+				if patch.Terminal.Tmux.HostStartMode != nil {
+					cfgRoot.Settings.Terminal.Tmux.HostStartMode = *patch.Terminal.Tmux.HostStartMode
 				}
 			}
 		}

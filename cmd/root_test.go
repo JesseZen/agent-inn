@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -126,6 +127,201 @@ providers:
 	}
 	if !called {
 		t.Fatal("root runner was not called")
+	}
+}
+
+func TestRunRootMainTUIWindowCreatesHostAndAttaches(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	var got [][]string
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	}
+	for i := range want {
+		if strings.Join(got[i], " ") != strings.Join(want[i], " ") {
+			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRunRootMainTUIWindowAttachesExistingHost(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	var got [][]string
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:ainn"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	}
+	for i := range want {
+		if strings.Join(got[i], " ") != strings.Join(want[i], " ") {
+			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRunRootMainTUIWindowRecreatesMissingMainWindowOnExistingHost(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	var got [][]string
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:ainn"},
+		{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	}
+	for i := range want {
+		if strings.Join(got[i], " ") != strings.Join(want[i], " ") {
+			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRunRootMainTUIWindowChildRunsRootRunnerDirectly(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	t.Setenv(tmuxRootChildEnvVar, "1")
+
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				t.Fatalf("tmux runner should not be used in child root: %#v", args)
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	var called bool
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		called = true
+		if opts.ConfigDir != dir {
+			t.Fatalf("unexpected config dir %s", opts.ConfigDir)
+		}
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if !called {
+		t.Fatal("expected root runner to run in tmux child process")
 	}
 }
 
@@ -331,6 +527,30 @@ func TestFlockLockerRejectsSecondAcquireOnSamePath(t *testing.T) {
 	}
 }
 
+func writeRootConfig(t *testing.T, configDir string, socketName string, hostSession string, hostStartMode string) {
+	t.Helper()
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+settings:
+  state_dir: ` + filepath.Join(configDir, "state") + `
+  log_dir: ` + filepath.Join(configDir, "logs") + `
+  terminal:
+    host: tmux
+    opener: default
+    tmux:
+      socket_name: ` + socketName + `
+      host_session: ` + hostSession + `
+      host_start_mode: ` + hostStartMode + `
+workers: {}
+upstreams: {}
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type fakeRootManager struct {
 	startErr                     error
 	startConfiguredWorkersCalled bool
@@ -361,11 +581,11 @@ func (m *fakeRootManager) StartUpstreamProber(_ time.Duration) func() {
 }
 
 type fakeRootServer struct {
-	addr         string
-	handler      http.Handler
+	addr          string
+	handler       http.Handler
 	listenStarted chan struct{}
-	listenCalled bool
-	closeCalled  bool
+	listenCalled  bool
+	closeCalled   bool
 }
 
 func (s *fakeRootServer) ensureListenStarted() {

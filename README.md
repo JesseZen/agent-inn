@@ -142,6 +142,7 @@ settings:
     tmux:
       socket_name: ainn
       host_session: ainn-host
+      host_start_mode: new-window
 
 # Worker definitions
 workers:
@@ -183,6 +184,14 @@ Leaving `api_format` empty or unset = native passthrough, no translation.
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `log_level` defaults to `"simple"`;
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
+
+`settings.terminal.tmux.host_start_mode` defaults to `new-window`.
+
+- `new-window`: keep the current behavior
+- `reuse-first-window`: on a brand-new hosted tmux host, place the first hosted session in window `0`
+- `main-tui-window`: start `./ainn` itself inside the tmux host and keep the main TUI in window `0`
+
+`reuse-first-window` only affects newly created hosted tmux hosts. `main-tui-window` changes how the root `./ainn` command starts and reuses the configured tmux host on later launches.
 
 ### API Key Resolution
 
