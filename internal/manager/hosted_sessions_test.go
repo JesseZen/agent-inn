@@ -100,6 +100,39 @@ func TestHostedSessionRegistrySummariesMatchRealTmuxWindowIDs(t *testing.T) {
 	}
 }
 
+func TestHostedSessionRegistrySummariesReturnsUnexpectedHasSessionError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	_, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hasSessionErr := errors.New("tmux socket permission denied")
+	oldFactory := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			if reflect.DeepEqual(args, TmuxHasSessionCommand()) {
+				return "", hasSessionErr
+			}
+			return "@12\tworker 1\n", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldFactory }()
+
+	summaries, err := registry.Summaries()
+	if !errors.Is(err, hasSessionErr) {
+		t.Fatalf("got summaries %#v and error %v, want error %v", summaries, err, hasSessionErr)
+	}
+}
+
 func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -138,6 +171,44 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tmux calls: %#v", got)
+	}
+}
+
+func TestHostedSessionRegistryRemoveReturnsUnexpectedHasSessionError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hasSessionErr := errors.New("tmux socket permission denied")
+	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		if reflect.DeepEqual(args, TmuxHasSessionCommand()) {
+			return "", hasSessionErr
+		}
+		return "@12\tworker 1\n", nil
+	})
+
+	err = registry.Remove(created.SessionID, runner)
+	if !errors.Is(err, hasSessionErr) {
+		t.Errorf("got error %v, want %v", err, hasSessionErr)
+	}
+
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []HostedSessionRecord{created}
+	if !reflect.DeepEqual(records, want) {
+		t.Fatalf("got records %#v, want %#v", records, want)
 	}
 }
 
@@ -192,7 +263,7 @@ func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxHostMissing(t *testing.T
 	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
 		got = append(got, append([]string{}, args...))
 		if strings.Join(args, " ") == strings.Join(TmuxHasSessionCommand(), " ") {
-			return "", errors.New("no server running")
+			return "", errors.New(tmuxNoServerRunningError)
 		}
 		return "", nil
 	})
