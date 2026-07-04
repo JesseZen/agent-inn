@@ -23,6 +23,7 @@ import (
 const (
 	tmuxRootChildEnvVar = "AINN_TMUX_ROOT_CHILD"
 	tmuxMainWindowName  = "ainn"
+	tmuxMainWindowIndex = "0"
 	tmuxDebugEnvVar     = "AINN_TMUX_DEBUG"
 	tmuxDebugLogEnvVar  = "AINN_TMUX_DEBUG_LOG"
 	tmuxTraceWriteError = "write tmux trace "
@@ -387,9 +388,17 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 				return 1
 			}
-			if _, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
+			createdWindowIndex, err := runner.Run(manager.TmuxStartMainWindowHostCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd))
+			if err != nil {
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
+			}
+			createdWindowIndex = strings.TrimSpace(createdWindowIndex)
+			if createdWindowIndex != tmuxMainWindowIndex {
+				if _, err := runner.Run(manager.TmuxMoveWindowToMainWindowCommandForSettings(cfg.Settings, createdWindowIndex)); err != nil {
+					fmt.Fprintf(stderr, "failed to move tmux main window: %v\n", err)
+					return 1
+				}
 			}
 		} else if paneStartCommand, err := runner.Run(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings)); err != nil {
 			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
@@ -415,7 +424,23 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 			}
 		}
 		if os.Getenv("TMUX") != "" && os.Getenv("TMUX_PANE") != "" {
-			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings)); err != nil {
+			currentSocketPath, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
+			currentSocketName := filepath.Base(currentSocketPath)
+			configuredSocketName := cfg.Settings.Terminal.Tmux.SocketName
+			if currentSocketName != configuredSocketName {
+				fmt.Fprintf(stderr, "unsupported tmux startup state: current tmux socket %q differs from configured tmux socket %q\n", currentSocketName, configuredSocketName)
+				return 1
+			}
+			clientName, err := runner.Run(manager.TmuxCurrentClientCommand(currentSocketPath))
+			if err != nil {
+				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to identify tmux client: %v\n", err)
+				return 1
+			}
+			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings, strings.TrimSpace(clientName))); err != nil {
 				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 					fmt.Fprintln(stderr, err)
 					return 1

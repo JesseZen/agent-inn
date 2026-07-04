@@ -31,6 +31,10 @@ if ! command -v script >/dev/null 2>&1; then
   printf 'script(1) is required for %s\n' "$(basename "$0")" >&2
   exit 1
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'python3 is required for %s\n' "$(basename "$0")" >&2
+  exit 1
+fi
 
 tmp_root="$(mktemp -d /tmp/ainn-tmux-repro.XXXXXX)"
 config_dir="$tmp_root/c"
