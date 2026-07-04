@@ -381,15 +381,43 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
-		} else if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(cfg.Settings, tmuxMainWindowName)); err != nil {
+		} else if paneStartCommand, err := runner.Run(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings)); err != nil {
 			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
-			if _, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
-				fmt.Fprintf(stderr, "failed to recreate main tmux window: %v\n", err)
+			if _, err := runner.Run(manager.TmuxCreateMainWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
+				fmt.Fprintf(stderr, "failed to create main tmux window: %v\n", err)
 				return 1
 			}
+		} else if !strings.Contains(paneStartCommand, exe) {
+			if _, err := runner.Run(manager.TmuxRespawnMainWindowCommandForSettings(cfg.Settings, rootCmd)); err != nil {
+				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to respawn main tmux window: %v\n", err)
+				return 1
+			}
+		}
+		if os.Getenv("TMUX") != "" && os.Getenv("TMUX_PANE") != "" {
+			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings)); err != nil {
+				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to switch tmux client: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		if _, err := runner.Run(manager.TmuxSelectMainWindowCommandForSettings(cfg.Settings)); err != nil {
+			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			fmt.Fprintf(stderr, "failed to select main tmux window: %v\n", err)
+			return 1
 		}
 		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(cfg.Settings)); err != nil {
 			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)

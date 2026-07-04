@@ -11,6 +11,7 @@ import (
 const (
 	tmuxSocketName   = "ainn"
 	tmuxHostSession  = "ainn-host"
+	tmuxMainWindowID = "0"
 	tmuxWindowPrefix = "ainn"
 )
 
@@ -80,6 +81,15 @@ func TmuxCreateWindowCommandForSettings(settings config.Settings, windowName str
 	return append(args, command...)
 }
 
+func tmuxMainWindowTargetForSettings(settings config.Settings) string {
+	return tmuxHostSessionForSettings(settings) + ":" + tmuxMainWindowID
+}
+
+func TmuxCreateMainWindowCommandForSettings(settings config.Settings, windowName string, command []string) []string {
+	args := append(tmuxPrefixForSettings(settings), "new-window", "-t", tmuxMainWindowTargetForSettings(settings), "-n", windowName, "-P", "-F", "#{window_id}")
+	return append(args, command...)
+}
+
 // TmuxSelectWindowCommand returns the argv that switches to a window in the AINN host.
 func TmuxSelectWindowCommand(windowID string) []string {
 	return TmuxSelectWindowCommandForSettings(defaultTmuxSettings(), windowID)
@@ -90,6 +100,10 @@ func TmuxSelectWindowCommandForSettings(settings config.Settings, windowID strin
 	return append(tmuxPrefixForSettings(settings), "select-window", "-t", target)
 }
 
+func TmuxSelectMainWindowCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "select-window", "-t", tmuxMainWindowTargetForSettings(settings))
+}
+
 // TmuxAttachCommand returns the argv that attaches to the AINN host session.
 func TmuxAttachCommand() []string {
 	return TmuxAttachCommandForSettings(defaultTmuxSettings())
@@ -97,6 +111,19 @@ func TmuxAttachCommand() []string {
 
 func TmuxAttachCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings), "attach-session", "-t", tmuxHostSessionForSettings(settings))
+}
+
+func TmuxMainWindowPaneStartCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "list-panes", "-t", tmuxMainWindowTargetForSettings(settings), "-F", "#{pane_start_command}")
+}
+
+func TmuxRespawnMainWindowCommandForSettings(settings config.Settings, command []string) []string {
+	args := append(tmuxPrefixForSettings(settings), "respawn-pane", "-k", "-t", tmuxMainWindowTargetForSettings(settings))
+	return append(args, command...)
+}
+
+func TmuxSwitchClientToMainWindowCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "switch-client", "-t", tmuxMainWindowTargetForSettings(settings))
 }
 
 // TmuxShowMouseCommand returns the argv that reads the AINN host mouse setting.
