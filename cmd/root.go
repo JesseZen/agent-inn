@@ -114,7 +114,7 @@ type rootLocker interface {
 	Acquire() (release func(), err error)
 }
 
-// flockLocker 用文件锁实现独占。锁文件路径固定，进程退出时由 OS 释放。
+// flockLocker 用文件锁实现独占。锁文件路径由 canonical config-dir 推导，进程退出时由 OS 释放。
 type flockLocker struct {
 	path string
 }
@@ -155,7 +155,7 @@ var rootLockerFactory = func(lockPath string) rootLocker {
 	return flockLocker{path: lockPath}
 }
 
-// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/ainn.lock。
+// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真实实例锁文件。
 func setRootLockerFactoryForTest(locker rootLocker) func() {
 	previous := rootLockerFactory
 	rootLockerFactory = func(string) rootLocker { return locker }
