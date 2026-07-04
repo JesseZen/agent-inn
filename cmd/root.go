@@ -103,15 +103,27 @@ var rootProgramFactory = func(addr string, startupStatus string, configDir strin
 	return newTUIProgram(addr, startupStatus, configDir)
 }
 
-var rootTmuxRunnerFactory = func(_ io.Writer, stderr io.Writer) rootTmuxRunner {
+var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
 	debugToStderr := os.Getenv(tmuxDebugEnvVar) == "1"
 	debugLogPath := os.Getenv(tmuxDebugLogEnvVar)
 	return rootTmuxRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
+		attachSession := false
+		for _, arg := range args {
+			if arg == "attach-session" {
+				attachSession = true
+				break
+			}
+		}
 		var stdoutBuf bytes.Buffer
 		var stderrBuf bytes.Buffer
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
+		if attachSession {
+			cmd.Stdout = stdout
+			cmd.Stderr = stderr
+		} else {
+			cmd.Stdout = &stdoutBuf
+			cmd.Stderr = &stderrBuf
+		}
 		cmd.Stdin = os.Stdin
 		startedAt := time.Now()
 		err := cmd.Run()
@@ -157,6 +169,11 @@ var rootTmuxRunnerFactory = func(_ io.Writer, stderr io.Writer) rootTmuxRunner {
 		}
 		return stdoutText, err
 	})
+}
+
+func isTmuxHostMissingError(err error) bool {
+	errText := err.Error()
+	return strings.Contains(errText, tmuxNoServerRunning) || strings.Contains(errText, tmuxCantFindSession)
 }
 
 var rootLogWriter io.Writer = os.Stderr
@@ -383,8 +400,7 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
-			errText := err.Error()
-			if !strings.Contains(errText, tmuxNoServerRunning) && !strings.Contains(errText, tmuxCantFindSession) {
+			if !isTmuxHostMissingError(err) {
 				fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 				return 1
 			}

@@ -57,7 +57,7 @@ trace_parse_failure=""
 initiating_client_tty=""
 
 tmux_cmd() {
-  TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" "$@"
+  TMUX_TMPDIR="$tmux_tmpdir" tmux -f /dev/null -L "$socket_name" "$@"
 }
 
 parse_jsonl_trace() {
@@ -163,7 +163,7 @@ cleanup() {
   local exit_code="$?"
   set +e
   if [ -n "${socket_name-}" ]; then
-    TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" kill-server >/dev/null 2>&1
+    TMUX_TMPDIR="$tmux_tmpdir" tmux -f /dev/null -L "$socket_name" kill-server >/dev/null 2>&1
   fi
   if [ -n "${launcher_pid-}" ] && [ -z "${launcher_status-}" ]; then
     wait "$launcher_pid" >/dev/null 2>&1

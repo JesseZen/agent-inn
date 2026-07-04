@@ -184,6 +184,51 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	}
 }
 
+func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("permission denied")
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Errorf("expected unexpected has-session error to fail launch")
+	}
+	if !strings.Contains(stderr.String(), "failed to inspect tmux host session") || !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("expected clear has-session failure, got %q", stderr.String())
+	}
+	for _, call := range got {
+		if len(call) > 3 && call[3] == "new-session" {
+			t.Errorf("unexpected new-session call after has-session failure: %#v", got)
+		}
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no hosted session registry records, got %#v", records)
+	}
+}
+
 func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")

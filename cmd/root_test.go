@@ -666,7 +666,7 @@ func TestRunRootMainTUIWindowWritesJSONLTracePerTmuxCommand(t *testing.T) {
 		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "can't find session\n", Err: "exit status 1", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"}, Stdout: "0\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
-		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "attached\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -704,10 +704,34 @@ func TestRunRootMainTUIWindowLogsFailedCommandBeforeReturningError(t *testing.T)
 		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"}, Stdout: "env AINN_TMUX_ROOT_CHILD=1 " + fakeTmuxCurrentExecutable(t) + "\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
-		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "attach failed\n", Err: "exit status 1", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "exit status 1", HasDuration: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRootTmuxRunnerStreamsAttachSessionToTerminalWriters(t *testing.T) {
+	installFakeTmuxOnPath(t)
+	t.Setenv(tmuxDebugEnvVar, "")
+	t.Setenv(tmuxDebugLogEnvVar, "")
+	t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "attached\n")
+	t.Setenv("FAKE_TMUX_ATTACH_STDERR", "attach stderr\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	got, err := rootTmuxRunnerFactory(&stdout, &stderr).Run([]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"})
+	if err != nil {
+		t.Fatalf("expected attach-session success, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected attach-session output not to be buffered, got %q", got)
+	}
+	if stdout.String() != "attached\n" {
+		t.Fatalf("expected attach-session stdout to stream to terminal writer, got %q", stdout.String())
+	}
+	if stderr.String() != "attach stderr\n" {
+		t.Fatalf("expected attach-session stderr to stream to terminal writer, got %q", stderr.String())
 	}
 }
 
@@ -837,7 +861,7 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 	}
 }
 
-func TestRunRootMainTUIWindowWithoutDebugDoesNotMirrorTmuxOutput(t *testing.T) {
+func TestRunRootMainTUIWindowWithoutDebugDoesNotMirrorControlCommandOutput(t *testing.T) {
 	for name, hasSession := range map[string]string{
 		"new host":      "0",
 		"existing host": "1",
@@ -868,8 +892,8 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotMirrorTmuxOutput(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 			}
-			if stdout.String() != "" {
-				t.Fatalf("expected stdout to stay quiet without tmux debug, got %q", stdout.String())
+			if stdout.String() != "attached session\n" {
+				t.Fatalf("expected only attach-session stdout to stream without tmux debug, got %q", stdout.String())
 			}
 			if stderr.String() != "" {
 				t.Fatalf("expected stderr to stay quiet without tmux debug, got %q", stderr.String())
@@ -993,12 +1017,15 @@ func TestRunRootMainTUIWindowWritesHumanTraceToStderr(t *testing.T) {
 		`stdout="tmux 3.6b\n"`,
 		"tmux trace: tmux -L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}",
 		"tmux trace: tmux -L ainn-test select-window -t ainn-test-host:0",
-		`stdout="attached\n"`,
+		"tmux trace: tmux -L ainn-test attach-session -t ainn-test-host",
 		"duration_ms=",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("expected stderr to contain %q, got %q", want, stderr.String())
 		}
+	}
+	if strings.Contains(stderr.String(), `stdout="attached\n"`) {
+		t.Fatalf("expected attach-session trace not to buffer interactive stdout, got %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), `{"argv":`) {
 		t.Fatalf("expected human-readable trace, got %q", stderr.String())
