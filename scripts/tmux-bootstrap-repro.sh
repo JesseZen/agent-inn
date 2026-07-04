@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly mode_fresh_outside="fresh-outside"
+readonly mode_stale_host="stale-host"
+readonly usage="usage: $(basename "$0") {$mode_fresh_outside|$mode_stale_host}"
+readonly term_name="xterm-256color"
+readonly client_format='#{client_tty}|#{session_name}|#{window_index}'
+readonly wait_attempts=50
+readonly wait_sleep_seconds=0.2
+
+mode="${1-}"
+if [ "$#" -ne 1 ] || { [ "$mode" != "$mode_fresh_outside" ] && [ "$mode" != "$mode_stale_host" ]; }; then
+  printf '%s\n' "$usage" >&2
+  exit 64
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+binary_path="$repo_root/ainn"
+if [ ! -x "$binary_path" ]; then
+  printf 'missing executable: %s\nrun `make build` first.\n' "$binary_path" >&2
+  exit 1
+fi
+if ! command -v tmux >/dev/null 2>&1; then
+  printf 'tmux is required for %s\n' "$(basename "$0")" >&2
+  exit 1
+fi
+if ! command -v script >/dev/null 2>&1; then
+  printf 'script(1) is required for %s\n' "$(basename "$0")" >&2
+  exit 1
+fi
+
+tmp_root="$(mktemp -d /tmp/ainn-tmux-repro.XXXXXX)"
+config_dir="$tmp_root/c"
+runtime_dir="$tmp_root/r"
+state_dir="$tmp_root/s"
+log_dir="$tmp_root/l"
+tmux_tmpdir="$tmp_root/t"
+trace_path="$tmp_root/tmux-trace.jsonl"
+transcript_path="$tmp_root/bootstrap.typescript"
+script_stdout_path="$tmp_root/script.stdout"
+script_stderr_path="$tmp_root/script.stderr"
+config_path="$config_dir/config.yaml"
+socket_name="ar-$RANDOM-$$"
+host_session="ar-host-$RANDOM-$$"
+manager_port="$((20000 + ((RANDOM << 1) + RANDOM) % 30000))"
+launcher_pid=""
+launcher_status=""
+
+tmux_cmd() {
+  TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" "$@"
+}
+
+show_diagnostics() {
+  local reason="$1"
+  local launcher_state="running"
+  local windows_output=""
+  local clients_output=""
+  local pane_output=""
+
+  if [ -n "$launcher_pid" ] && ! kill -0 "$launcher_pid" >/dev/null 2>&1 && [ -z "$launcher_status" ]; then
+    if wait "$launcher_pid"; then
+      launcher_status=0
+    else
+      launcher_status=$?
+    fi
+  fi
+  if [ -n "$launcher_status" ]; then
+    launcher_state="exited($launcher_status)"
+  fi
+  windows_output="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}' 2>/dev/null || true)"
+  clients_output="$(tmux_cmd list-clients -t "$host_session" -F "$client_format" 2>/dev/null || true)"
+  pane_output="$(tmux_cmd list-panes -t "$host_session:0" -F '#{pane_start_command}' 2>/dev/null || true)"
+
+  printf 'repro failed: %s\n' "$reason" >&2
+  printf 'mode: %s\n' "$mode" >&2
+  printf 'config_dir: %s\n' "$config_dir" >&2
+  printf 'runtime_dir: %s\n' "$runtime_dir" >&2
+  printf 'tmux_tmpdir: %s\n' "$tmux_tmpdir" >&2
+  printf 'socket_name: %s\n' "$socket_name" >&2
+  printf 'host_session: %s\n' "$host_session" >&2
+  printf 'manager_port: %s\n' "$manager_port" >&2
+  printf 'trace_path: %s\n' "$trace_path" >&2
+  printf 'transcript_path: %s\n' "$transcript_path" >&2
+  printf 'launcher: %s\n' "$launcher_state" >&2
+  printf 'windows:\n%s\n' "${windows_output:-<none>}" >&2
+  printf 'clients:\n%s\n' "${clients_output:-<none>}" >&2
+  printf 'pane_start_command:\n%s\n' "${pane_output:-<none>}" >&2
+  if [ -f "$trace_path" ]; then
+    printf 'trace_tail:\n' >&2
+    tail -n 20 "$trace_path" >&2 || true
+  else
+    printf 'trace_tail:\n<missing>\n' >&2
+  fi
+  if [ -f "$script_stderr_path" ]; then
+    printf 'script_stderr_tail:\n' >&2
+    tail -n 20 "$script_stderr_path" >&2 || true
+  fi
+  if [ -f "$transcript_path" ]; then
+    printf 'transcript_tail:\n' >&2
+    tail -n 20 "$transcript_path" >&2 || true
+  fi
+}
+
+cleanup() {
+  local exit_code="$?"
+  set +e
+  if [ -n "${socket_name-}" ]; then
+    TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" kill-server >/dev/null 2>&1
+  fi
+  if [ -n "${launcher_pid-}" ] && [ -z "${launcher_status-}" ]; then
+    wait "$launcher_pid" >/dev/null 2>&1
+  fi
+  exit "$exit_code"
+}
+trap cleanup EXIT
+
+mkdir -p "$config_dir" "$runtime_dir" "$state_dir" "$log_dir" "$tmux_tmpdir"
+cat >"$config_path" <<EOF
+settings:
+  state_dir: $state_dir
+  log_dir: $log_dir
+  terminal:
+    host: tmux
+    tmux:
+      socket_name: $socket_name
+      host_session: $host_session
+      host_start_mode: main-tui-window
+workers: {}
+upstreams: {}
+EOF
+
+if [ "$mode" = "$mode_stale_host" ]; then
+  if ! tmux_cmd new-session -d -s "$host_session" -n bootstrap "sh -c 'while :; do sleep 60; done'"; then
+    show_diagnostics "failed to create stale-host tmux session"
+    exit 1
+  fi
+  if ! tmux_cmd new-window -t "$host_session" -n old-bug "sh -c 'while :; do sleep 60; done'"; then
+    show_diagnostics "failed to create stale-host old-bug window"
+    exit 1
+  fi
+  if ! tmux_cmd kill-window -t "$host_session:0"; then
+    show_diagnostics "failed to remove stale-host window 0"
+    exit 1
+  fi
+  stale_windows="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}')"
+  if [ "$stale_windows" != "1:old-bug" ]; then
+    show_diagnostics "stale-host precondition mismatch"
+    exit 1
+  fi
+fi
+
+TERM="$term_name" script -q "$transcript_path" env -u TMUX -u TMUX_PANE TERM="$term_name" TMUX_TMPDIR="$tmux_tmpdir" XDG_RUNTIME_DIR="$runtime_dir" AINN_TMUX_DEBUG_LOG="$trace_path" "$binary_path" --config-dir "$config_dir" --manager-port "$manager_port" >"$script_stdout_path" 2>"$script_stderr_path" &
+launcher_pid="$!"
+
+host_seen=0
+attempt=0
+while [ "$attempt" -lt "$wait_attempts" ]; do
+  if tmux_cmd has-session -t "$host_session" >/dev/null 2>&1; then
+    host_seen=1
+    break
+  fi
+  if ! kill -0 "$launcher_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep "$wait_sleep_seconds"
+  attempt="$((attempt + 1))"
+done
+
+if [ "$host_seen" -ne 1 ]; then
+  show_diagnostics "bootstrap never created the isolated host session"
+  exit 1
+fi
+
+postcondition_met=0
+attempt=0
+while [ "$attempt" -lt "$wait_attempts" ]; do
+  windows_output="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}' 2>/dev/null || true)"
+  clients_output="$(tmux_cmd list-clients -t "$host_session" -F "$client_format" 2>/dev/null || true)"
+  pane_output="$(tmux_cmd list-panes -t "$host_session:0" -F '#{pane_start_command}' 2>/dev/null || true)"
+  trace_line_count="$(awk 'END { print NR }' "$trace_path" 2>/dev/null || printf '0')"
+
+  if printf '%s\n' "$windows_output" | grep -q '^0:' \
+    && printf '%s\n' "$clients_output" | awk -F '|' '$3 == "0" { found = 1 } END { exit found ? 0 : 1 }' \
+    && printf '%s\n' "$pane_output" | grep -Fq "$binary_path" \
+    && printf '%s\n' "$pane_output" | grep -Fq 'AINN_TMUX_ROOT_CHILD=1' \
+    && [ "$trace_line_count" -gt 0 ] \
+    && awk '/"argv":/ && /"stdout":/ && /"stderr":/ && /"err":/ && /"duration_ms":/ { next } { exit 1 } END { exit NR == 0 }' "$trace_path"; then
+    postcondition_met=1
+    break
+  fi
+
+  if ! kill -0 "$launcher_pid" >/dev/null 2>&1 && [ "$attempt" -ge 5 ]; then
+    break
+  fi
+  sleep "$wait_sleep_seconds"
+  attempt="$((attempt + 1))"
+done
+
+if [ "$postcondition_met" -ne 1 ]; then
+  show_diagnostics "bootstrap did not reach window 0 with an attached isolated client"
+  exit 1
+fi
+
+printf 'repro passed: %s\n' "$mode"
+printf 'artifact_root: %s\n' "$tmp_root"
+printf 'trace_path: %s\n' "$trace_path"
