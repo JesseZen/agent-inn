@@ -70,6 +70,16 @@ func TmuxStartHostWithWindowCommandForSettings(settings config.Settings, windowN
 	return append(args, command...)
 }
 
+func TmuxStartMainWindowHostCommandForSettings(settings config.Settings, windowName string, command []string) []string {
+	args := append(
+		tmuxPrefixForSettings(settings),
+		"new-session", "-d", "-s", tmuxHostSessionForSettings(settings),
+		"-n", windowName,
+		"-P", "-F", "#{window_index}",
+	)
+	return append(args, command...)
+}
+
 // TmuxCreateWindowCommand returns the argv that creates a new window in the AINN host
 // running the given command.
 func TmuxCreateWindowCommand(windowName string, command []string) []string {
@@ -122,8 +132,17 @@ func TmuxRespawnMainWindowCommandForSettings(settings config.Settings, command [
 	return append(args, command...)
 }
 
-func TmuxSwitchClientToMainWindowCommandForSettings(settings config.Settings) []string {
-	return append(tmuxPrefixForSettings(settings), "switch-client", "-t", tmuxMainWindowTargetForSettings(settings))
+func TmuxMoveWindowToMainWindowCommandForSettings(settings config.Settings, windowIndex string) []string {
+	source := tmuxHostSessionForSettings(settings) + ":" + windowIndex
+	return append(tmuxPrefixForSettings(settings), "move-window", "-s", source, "-t", tmuxMainWindowTargetForSettings(settings))
+}
+
+func TmuxCurrentClientCommand(socketPath string) []string {
+	return []string{"tmux", "-S", socketPath, "display-message", "-p", "#{client_name}"}
+}
+
+func TmuxSwitchClientToMainWindowCommandForSettings(settings config.Settings, clientName string) []string {
+	return append(tmuxPrefixForSettings(settings), "switch-client", "-c", clientName, "-t", tmuxMainWindowTargetForSettings(settings))
 }
 
 // TmuxShowMouseCommand returns the argv that reads the AINN host mouse setting.
