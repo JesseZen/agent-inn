@@ -444,7 +444,7 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 			}
 		}
 		if insideTmux {
-			clientName, err := runner.Run(manager.TmuxCurrentClientCommand(currentSocketPath))
+			clientRows, err := runner.Run(manager.TmuxListClientPanesCommand(currentSocketPath))
 			if err != nil {
 				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 					fmt.Fprintln(stderr, err)
@@ -453,7 +453,20 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "failed to identify tmux client: %v\n", err)
 				return 1
 			}
-			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings, strings.TrimSpace(clientName))); err != nil {
+			currentPaneID := os.Getenv("TMUX_PANE")
+			clientName := ""
+			for _, row := range strings.Split(strings.TrimSpace(clientRows), "\n") {
+				rowClientName, rowPaneID, _ := strings.Cut(row, "\t")
+				if rowPaneID == currentPaneID {
+					clientName = rowClientName
+					break
+				}
+			}
+			if clientName == "" {
+				fmt.Fprintf(stderr, "failed to identify tmux client: no client found for pane %s\n", currentPaneID)
+				return 1
+			}
+			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings, clientName)); err != nil {
 				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 					fmt.Fprintln(stderr, err)
 					return 1

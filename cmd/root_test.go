@@ -300,7 +300,7 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
 	t.Setenv("TMUX", "/tmp/tmux-1000/ainn-test,123,0")
-	t.Setenv("TMUX_PANE", "%1")
+	t.Setenv("TMUX_PANE", "%2")
 
 	var got [][]string
 	exe, err := os.Executable()
@@ -315,8 +315,8 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 				if len(args) > 3 && args[3] == "list-panes" {
 					return "env " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
 				}
-				if len(args) > 3 && args[3] == "display-message" {
-					return "client-1\n", nil
+				if len(args) > 3 && args[3] == "list-clients" {
+					return "client-1\t%1\nclient-2\t%2\n", nil
 				}
 				return "", nil
 			})
@@ -343,8 +343,65 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
-		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "display-message", "-p", "#{client_name}"},
-		{"tmux", "-L", "ainn-test", "switch-client", "-c", "client-1", "-t", "ainn-test-host:0"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
+		{"tmux", "-L", "ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowFailsWhenInsideTmuxClientPaneIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	t.Setenv("TMUX", "/tmp/tmux-1000/ainn-test,123,0")
+	t.Setenv("TMUX_PANE", "%3")
+
+	var got [][]string
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "list-panes" {
+					return "env " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
+				}
+				if len(args) > 3 && args[3] == "list-clients" {
+					return "client-1\t%1\nclient-2\t%2\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit when tmux client pane is missing")
+	}
+	if !strings.Contains(stderr.String(), "failed to identify tmux client") {
+		t.Fatalf("expected client lookup failure in stderr, got %q", stderr.String())
+	}
+
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -1708,7 +1765,7 @@ fi
 cmd=""
 for arg in "$@"; do
   case "$arg" in
-    has-session|new-session|list-panes|select-window|new-window|respawn-pane|move-window|display-message|switch-client|attach-session|show|set-option)
+    has-session|new-session|list-panes|list-clients|select-window|new-window|respawn-pane|move-window|switch-client|attach-session|show|set-option)
       cmd="$arg"
       break
       ;;
@@ -1770,10 +1827,10 @@ case "$cmd" in
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "move-window" ]] && exit 1
     exit 0
     ;;
-  display-message)
-    printf '%s' "${FAKE_TMUX_DISPLAY_MESSAGE_STDOUT:-}"
-    printf '%s' "${FAKE_TMUX_DISPLAY_MESSAGE_STDERR:-}" >&2
-    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "display-message" ]] && exit 1
+  list-clients)
+    printf '%s' "${FAKE_TMUX_LIST_CLIENTS_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_LIST_CLIENTS_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "list-clients" ]] && exit 1
     exit 0
     ;;
   switch-client)

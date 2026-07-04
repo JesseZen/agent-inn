@@ -137,8 +137,8 @@ func TmuxMoveWindowToMainWindowCommandForSettings(settings config.Settings, wind
 	return append(tmuxPrefixForSettings(settings), "move-window", "-s", source, "-t", tmuxMainWindowTargetForSettings(settings))
 }
 
-func TmuxCurrentClientCommand(socketPath string) []string {
-	return []string{"tmux", "-S", socketPath, "display-message", "-p", "#{client_name}"}
+func TmuxListClientPanesCommand(socketPath string) []string {
+	return []string{"tmux", "-S", socketPath, "list-clients", "-F", "#{client_name}\t#{pane_id}"}
 }
 
 func TmuxSwitchClientToMainWindowCommandForSettings(settings config.Settings, clientName string) []string {
