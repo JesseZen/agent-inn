@@ -149,6 +149,9 @@ var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRun
 				return stdoutText, fmt.Errorf("write tmux trace %s: %w", debugLogPath, closeErr)
 			}
 		}
+		if err != nil && strings.TrimSpace(stderrText) != "" {
+			return stdoutText, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderrText))
+		}
 		return stdoutText, err
 	})
 }
@@ -384,6 +387,10 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		} else if paneStartCommand, err := runner.Run(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings)); err != nil {
 			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			if !strings.Contains(err.Error(), "can't find window") {
+				fmt.Fprintf(stderr, "failed to inspect main tmux window: %v\n", err)
 				return 1
 			}
 			if _, err := runner.Run(manager.TmuxCreateMainWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {

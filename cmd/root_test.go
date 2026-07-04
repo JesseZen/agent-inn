@@ -392,6 +392,47 @@ func TestRunRootMainTUIWindowRespawnsWindowZeroWhenPaneCommandDiffers(t *testing
 	}
 }
 
+func TestRunRootMainTUIWindowAbortsWhenMainWindowInspectFailsWithoutMissingWindow(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_FAIL_COMMAND", "list-panes")
+	t.Setenv("FAKE_TMUX_LIST_PANES_STDERR", "permission denied\n")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "failed to inspect main tmux window") {
+		t.Fatalf("expected inspect failure in stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Fatalf("expected list-panes stderr in failure output, got %q", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}\n"
+	if string(got) != want {
+		t.Fatalf("expected bootstrap to stop after list-panes, got %q want %q", string(got), want)
+	}
+}
+
 func TestRunRootMainTUIWindowChildRunsRootRunnerDirectly(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
