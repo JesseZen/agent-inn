@@ -415,10 +415,11 @@ func TestRunRootMainTUIWindowFailsWhenTraceWriteFails(t *testing.T) {
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
 
 	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	tracePath := filepath.Join(t.TempDir(), "missing", "tmux-trace.jsonl")
 	installFakeTmuxOnPath(t)
 	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
 	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "missing host\n")
-	t.Setenv("AINN_TMUX_DEBUG_LOG", filepath.Join(t.TempDir(), "missing", "tmux-trace.jsonl"))
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
 
 	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
 		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
@@ -432,6 +433,12 @@ func TestRunRootMainTUIWindowFailsWhenTraceWriteFails(t *testing.T) {
 	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "write tmux trace "+tracePath) {
+		t.Fatalf("expected trace write failure in stderr, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "tmux is required for main-tui-window mode") {
+		t.Fatalf("expected stderr to avoid misleading tmux-required message, got %q", stderr.String())
 	}
 
 	got, err := os.ReadFile(callsPath)
