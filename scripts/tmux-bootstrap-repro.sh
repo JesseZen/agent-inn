@@ -5,7 +5,9 @@ readonly mode_fresh_outside="fresh-outside"
 readonly mode_stale_host="stale-host"
 readonly usage="usage: $(basename "$0") {$mode_fresh_outside|$mode_stale_host}"
 readonly term_name="xterm-256color"
-readonly client_format='#{client_tty}|#{session_name}|#{window_index}'
+readonly windows_format='#{window_index}:#{window_name}'
+readonly client_format='#{client_tty}|#{client_pid}|#{session_name}|#{window_index}'
+readonly pane_format='#{window_index}|#{pane_id}|#{pane_start_command}'
 readonly wait_attempts=50
 readonly wait_sleep_seconds=0.2
 
@@ -40,6 +42,7 @@ trace_path="$tmp_root/tmux-trace.jsonl"
 transcript_path="$tmp_root/bootstrap.typescript"
 script_stdout_path="$tmp_root/script.stdout"
 script_stderr_path="$tmp_root/script.stderr"
+client_tty_path="$tmp_root/client.tty"
 config_path="$config_dir/config.yaml"
 socket_name="ar-$RANDOM-$$"
 host_session="ar-host-$RANDOM-$$"
@@ -47,6 +50,7 @@ manager_port="$((20000 + ((RANDOM << 1) + RANDOM) % 30000))"
 launcher_pid=""
 launcher_status=""
 trace_parse_failure=""
+initiating_client_tty=""
 
 tmux_cmd() {
   TMUX_TMPDIR="$tmux_tmpdir" tmux -L "$socket_name" "$@"
@@ -116,9 +120,9 @@ show_diagnostics() {
   if [ -n "$launcher_status" ]; then
     launcher_state="exited($launcher_status)"
   fi
-  windows_output="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}' 2>/dev/null || true)"
+  windows_output="$(tmux_cmd list-windows -t "$host_session" -F "$windows_format" 2>/dev/null || true)"
   clients_output="$(tmux_cmd list-clients -t "$host_session" -F "$client_format" 2>/dev/null || true)"
-  pane_output="$(tmux_cmd list-panes -t "$host_session:0" -F '#{pane_start_command}' 2>/dev/null || true)"
+  pane_output="$(tmux_cmd list-panes -t "$host_session" -F "$pane_format" 2>/dev/null || true)"
 
   printf 'repro failed: %s\n' "$reason" >&2
   printf 'mode: %s\n' "$mode" >&2
@@ -128,12 +132,13 @@ show_diagnostics() {
   printf 'socket_name: %s\n' "$socket_name" >&2
   printf 'host_session: %s\n' "$host_session" >&2
   printf 'manager_port: %s\n' "$manager_port" >&2
+  printf 'initiating_client_tty: %s\n' "${initiating_client_tty:-<missing>}" >&2
   printf 'trace_path: %s\n' "$trace_path" >&2
   printf 'transcript_path: %s\n' "$transcript_path" >&2
   printf 'launcher: %s\n' "$launcher_state" >&2
   printf 'windows:\n%s\n' "${windows_output:-<none>}" >&2
   printf 'clients:\n%s\n' "${clients_output:-<none>}" >&2
-  printf 'pane_start_command:\n%s\n' "${pane_output:-<none>}" >&2
+  printf 'panes:\n%s\n' "${pane_output:-<none>}" >&2
   if [ -f "$trace_path" ]; then
     printf 'trace_tail:\n' >&2
     tail -n 20 "$trace_path" >&2 || true
@@ -198,8 +203,39 @@ if [ "$mode" = "$mode_stale_host" ]; then
   fi
 fi
 
-TERM="$term_name" script -q "$transcript_path" env -u TMUX -u TMUX_PANE TERM="$term_name" TMUX_TMPDIR="$tmux_tmpdir" XDG_RUNTIME_DIR="$runtime_dir" AINN_TMUX_DEBUG_LOG="$trace_path" "$binary_path" --config-dir "$config_dir" --manager-port "$manager_port" >"$script_stdout_path" 2>"$script_stderr_path" &
+TERM="$term_name" \
+TMUX_TMPDIR="$tmux_tmpdir" \
+XDG_RUNTIME_DIR="$runtime_dir" \
+AINN_TMUX_DEBUG_LOG="$trace_path" \
+AINN_CLIENT_TTY_PATH="$client_tty_path" \
+AINN_BINARY_PATH="$binary_path" \
+AINN_CONFIG_DIR="$config_dir" \
+AINN_MANAGER_PORT="$manager_port" \
+env -u TMUX -u TMUX_PANE \
+script -q "$transcript_path" sh -lc 'tty > "$AINN_CLIENT_TTY_PATH"; exec "$AINN_BINARY_PATH" --config-dir "$AINN_CONFIG_DIR" --manager-port "$AINN_MANAGER_PORT"' >"$script_stdout_path" 2>"$script_stderr_path" &
 launcher_pid="$!"
+
+client_tty_seen=0
+attempt=0
+while [ "$attempt" -lt "$wait_attempts" ]; do
+  if [ -s "$client_tty_path" ]; then
+    initiating_client_tty="$(tr -d '\r\n' < "$client_tty_path")"
+    if [ -n "$initiating_client_tty" ]; then
+      client_tty_seen=1
+      break
+    fi
+  fi
+  if ! kill -0 "$launcher_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep "$wait_sleep_seconds"
+  attempt="$((attempt + 1))"
+done
+
+if [ "$client_tty_seen" -ne 1 ]; then
+  show_diagnostics "failed to capture initiating client tty from script(1)"
+  exit 1
+fi
 
 trace_parsed=0
 attempt=0
@@ -242,14 +278,13 @@ fi
 postcondition_met=0
 attempt=0
 while [ "$attempt" -lt "$wait_attempts" ]; do
-  windows_output="$(tmux_cmd list-windows -t "$host_session" -F '#{window_index}:#{window_name}' 2>/dev/null || true)"
+  windows_output="$(tmux_cmd list-windows -t "$host_session" -F "$windows_format" 2>/dev/null || true)"
   clients_output="$(tmux_cmd list-clients -t "$host_session" -F "$client_format" 2>/dev/null || true)"
-  pane_output="$(tmux_cmd list-panes -t "$host_session:0" -F '#{pane_start_command}' 2>/dev/null || true)"
+  pane_output="$(tmux_cmd list-panes -t "$host_session" -F "$pane_format" 2>/dev/null || true)"
 
   if printf '%s\n' "$windows_output" | grep -q '^0:' \
-    && printf '%s\n' "$clients_output" | awk -F '|' '$3 == "0" { found = 1 } END { exit found ? 0 : 1 }' \
-    && printf '%s\n' "$pane_output" | grep -Fq "$binary_path" \
-    && printf '%s\n' "$pane_output" | grep -Fq 'AINN_TMUX_ROOT_CHILD=1'; then
+    && printf '%s\n' "$clients_output" | awk -F '|' -v expected_tty="$initiating_client_tty" '$1 == expected_tty && $4 == "0" { found = 1 } END { exit found ? 0 : 1 }' \
+    && printf '%s\n' "$pane_output" | awk -F '|' -v expected_path="$binary_path" '$1 == "0" && index($3, expected_path) && index($3, "AINN_TMUX_ROOT_CHILD=1") { found = 1 } END { exit found ? 0 : 1 }'; then
     postcondition_met=1
     break
   fi
@@ -263,6 +298,11 @@ done
 
 if [ "$postcondition_met" -ne 1 ]; then
   show_diagnostics "bootstrap did not reach window 0 with an attached isolated client"
+  exit 1
+fi
+
+if ! parse_jsonl_trace; then
+  show_diagnostics "${trace_parse_failure:-trace JSONL did not remain valid after bootstrap settled (trace_path: $trace_path)}"
   exit 1
 fi
 
