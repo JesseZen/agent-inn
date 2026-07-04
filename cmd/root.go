@@ -373,11 +373,19 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		rootCmd := []string{"env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", *configDir, "--manager-port", strconv.Itoa(*managerPort)}
 		if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(cfg.Settings)); err != nil {
+			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 			if _, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
 		} else if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(cfg.Settings, tmuxMainWindowName)); err != nil {
+			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 			if _, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
 				fmt.Fprintf(stderr, "failed to recreate main tmux window: %v\n", err)
 				return 1
