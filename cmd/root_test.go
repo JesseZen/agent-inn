@@ -679,6 +679,47 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 	}
 }
 
+func TestRunRootMainTUIWindowWithoutDebugDoesNotMirrorTmuxOutput(t *testing.T) {
+	for name, hasSession := range map[string]string{
+		"new host":      "0",
+		"existing host": "1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+			installFakeTmuxOnPath(t)
+			t.Setenv(tmuxDebugEnvVar, "")
+			t.Setenv(tmuxDebugLogEnvVar, "")
+			t.Setenv("FAKE_TMUX_HAS_SESSION", hasSession)
+			t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "@main-window\n")
+			t.Setenv("FAKE_TMUX_SELECT_WINDOW_STDOUT", "selected window\n")
+			t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "attached session\n")
+
+			restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+				t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+				return nil
+			})
+			defer restoreRoot()
+			restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+			defer restoreLocker()
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+			}
+			if stdout.String() != "" {
+				t.Fatalf("expected stdout to stay quiet without tmux debug, got %q", stdout.String())
+			}
+			if stderr.String() != "" {
+				t.Fatalf("expected stderr to stay quiet without tmux debug, got %q", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	sandboxDir := t.TempDir()
 	configDir := filepath.Join(sandboxDir, "config")

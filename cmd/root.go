@@ -100,15 +100,15 @@ var rootProgramFactory = func(addr string, startupStatus string, configDir strin
 	return newTUIProgram(addr, startupStatus, configDir)
 }
 
-var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+var rootTmuxRunnerFactory = func(_ io.Writer, stderr io.Writer) rootTmuxRunner {
 	debugToStderr := os.Getenv(tmuxDebugEnvVar) == "1"
 	debugLogPath := os.Getenv(tmuxDebugLogEnvVar)
 	return rootTmuxRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
 		var stdoutBuf bytes.Buffer
 		var stderrBuf bytes.Buffer
-		cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
-		cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
 		cmd.Stdin = os.Stdin
 		startedAt := time.Now()
 		err := cmd.Run()
