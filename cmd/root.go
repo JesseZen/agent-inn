@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -21,6 +23,8 @@ import (
 const (
 	tmuxRootChildEnvVar = "AINN_TMUX_ROOT_CHILD"
 	tmuxMainWindowName  = "ainn"
+	tmuxDebugEnvVar     = "AINN_TMUX_DEBUG"
+	tmuxDebugLogEnvVar  = "AINN_TMUX_DEBUG_LOG"
 )
 
 type rootManager interface {
@@ -96,14 +100,55 @@ var rootProgramFactory = func(addr string, startupStatus string, configDir strin
 }
 
 var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+	debugToStderr := os.Getenv(tmuxDebugEnvVar) == "1"
+	debugLogPath := os.Getenv(tmuxDebugLogEnvVar)
 	return rootTmuxRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
 		var stdoutBuf bytes.Buffer
+		var stderrBuf bytes.Buffer
 		cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
-		cmd.Stderr = stderr
+		cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 		cmd.Stdin = os.Stdin
+		startedAt := time.Now()
 		err := cmd.Run()
-		return stdoutBuf.String(), err
+		duration := time.Since(startedAt)
+		stdoutText := stdoutBuf.String()
+		stderrText := stderrBuf.String()
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		if debugToStderr {
+			fmt.Fprintf(stderr, "tmux trace: %s duration_ms=%d stdout=%q stderr=%q err=%q\n", strings.Join(args, " "), duration.Milliseconds(), stdoutText, stderrText, errText)
+		}
+		if debugLogPath != "" {
+			record := struct {
+				Argv       []string `json:"argv"`
+				Stdout     string   `json:"stdout"`
+				Stderr     string   `json:"stderr"`
+				Err        string   `json:"err"`
+				DurationMS int64    `json:"duration_ms"`
+			}{
+				Argv:       append([]string{}, args...),
+				Stdout:     stdoutText,
+				Stderr:     stderrText,
+				Err:        errText,
+				DurationMS: duration.Milliseconds(),
+			}
+			f, openErr := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+			if openErr != nil {
+				return stdoutText, fmt.Errorf("write tmux trace %s: %w", debugLogPath, openErr)
+			}
+			encodeErr := json.NewEncoder(f).Encode(record)
+			closeErr := f.Close()
+			if encodeErr != nil {
+				return stdoutText, fmt.Errorf("write tmux trace %s: %w", debugLogPath, encodeErr)
+			}
+			if closeErr != nil {
+				return stdoutText, fmt.Errorf("write tmux trace %s: %w", debugLogPath, closeErr)
+			}
+		}
+		return stdoutText, err
 	})
 }
 

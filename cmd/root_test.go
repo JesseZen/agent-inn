@@ -3,12 +3,14 @@ package cmd
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -326,6 +328,225 @@ func TestRunRootMainTUIWindowChildRunsRootRunnerDirectly(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected root runner to run in tmux child process")
+	}
+}
+
+func TestRunRootMainTUIWindowWritesJSONLTracePerTmuxCommand(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "0")
+	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "missing host\n")
+	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "@1\n")
+	t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "attached\n")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readTmuxTraceViews(t, tracePath)
+	want := []tmuxTraceView{
+		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "missing host\n", Err: "exit status 1", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"}, Stdout: "@1\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "attached\n", Stderr: "", Err: "", HasDuration: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowLogsFailedCommandBeforeReturningError(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_ATTACH_STDERR", "attach failed\n")
+	t.Setenv("FAKE_TMUX_FAIL_COMMAND", "attach-session")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+
+	got := readTmuxTraceViews(t, tracePath)
+	want := []tmuxTraceView{
+		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:ainn"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "attach failed\n", Err: "exit status 1", HasDuration: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowFailsWhenTraceWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "missing host\n")
+	t.Setenv("AINN_TMUX_DEBUG_LOG", filepath.Join(t.TempDir(), "missing", "tmux-trace.jsonl"))
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "-V\n" {
+		t.Fatalf("expected trace write failure to abort after first tmux command, got %q", string(got))
+	}
+}
+
+func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	traceDir := t.TempDir()
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	entries, err := os.ReadDir(traceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no trace files, got %#v", entries)
+	}
+}
+
+func TestRunRootMainTUIWindowWritesHumanTraceToStderr(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG", "1")
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "attached\n")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	for _, want := range []string{
+		"tmux trace: tmux -V",
+		`stdout="tmux 3.6b\n"`,
+		"tmux trace: tmux -L ainn-test select-window -t ainn-test-host:ainn",
+		`stdout="attached\n"`,
+		"duration_ms=",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected stderr to contain %q, got %q", want, stderr.String())
+		}
+	}
+	if strings.Contains(stderr.String(), `{"argv":`) {
+		t.Fatalf("expected human-readable trace, got %q", stderr.String())
+	}
+}
+
+func TestRunRootMainTUIWindowChildDoesNotCreateTraceLog(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	t.Setenv(tmuxRootChildEnvVar, "1")
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				t.Fatalf("tmux runner should not be used in child root: %#v", args)
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(tracePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no child trace log, got err=%v", err)
 	}
 }
 
@@ -856,4 +1077,116 @@ func (p *fakeRootProgram) WorkingDir() string {
 
 func (p *fakeRootProgram) Env() map[string]string {
 	return map[string]string{}
+}
+
+type tmuxTraceRecord struct {
+	Argv       []string `json:"argv"`
+	Stdout     string   `json:"stdout"`
+	Stderr     string   `json:"stderr"`
+	Err        string   `json:"err"`
+	DurationMS int64    `json:"duration_ms"`
+}
+
+type tmuxTraceView struct {
+	Argv        []string
+	Stdout      string
+	Stderr      string
+	Err         string
+	HasDuration bool
+}
+
+func installFakeTmuxOnPath(t *testing.T) {
+	t.Helper()
+	fakeBinDir := t.TempDir()
+	fakeTmuxPath := filepath.Join(fakeBinDir, "tmux")
+	script := `#!/usr/bin/env bash
+set -eu
+if [[ -n "${FAKE_TMUX_CALLS_FILE:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_TMUX_CALLS_FILE"
+fi
+if [[ "${1:-}" == "-V" ]]; then
+  printf 'tmux 3.6b\n'
+  exit 0
+fi
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    has-session|new-session|select-window|new-window|attach-session)
+      cmd="$arg"
+      break
+      ;;
+  esac
+done
+case "$cmd" in
+  has-session)
+    if [[ "${FAKE_TMUX_HAS_SESSION:-0}" == "1" ]]; then
+      printf '%s' "${FAKE_TMUX_HAS_SESSION_STDOUT:-}"
+      printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-}" >&2
+      exit 0
+    fi
+    printf '%s' "${FAKE_TMUX_HAS_SESSION_STDERR:-missing host\n}" >&2
+    exit 1
+    ;;
+  new-session)
+    printf '%s' "${FAKE_TMUX_NEW_SESSION_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_NEW_SESSION_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "new-session" ]] && exit 1
+    exit 0
+    ;;
+  select-window)
+    printf '%s' "${FAKE_TMUX_SELECT_WINDOW_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_SELECT_WINDOW_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "select-window" ]] && exit 1
+    exit 0
+    ;;
+  new-window)
+    printf '%s' "${FAKE_TMUX_NEW_WINDOW_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_NEW_WINDOW_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "new-window" ]] && exit 1
+    exit 0
+    ;;
+  attach-session)
+    printf '%s' "${FAKE_TMUX_ATTACH_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_ATTACH_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "attach-session" ]] && exit 1
+    exit 0
+    ;;
+  *)
+    printf 'unexpected tmux args: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac
+`
+	if err := os.WriteFile(fakeTmuxPath, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func readTmuxTraceViews(t *testing.T, tracePath string) []tmuxTraceView {
+	t.Helper()
+	data, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	views := make([]tmuxTraceView, 0, len(lines))
+	for _, line := range lines {
+		var record tmuxTraceRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("failed to parse trace line %q: %v", line, err)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("failed to inspect trace line %q: %v", line, err)
+		}
+		views = append(views, tmuxTraceView{
+			Argv:        record.Argv,
+			Stdout:      record.Stdout,
+			Stderr:      record.Stderr,
+			Err:         record.Err,
+			HasDuration: raw["duration_ms"] != nil,
+		})
+	}
+	return views
 }
