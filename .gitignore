@@ -13,6 +13,7 @@ ainn
 
 # Internal dev docs (kept local only)
 docs/
+.worktrees/
 
 # Dependencies
 node_modules/
