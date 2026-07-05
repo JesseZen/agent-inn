@@ -185,6 +185,66 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	}
 }
 
+func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New(tmuxMissingSocketErrorText)
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--cd", "/tmp/work", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("expected success, got %d", code)
+	}
+
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexCmd := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{
+		Profile:    "cli-openai",
+		Workspace:  "/tmp/work",
+		WorkerPort: 11199,
+	})
+	want := [][]string{
+		manager.TmuxDetectCommand(),
+		manager.TmuxHasSessionCommandForSettings(cfg.Settings),
+		manager.TmuxStartHostCommandForSettings(cfg.Settings),
+		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
+		manager.TmuxThemeCommandForSettings(cfg.Settings),
+		manager.TmuxSelectWindowCommandForSettings(cfg.Settings, "solve problem A"),
+		manager.TmuxCreateWindowCommandForSettings(cfg.Settings, "solve problem A", codexCmd),
+		manager.TmuxAttachCommandForSettings(cfg.Settings),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
