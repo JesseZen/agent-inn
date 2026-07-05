@@ -89,6 +89,130 @@ providers:
 	}
 }
 
+func TestRunDefaultNormalizesConfigDirForRootRunner(t *testing.T) {
+	workDir := t.TempDir()
+	configDir := filepath.Join(workDir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	t.Chdir(workDir)
+
+	type observedRootOptions struct {
+		ConfigDir   string
+		ConfigPath  string
+		ManagerPort int
+	}
+	var got observedRootOptions
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		got = observedRootOptions{
+			ConfigDir:   opts.ConfigDir,
+			ConfigPath:  opts.ConfigPath,
+			ManagerPort: opts.ManagerPort,
+		}
+		return nil
+	})
+	defer restore()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", "./config/..//config", "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := observedRootOptions{
+		ConfigDir:   configDir,
+		ConfigPath:  filepath.Join(configDir, "config.yaml"),
+		ManagerPort: 19090,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected root options: got %#v want %#v", got, want)
+	}
+}
+
+func TestRunDefaultExpandsHomeConfigDirForRootRunner(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	configDir := filepath.Join(homeDir, "ainn-config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+
+	type observedRootOptions struct {
+		ConfigDir  string
+		ConfigPath string
+	}
+	var got observedRootOptions
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		got = observedRootOptions{ConfigDir: opts.ConfigDir, ConfigPath: opts.ConfigPath}
+		return nil
+	})
+	defer restore()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", "~/ainn-config", "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := observedRootOptions{
+		ConfigDir:  configDir,
+		ConfigPath: filepath.Join(configDir, "config.yaml"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected root options: got %#v want %#v", got, want)
+	}
+}
+
+func TestRunDefaultNormalizesSymlinkConfigDirForRootRunnerAndLock(t *testing.T) {
+	workDir := t.TempDir()
+	targetDir := filepath.Join(workDir, "target")
+	linkDir := filepath.Join(workDir, "link")
+	writeRootConfig(t, targetDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workDir)
+
+	type observedRootOptions struct {
+		ConfigDir  string
+		ConfigPath string
+	}
+	var got observedRootOptions
+	restore := SetRootRunnerForTest(func(opts RootOptions) error {
+		got = observedRootOptions{ConfigDir: opts.ConfigDir, ConfigPath: opts.ConfigPath}
+		return nil
+	})
+	defer restore()
+	var gotLockPath string
+	previousLockerFactory := rootLockerFactory
+	rootLockerFactory = func(lockPath string) rootLocker {
+		gotLockPath = lockPath
+		return noopLocker{}
+	}
+	defer func() { rootLockerFactory = previousLockerFactory }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", "./link", "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := observedRootOptions{
+		ConfigDir:  linkDir,
+		ConfigPath: filepath.Join(linkDir, "config.yaml"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected root options: got %#v want %#v", got, want)
+	}
+	wantLockPath, err := rootLockPath(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotLockPath != wantLockPath {
+		t.Fatalf("unexpected lock path: got %q want %q", gotLockPath, wantLockPath)
+	}
+}
+
 func TestRunDefaultRejectsLegacyConfigFlag(t *testing.T) {
 	var stderr bytes.Buffer
 	code := Run([]string{"--config", "config.yaml"}, &bytes.Buffer{}, &stderr)
@@ -178,6 +302,61 @@ func TestRunRootMainTUIWindowCreatesHostAndAttaches(t *testing.T) {
 
 	var stderr bytes.Buffer
 	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowChildCommandUsesNormalizedConfigDir(t *testing.T) {
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, "config")
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	t.Chdir(workDir)
+
+	var got [][]string
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "new-session" {
+					return "0\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", "./config/..//config", "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
