@@ -18,13 +18,15 @@ import (
 type RuntimeBuilder struct{}
 
 type externalPluginManifest struct {
-	Name            string   `yaml:"name" json:"name"`
-	Kind            string   `yaml:"kind" json:"kind"`
-	Version         string   `yaml:"version" json:"version"`
-	ProtocolVersion string   `yaml:"protocol_version" json:"protocol_version"`
-	Command         string   `yaml:"command,omitempty" json:"command,omitempty"`
-	Args            []string `yaml:"args,omitempty" json:"args,omitempty"`
-	Path            string   `yaml:"path,omitempty" json:"path,omitempty"`
+	Name            string                          `yaml:"name" json:"name"`
+	Kind            string                          `yaml:"kind" json:"kind"`
+	Version         string                          `yaml:"version" json:"version"`
+	ProtocolVersion string                          `yaml:"protocol_version" json:"protocol_version"`
+	Command         string                          `yaml:"command,omitempty" json:"command,omitempty"`
+	Args            []string                        `yaml:"args,omitempty" json:"args,omitempty"`
+	Path            string                          `yaml:"path,omitempty" json:"path,omitempty"`
+	Protocols       []appruntime.ProtocolKind       `yaml:"protocols" json:"protocols"`
+	Capabilities    []appruntime.ProtocolCapability `yaml:"capabilities" json:"capabilities"`
 }
 
 type resolvedExternalPlugin struct {
@@ -188,6 +190,10 @@ func resolveExternalPlugin(pluginName string, definition config.PluginDefinition
 			Command:         executable,
 			Args:            append([]string(nil), manifest.Args...),
 			ProtocolVersion: manifest.ProtocolVersion,
+			ProtocolSupport: appruntime.ModuleProtocolSupport{
+				Protocols:    append([]appruntime.ProtocolKind(nil), manifest.Protocols...),
+				Capabilities: append([]appruntime.ProtocolCapability(nil), manifest.Capabilities...),
+			},
 		},
 		manifest: manifest,
 	}, nil

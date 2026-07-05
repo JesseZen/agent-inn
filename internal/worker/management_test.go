@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -70,6 +71,55 @@ func TestWorkerManagementStatusIncludesConfigPatchState(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), `"hook_statuses":{"config_patch":{"state":"active"}}`) {
 		t.Fatalf("status missing hook_statuses config_patch state: %s", res.Body.String())
+	}
+}
+
+func TestWorkerManagementStatusIncludesProtocolMetadata(t *testing.T) {
+	w := mustNewWorker(t, Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream: upstream.RuntimeUpstream{
+				Name:      "openai",
+				BaseURL:   "https://api.openai.com/v1",
+				APIFormat: "responses",
+			},
+			Protocol: appruntime.ProtocolResponses,
+			ModuleSupport: map[string]appruntime.ModuleProtocolSupport{
+				"image_filter": {
+					Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+					Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
+				},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://proxy.local/_proxy/status", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+
+	var got struct {
+		Protocol      appruntime.ProtocolKind                     `json:"protocol"`
+		ModuleSupport map[string]appruntime.ModuleProtocolSupport `json:"module_support"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := struct {
+		Protocol      appruntime.ProtocolKind                     `json:"protocol"`
+		ModuleSupport map[string]appruntime.ModuleProtocolSupport `json:"module_support"`
+	}{
+		Protocol: appruntime.ProtocolResponses,
+		ModuleSupport: map[string]appruntime.ModuleProtocolSupport{
+			"image_filter": {
+				Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+				Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad protocol metadata:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

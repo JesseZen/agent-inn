@@ -5,10 +5,12 @@ import (
 	"io"
 	"reflect"
 	"testing"
+
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 func TestBuildRequestMiddlewaresBuildsFixedOrderAndNormalizesAPITranslate(t *testing.T) {
-	modules, configs, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+	modules, configs, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
 		"debug_sse":      {Enabled: true},
 		"request_log":    {Enabled: true},
 		"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-test"}},
@@ -36,7 +38,7 @@ func TestBuildRequestMiddlewaresBuildsFixedOrderAndNormalizesAPITranslate(t *tes
 }
 
 func TestBuildRequestMiddlewaresRejectsUnknownName(t *testing.T) {
-	_, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+	_, _, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
 		"unknown": {Enabled: true},
 	}, BuildDependencies{Stderr: io.Discard})
 	if err == nil {
@@ -45,7 +47,7 @@ func TestBuildRequestMiddlewaresRejectsUnknownName(t *testing.T) {
 }
 
 func TestBuildRequestMiddlewaresBuildsExternalRequestMiddleware(t *testing.T) {
-	modules, configs, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+	modules, configs, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
 		"api_translate":   {Enabled: true},
 		"external_filter": {Enabled: true},
 	}, BuildDependencies{
@@ -75,7 +77,7 @@ func TestBuildRequestMiddlewaresBuildsExternalRequestMiddleware(t *testing.T) {
 }
 
 func TestBuildRequestMiddlewaresReplacesBuiltinWithExternalRuntime(t *testing.T) {
-	modules, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+	modules, _, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
 		"image_filter": {Enabled: true},
 	}, BuildDependencies{
 		Stderr: io.Discard,
@@ -101,6 +103,57 @@ func TestBuildRequestMiddlewaresReplacesBuiltinWithExternalRuntime(t *testing.T)
 	}
 	if string(req.Body) != `{"tools":[{"type":"image_generation"},{"type":"function","name":"keep"}]}` {
 		t.Fatalf("builtin image_filter was not replaced by external runtime: %s", req.Body)
+	}
+}
+
+func TestBuildRequestMiddlewaresReturnsProtocolSupport(t *testing.T) {
+	_, _, support, err := BuildRequestMiddlewares(map[string]ModuleConfig{
+		"api_translate": {Enabled: true},
+	}, BuildDependencies{
+		APIFormat: "chat_completions",
+		Stderr:    io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]appruntime.ModuleProtocolSupport{
+		"image_filter": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
+		},
+		"debug_sse": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents},
+		},
+		"api_translate": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+			},
+			Capabilities: []appruntime.ProtocolCapability{
+				appruntime.ProtocolCapabilityInputText,
+				appruntime.ProtocolCapabilityToolCalls,
+				appruntime.ProtocolCapabilityStreamEvents,
+			},
+		},
+		"model_override": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+			},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+		},
+		"request_log": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolClaudeCode,
+			},
+		},
+	}
+	if !reflect.DeepEqual(support, want) {
+		t.Fatalf("bad support:\ngot  %#v\nwant %#v", support, want)
 	}
 }
 

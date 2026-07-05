@@ -70,11 +70,12 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 				Command:         plugin.Command,
 				Args:            append([]string(nil), plugin.Args...),
 				ProtocolVersion: plugin.ProtocolVersion,
+				ProtocolSupport: plugin.ProtocolSupport,
 				Stderr:          os.Stderr,
 			}
 		}
 	}
-	modules, requestStates, err := module.BuildRequestMiddlewares(cfg.Modules, module.BuildDependencies{
+	modules, requestStates, support, err := module.BuildRequestMiddlewares(cfg.Modules, module.BuildDependencies{
 		APIFormat:       string(cfg.Upstream.APIFormat),
 		Stderr:          os.Stderr,
 		ExternalRequest: externalRequest,
@@ -102,6 +103,8 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		RequestModuleStates:  requestStates,
 		HookConfigs:          module.CloneModuleConfigs(cfg.Hooks),
 		Plugins:              cfg.Plugins,
+		Protocol:             appruntime.ProtocolKindFromAPIFormat(cfg.Upstream.APIFormat),
+		ModuleSupport:        support,
 		Modules:              modules,
 	}
 	compiledUpstream, err := upstream.Compile(cfg.Upstream)
@@ -116,8 +119,12 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 				Command:         plugin.Command,
 				Args:            append([]string(nil), plugin.Args...),
 				ProtocolVersion: plugin.ProtocolVersion,
+				ProtocolSupport: plugin.ProtocolSupport,
 			}
 		}
+	}
+	for name, hookSupport := range modulehook.Support(externalHooks) {
+		snapshot.ModuleSupport[name] = hookSupport
 	}
 	hooks, err := modulehook.Build(cfg.Hooks, modulehook.BuildDependencies{
 		WorkerID:      string(cfg.ID),
@@ -193,7 +200,7 @@ func SetWorkerRunnerForTest(runner func(WorkerRuntimeConfig) error) func() {
 }
 
 func buildModules(configs map[string]module.ModuleConfig, apiFormat string) []module.Middleware {
-	modules, _, err := module.BuildRequestMiddlewares(configs, module.BuildDependencies{
+	modules, _, _, err := module.BuildRequestMiddlewares(configs, module.BuildDependencies{
 		APIFormat: apiFormat,
 		Stderr:    os.Stderr,
 	})

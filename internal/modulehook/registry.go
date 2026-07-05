@@ -5,20 +5,40 @@ import (
 	"sort"
 
 	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 type hookDefinition struct {
-	name  string
-	build func(module.ModuleConfig, BuildDependencies) (Hook, error)
+	name    string
+	support appruntime.ModuleProtocolSupport
+	build   func(module.ModuleConfig, BuildDependencies) (Hook, error)
 }
 
 var lifecycleHookDefinitions = []hookDefinition{
 	{
 		name: ConfigPatchName,
+		support: appruntime.ModuleProtocolSupport{
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolClaudeCode,
+			},
+		},
 		build: func(cfg module.ModuleConfig, deps BuildDependencies) (Hook, error) {
 			return NewConfigPatch(cfg, deps), nil
 		},
 	},
+}
+
+func Support(external map[string]ExternalHookRuntime) map[string]appruntime.ModuleProtocolSupport {
+	support := make(map[string]appruntime.ModuleProtocolSupport, len(lifecycleHookDefinitions)+len(external))
+	for _, definition := range lifecycleHookDefinitions {
+		support[definition.name] = cloneProtocolSupport(definition.support)
+	}
+	for name, runtime := range external {
+		support[name] = cloneProtocolSupport(runtime.ProtocolSupport)
+	}
+	return support
 }
 
 func Names() []string {
@@ -73,4 +93,15 @@ func Build(configs map[string]module.ModuleConfig, deps BuildDependencies) ([]Ho
 		hooks = append(hooks, NewExternalHook(name, module.CloneModuleConfig(configs[name]), deps.ExternalHooks[name], deps))
 	}
 	return hooks, nil
+}
+
+func cloneProtocolSupport(s appruntime.ModuleProtocolSupport) appruntime.ModuleProtocolSupport {
+	out := appruntime.ModuleProtocolSupport{}
+	if s.Protocols != nil {
+		out.Protocols = append([]appruntime.ProtocolKind(nil), s.Protocols...)
+	}
+	if s.Capabilities != nil {
+		out.Capabilities = append([]appruntime.ProtocolCapability(nil), s.Capabilities...)
+	}
+	return out
 }

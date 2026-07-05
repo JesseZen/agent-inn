@@ -529,7 +529,7 @@ func TestManagerAPITogglesConfiguredWorkerModule(t *testing.T) {
 	}
 }
 
-func TestManagerAPIExposesOnlyConfiguredWorkerPluginBindings(t *testing.T) {
+func TestManagerAPIExposesConfiguredWorkerPluginBindingsAndRegistrySupport(t *testing.T) {
 	m := New(Config{
 		Config: config.Config{
 			Plugins: testPluginDefinitions(),
@@ -550,13 +550,298 @@ func TestManagerAPIExposesOnlyConfiguredWorkerPluginBindings(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected worker detail status %d: %s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), `"log_level":"simple"`) {
-		t.Fatalf("worker detail missing default log level: %s", res.Body.String())
+	var got WorkerDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(res.Body.String(), "image_filter") ||
-		strings.Contains(res.Body.String(), "api_translate") ||
-		strings.Contains(res.Body.String(), "config_patch") {
-		t.Fatalf("worker detail should not invent disabled built-in plugin bindings: %s", res.Body.String())
+	if got.LogLevel != "simple" || len(got.Modules) != 0 || len(got.Hooks) != 0 {
+		t.Fatalf("bad worker bindings:\ngot modules=%#v hooks=%#v log=%q\nwant no modules, no hooks, log=%q", got.Modules, got.Hooks, got.LogLevel, "simple")
+	}
+	wantSupport := map[string]appruntime.ModuleProtocolSupport{
+		"debug_sse": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents},
+		},
+		"api_translate": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+			},
+			Capabilities: []appruntime.ProtocolCapability{
+				appruntime.ProtocolCapabilityInputText,
+				appruntime.ProtocolCapabilityToolCalls,
+				appruntime.ProtocolCapabilityStreamEvents,
+			},
+		},
+	}
+	for name, want := range wantSupport {
+		if !reflect.DeepEqual(got.ModuleSupport[name], want) {
+			t.Fatalf("bad support for %s:\ngot  %#v\nwant %#v", name, got.ModuleSupport[name], want)
+		}
+	}
+}
+
+func TestManagerAPIExposesExternalPluginDefinitionSupportWhenStopped(t *testing.T) {
+	dir := t.TempDir()
+	requestManifestPath := filepath.Join(dir, "external_filter.yaml")
+	if err := os.WriteFile(requestManifestPath, []byte(`name: external_filter
+kind: request_middleware
+version: 0.1.0
+protocol_version: "2"
+command: /bin/cat
+protocols:
+  - responses
+capabilities:
+  - input_text
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hookManifestPath := filepath.Join(dir, "external_hook.yaml")
+	if err := os.WriteFile(hookManifestPath, []byte(`name: external_hook
+kind: lifecycle_hook
+version: 0.1.0
+protocol_version: "1"
+command: /bin/cat
+protocols:
+  - claude_code
+capabilities:
+  - stream_events
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	plugins := testPluginDefinitions()
+	plugins["external_filter"] = config.PluginDefinition{
+		Kind:   config.PluginKindRequestMiddleware,
+		Source: config.PluginSourceExternal,
+		Path:   requestManifestPath,
+	}
+	plugins["external_hook"] = config.PluginDefinition{
+		Kind:   config.PluginKindLifecycleHook,
+		Source: config.PluginSourceExternal,
+		Path:   hookManifestPath,
+	}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: plugins,
+			Workers: map[string]config.WorkerConfig{
+				"plain": {
+					Port:     11199,
+					Upstream: "openai",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/11199", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected worker detail status %d: %s", res.Code, res.Body.String())
+	}
+	var detail WorkerDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	wantDetailSupport := map[string]appruntime.ModuleProtocolSupport{
+		"external_filter": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+		},
+		"external_hook": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolClaudeCode},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents},
+		},
+	}
+	for name, want := range wantDetailSupport {
+		if !reflect.DeepEqual(detail.ModuleSupport[name], want) {
+			t.Fatalf("bad detail support for %s:\ngot  %#v\nwant %#v", name, detail.ModuleSupport[name], want)
+		}
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected workers status %d: %s", res.Code, res.Body.String())
+	}
+	var list struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Workers) != 1 {
+		t.Fatalf("expected one worker, got %#v", list.Workers)
+	}
+	for name, want := range wantDetailSupport {
+		if !reflect.DeepEqual(list.Workers[0].ModuleSupport[name], want) {
+			t.Fatalf("bad summary support for %s:\ngot  %#v\nwant %#v", name, list.Workers[0].ModuleSupport[name], want)
+		}
+	}
+}
+
+func TestManagerAPIRunningWorkerOverlaysLiveSupportOnPluginDefinitions(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "external_filter.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`name: external_filter
+kind: request_middleware
+version: 0.1.0
+protocol_version: "2"
+command: /bin/cat
+protocols:
+  - claude_code
+capabilities:
+  - input_text
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	plugins := testPluginDefinitions()
+	plugins["external_filter"] = config.PluginDefinition{
+		Kind:   config.PluginKindRequestMiddleware,
+		Source: config.PluginSourceExternal,
+		Path:   manifestPath,
+	}
+	client := &recordingWorkerClient{
+		statusBody: `{"snapshot_generation":7,"upstream":{"name":"openai","base_url":"https://api.openai.com/v1"},"module_support":{"debug_sse":{"protocols":["chat_completions"],"capabilities":["stream_events"]}}}`,
+	}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: plugins,
+			Workers: map[string]config.WorkerConfig{
+				"plain": {
+					Port:     11199,
+					Upstream: "openai",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: client,
+	})
+	m.statuses["plain"] = "running"
+
+	wantExternal := appruntime.ModuleProtocolSupport{
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolClaudeCode},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+	}
+	wantLive := appruntime.ModuleProtocolSupport{
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolChatCompletions},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents},
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/11199", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected worker detail status %d: %s", res.Code, res.Body.String())
+	}
+	var detail WorkerDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(detail.ModuleSupport["external_filter"], wantExternal) {
+		t.Fatalf("bad detail support for external_filter:\ngot  %#v\nwant %#v", detail.ModuleSupport["external_filter"], wantExternal)
+	}
+	if !reflect.DeepEqual(detail.ModuleSupport["debug_sse"], wantLive) {
+		t.Fatalf("bad detail support for debug_sse:\ngot  %#v\nwant %#v", detail.ModuleSupport["debug_sse"], wantLive)
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected workers status %d: %s", res.Code, res.Body.String())
+	}
+	var list struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Workers) != 1 {
+		t.Fatalf("expected one worker, got %#v", list.Workers)
+	}
+	if !reflect.DeepEqual(list.Workers[0].ModuleSupport["external_filter"], wantExternal) {
+		t.Fatalf("bad summary support for external_filter:\ngot  %#v\nwant %#v", list.Workers[0].ModuleSupport["external_filter"], wantExternal)
+	}
+	if !reflect.DeepEqual(list.Workers[0].ModuleSupport["debug_sse"], wantLive) {
+		t.Fatalf("bad summary support for debug_sse:\ngot  %#v\nwant %#v", list.Workers[0].ModuleSupport["debug_sse"], wantLive)
+	}
+}
+
+func TestManagerAPIStoppedWorkerUsesExternalSupportForBuiltinRequestName(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "plugin")
+	if err := os.WriteFile(pluginPath, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "image_filter.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`name: image_filter
+kind: request_middleware
+version: 0.1.0
+protocol_version: "2"
+command: `+pluginPath+`
+protocols:
+  - chat_completions
+capabilities:
+  - input_text
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	plugins := testPluginDefinitions()
+	plugins["image_filter"] = config.PluginDefinition{
+		Kind:   config.PluginKindRequestMiddleware,
+		Source: config.PluginSourceExternal,
+		Path:   manifestPath,
+	}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: plugins,
+			Workers: map[string]config.WorkerConfig{
+				"plain": {
+					Port:     11199,
+					Upstream: "openai",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/11199", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected worker detail status %d: %s", res.Code, res.Body.String())
+	}
+	var detail WorkerDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	want := appruntime.ModuleProtocolSupport{
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolChatCompletions},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+	}
+	if !reflect.DeepEqual(detail.ModuleSupport["image_filter"], want) {
+		t.Fatalf("bad detail support for image_filter:\ngot  %#v\nwant %#v", detail.ModuleSupport["image_filter"], want)
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected workers status %d: %s", res.Code, res.Body.String())
+	}
+	var list struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Workers) != 1 {
+		t.Fatalf("expected one worker, got %#v", list.Workers)
+	}
+	if !reflect.DeepEqual(list.Workers[0].ModuleSupport["image_filter"], want) {
+		t.Fatalf("bad summary support for image_filter:\ngot  %#v\nwant %#v", list.Workers[0].ModuleSupport["image_filter"], want)
 	}
 }
 

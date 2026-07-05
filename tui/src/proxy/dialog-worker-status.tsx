@@ -88,7 +88,10 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       title: "Manage Modules",
       value: "modules",
       description: `${modules().length} req • ${hooks().length} hook`,
-      onSelect: () => dialog.replace(() => <DialogModulePicker worker={props.worker} />),
+      onSelect: async () => {
+        const worker = await sdk.client.getWorker(props.worker.port)
+        dialog.replace(() => <DialogModulePicker worker={worker} />)
+      },
   }
 
   const restartAction: DialogSelectOption<string> = {
@@ -162,7 +165,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       footer={
         <box flexDirection="column" gap={1}>
           <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
-          <text fg={theme.textMuted}>upstream: {props.worker.upstream.name}</text>
+          <text fg={theme.textMuted}>upstream: {props.worker.upstream.name} • protocol: {props.worker.protocol ?? "responses"}</text>
           <text fg={theme.textMuted}>log level: {props.worker.log_level} • modules: {modules().length} req • {hooks().length} hook</text>
           <text fg={theme.textMuted}>snapshot: {props.worker.snapshot_generation}</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>

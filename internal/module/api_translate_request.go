@@ -3,6 +3,8 @@ package module
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jesse/agent-inn/internal/protocol"
 )
 
 const chatCompletionsFormat = "chat_completions"
@@ -75,49 +77,18 @@ func translateResponsesPath(path string) string {
 }
 
 func translateResponsesBodyToChat(body map[string]any) map[string]any {
-	out := map[string]any{}
-
-	copyIfPresent(out, body, "model")
-	copyIfPresent(out, body, "stream")
-	copyIfPresent(out, body, "temperature")
-	copyIfPresent(out, body, "top_p")
-	if value, ok := body["max_output_tokens"]; ok {
-		out["max_tokens"] = value
-	}
-	if metadata, ok := body["metadata"].(map[string]any); ok {
-		if userID, ok := metadata["user_id"]; ok {
-			out["user"] = userID
-		}
-	}
-
-	messages := translateInputToMessages(body)
-	if len(messages) > 0 {
-		out["messages"] = messages
-	}
-	if tools := translateTools(body["tools"]); len(tools) > 0 {
-		out["tools"] = tools
-	}
-	if toolChoice, ok := translateToolChoice(body["tool_choice"]); ok {
-		out["tool_choice"] = toolChoice
-	}
-	return out
+	return protocolRequestToChatBody(responsesBodyToProtocolRequest(body))
 }
 
-func copyIfPresent(dst map[string]any, src map[string]any, key string) {
-	if value, ok := src[key]; ok {
-		dst[key] = value
-	}
-}
-
-func translateInputToMessages(body map[string]any) []map[string]any {
-	var messages []map[string]any
+func translateInputToMessages(body map[string]any) []protocol.Message {
+	var messages []protocol.Message
 	if instructions, ok := body["instructions"].(string); ok && instructions != "" {
-		messages = append(messages, map[string]any{"role": "system", "content": instructions})
+		messages = append(messages, protocol.Message{Role: "system", Content: instructions})
 	}
 
 	switch input := body["input"].(type) {
 	case string:
-		messages = append(messages, map[string]any{"role": "user", "content": input})
+		messages = append(messages, protocol.Message{Role: "user", Content: input})
 	case []any:
 		for _, item := range input {
 			if message, ok := translateInputItem(item); ok {
@@ -128,10 +99,10 @@ func translateInputToMessages(body map[string]any) []map[string]any {
 	return messages
 }
 
-func translateInputItem(item any) (map[string]any, bool) {
+func translateInputItem(item any) (protocol.Message, bool) {
 	object, ok := item.(map[string]any)
 	if !ok {
-		return nil, false
+		return protocol.Message{}, false
 	}
 
 	switch object["type"] {
@@ -140,43 +111,36 @@ func translateInputItem(item any) (map[string]any, bool) {
 		if callID == "" {
 			callID, _ = object["id"].(string)
 		}
-		return map[string]any{
-			"role":    "assistant",
-			"content": nil,
-			"tool_calls": []map[string]any{{
-				"id":   callID,
-				"type": "function",
-				"function": map[string]any{
-					"name":      object["name"],
-					"arguments": defaultString(object["arguments"], "{}"),
-				},
+		return protocol.Message{
+			Role: "assistant",
+			ToolCalls: []protocol.ToolCall{{
+				ID:        callID,
+				Name:      object["name"],
+				Arguments: defaultString(object["arguments"], "{}"),
 			}},
 		}, true
 	case "function_call_output":
-		return map[string]any{
-			"role":         "tool",
-			"tool_call_id": defaultString(object["call_id"], ""),
-			"content":      defaultString(object["output"], ""),
+		return protocol.Message{
+			Role:       "tool",
+			ToolCallID: defaultString(object["call_id"], ""),
+			Content:    defaultString(object["output"], ""),
 		}, true
 	case "reasoning":
 		text := collectReasoningText(object)
 		if text == "" {
-			return nil, false
+			return protocol.Message{}, false
 		}
-		return map[string]any{"role": "system", "content": "[Previous reasoning] " + text}, true
+		return protocol.Message{Role: "system", Content: "[Previous reasoning] " + text}, true
 	}
 
 	role, _ := object["role"].(string)
 	if role != "user" && role != "assistant" && role != "system" && role != "developer" {
-		return nil, false
+		return protocol.Message{}, false
 	}
 	if role == "developer" {
 		role = "system"
 	}
-	return map[string]any{
-		"role":    role,
-		"content": convertResponsesContentToChat(object["content"], role),
-	}, true
+	return protocol.Message{Role: role, Content: convertResponsesContentToChat(object["content"], role)}, true
 }
 
 func defaultString(value any, fallback string) string {
@@ -271,23 +235,68 @@ func convertContentPart(part any) (map[string]any, bool) {
 	}
 }
 
-func translateTools(value any) []map[string]any {
+func translateTools(value any) []protocol.Tool {
 	list, ok := value.([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(list))
+	out := make([]protocol.Tool, 0, len(list))
 	for _, tool := range list {
 		object, ok := tool.(map[string]any)
 		if !ok || object["type"] != "function" {
 			continue
 		}
+		out = append(out, protocol.Tool{
+			Name:        object["name"],
+			Description: defaultString(object["description"], ""),
+			Parameters:  object["parameters"],
+		})
+	}
+	return out
+}
+
+func protocolMessagesToChat(messages []protocol.Message) []map[string]any {
+	out := make([]map[string]any, 0, len(messages))
+	for _, message := range messages {
+		item := map[string]any{"role": message.Role}
+		if len(message.ToolCalls) > 0 {
+			item["content"] = nil
+			item["tool_calls"] = protocolToolCallsToChat(message.ToolCalls)
+		} else {
+			item["content"] = message.Content
+		}
+		if message.ToolCallID != "" {
+			item["tool_call_id"] = message.ToolCallID
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func protocolToolCallsToChat(calls []protocol.ToolCall) []map[string]any {
+	out := make([]map[string]any, 0, len(calls))
+	for _, call := range calls {
+		out = append(out, map[string]any{
+			"id":   call.ID,
+			"type": "function",
+			"function": map[string]any{
+				"name":      call.Name,
+				"arguments": call.Arguments,
+			},
+		})
+	}
+	return out
+}
+
+func protocolToolsToChat(tools []protocol.Tool) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
 		out = append(out, map[string]any{
 			"type": "function",
 			"function": map[string]any{
-				"name":        object["name"],
-				"description": defaultString(object["description"], ""),
-				"parameters":  defaultParameters(object["parameters"]),
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  defaultParameters(tool.Parameters),
 			},
 		})
 	}

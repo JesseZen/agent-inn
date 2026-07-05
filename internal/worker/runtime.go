@@ -20,6 +20,8 @@ type RuntimeConfigSnapshot struct {
 	RequestModuleStates map[string]module.ModuleConfig
 	HookConfigs         map[string]module.ModuleConfig
 	Plugins             map[string]appruntime.PluginRuntime
+	Protocol            appruntime.ProtocolKind
+	ModuleSupport       map[string]appruntime.ModuleProtocolSupport
 	Modules             []module.Middleware
 	HookStatuses        map[string]modulehook.Status
 }
@@ -65,7 +67,7 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 			Params:  cloneRuntimeParams(cfg.Params),
 		}
 	}
-	modules, requestStates, err := buildRuntimeModules(moduleConfigs, runtime.Plugins, runtime.Upstream.APIFormat)
+	modules, requestStates, support, err := buildRuntimeModules(moduleConfigs, runtime.Plugins, runtime.Upstream.APIFormat)
 	if err != nil {
 		return RuntimeConfigSnapshot{}, err
 	}
@@ -82,6 +84,20 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 			Params:  cloneRuntimeParams(cfg.Params),
 		}
 	}
+	externalHooks := map[string]modulehook.ExternalHookRuntime{}
+	for name, plugin := range runtime.Plugins {
+		if plugin.Source == "external" && plugin.Kind == "lifecycle_hook" {
+			externalHooks[name] = modulehook.ExternalHookRuntime{
+				Command:         plugin.Command,
+				Args:            append([]string(nil), plugin.Args...),
+				ProtocolVersion: plugin.ProtocolVersion,
+				ProtocolSupport: plugin.ProtocolSupport,
+			}
+		}
+	}
+	for name, hookSupport := range modulehook.Support(externalHooks) {
+		support[name] = hookSupport
+	}
 	snapshot := RuntimeConfigSnapshot{
 		Generation: int(runtime.Generation),
 		Upstream: upstream.RuntimeUpstream{
@@ -95,6 +111,8 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 		RequestModuleStates:  requestStates,
 		HookConfigs:          hookConfigs,
 		Plugins:              clonePluginRuntimes(runtime.Plugins),
+		Protocol:             appruntime.ProtocolKindFromAPIFormat(runtime.Upstream.APIFormat),
+		ModuleSupport:        support,
 		Modules:              modules,
 	}
 	if snapshot.Generation == 0 {
@@ -143,13 +161,29 @@ func (s RuntimeConfigSnapshot) hookModules() map[string]module.ModuleConfig {
 }
 
 func (s RuntimeConfigSnapshot) withRequestModuleConfigs(configs map[string]module.ModuleConfig) (RuntimeConfigSnapshot, error) {
-	modules, requestStates, err := buildRuntimeModules(configs, s.Plugins, appruntime.APIFormat(s.Upstream.APIFormat))
+	modules, requestStates, support, err := buildRuntimeModules(configs, s.Plugins, appruntime.APIFormat(s.Upstream.APIFormat))
 	if err != nil {
 		return RuntimeConfigSnapshot{}, err
+	}
+	externalHooks := map[string]modulehook.ExternalHookRuntime{}
+	for name, plugin := range s.Plugins {
+		if plugin.Source == "external" && plugin.Kind == "lifecycle_hook" {
+			externalHooks[name] = modulehook.ExternalHookRuntime{
+				Command:         plugin.Command,
+				Args:            append([]string(nil), plugin.Args...),
+				ProtocolVersion: plugin.ProtocolVersion,
+				ProtocolSupport: plugin.ProtocolSupport,
+			}
+		}
+	}
+	for name, hookSupport := range modulehook.Support(externalHooks) {
+		support[name] = hookSupport
 	}
 	next := s
 	next.RequestModuleConfigs = module.CloneModuleConfigs(configs)
 	next.RequestModuleStates = requestStates
+	next.Protocol = appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(s.Upstream.APIFormat))
+	next.ModuleSupport = support
 	next.Modules = modules
 	return next, nil
 }

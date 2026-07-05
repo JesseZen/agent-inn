@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os/exec"
 	"time"
+
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 const externalRequestTimeout = 5 * time.Second
@@ -17,6 +19,7 @@ type ExternalRequestRuntime struct {
 	Command         string
 	Args            []string
 	ProtocolVersion string
+	ProtocolSupport appruntime.ModuleProtocolSupport
 	Stderr          io.Writer
 }
 

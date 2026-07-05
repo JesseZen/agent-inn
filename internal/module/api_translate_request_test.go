@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
+
+	"github.com/jesse/agent-inn/internal/protocol"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 func TestTranslateResponsesRequestToChatCompletions(t *testing.T) {
@@ -56,5 +60,49 @@ func TestTranslateResponsesRequestToChatCompletions(t *testing.T) {
 	function := tool["function"].(map[string]any)
 	if tool["type"] != "function" || function["name"] != "get_weather" {
 		t.Fatalf("bad tool mapping: %#v", tool)
+	}
+}
+
+func TestResponsesBodyToProtocolRequestCapturesToolCalls(t *testing.T) {
+	body := map[string]any{
+		"model": "gpt-test",
+		"input": []any{
+			map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{"q":"x"}`},
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+		},
+		"tools": []any{
+			map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object"}},
+		},
+	}
+
+	got := responsesBodyToProtocolRequest(body)
+	want := protocol.Request{
+		Protocol: appruntime.ProtocolResponses,
+		Model:    "gpt-test",
+		Input: []protocol.Message{
+			{Role: "assistant", ToolCalls: []protocol.ToolCall{{ID: "call_1", Name: "lookup", Arguments: `{"q":"x"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Content: "ok"},
+		},
+		Tools: []protocol.Tool{{Name: "lookup", Parameters: map[string]any{"type": "object"}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("protocol request mismatch:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestTranslateResponsesBodyToChatUsesProtocolAdapterShape(t *testing.T) {
+	body := map[string]any{
+		"model":  "gpt-test",
+		"input":  "hello",
+		"stream": true,
+		"tools": []any{
+			map[string]any{"type": "function", "name": "lookup"},
+		},
+	}
+
+	got := translateResponsesBodyToChat(body)
+	want := protocolRequestToChatBody(responsesBodyToProtocolRequest(body))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("adapter output mismatch:\ngot  %#v\nwant %#v", got, want)
 	}
 }
