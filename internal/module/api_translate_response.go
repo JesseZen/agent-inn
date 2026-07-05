@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/jesse/agent-inn/internal/protocol"
 )
 
 func (m *APITranslate) WrapResponse(ctx context.Context, req *ProxyRequest, upstream *ProxyResponse) (*ProxyResponse, error) {
@@ -339,12 +341,18 @@ func (t *chatToResponsesTranslator) processChunk(chunk chatCompletionChunk) {
 		if choice.FinishReason != nil {
 			t.state.finishReason = *choice.FinishReason
 		}
-		if choice.Delta.Content != "" {
-			t.emitTextDelta(choice.Delta.Content)
-		}
-		for _, toolCall := range choice.Delta.ToolCalls {
-			t.emitToolCallDelta(toolCall)
-		}
+	}
+	for _, event := range chatChunkToProtocolEvents(chunk) {
+		t.emitProtocolEvent(event)
+	}
+}
+
+func (t *chatToResponsesTranslator) emitProtocolEvent(event protocol.StreamEvent) {
+	switch event.Kind {
+	case protocol.StreamEventTextDelta:
+		t.emitTextDelta(event.Text)
+	case protocol.StreamEventToolCallDelta:
+		t.emitProtocolToolCallDelta(*event.ToolCall)
 	}
 }
 
@@ -406,7 +414,7 @@ func (t *chatToResponsesTranslator) openMessageItem() {
 	})
 }
 
-func (t *chatToResponsesTranslator) emitToolCallDelta(toolCall chatToolCall) {
+func (t *chatToResponsesTranslator) emitProtocolToolCallDelta(toolCall protocol.ToolCall) {
 	if t.state.currentType != "function_call" || (toolCall.ID != "" && t.state.callID != "" && toolCall.ID != t.state.callID) {
 		t.closeCurrentItem()
 		t.openFunctionCallItem(toolCall)
@@ -417,24 +425,25 @@ func (t *chatToResponsesTranslator) emitToolCallDelta(toolCall chatToolCall) {
 	if toolCall.ID != "" {
 		t.state.callID = toolCall.ID
 	}
-	if toolCall.Function.Name != "" {
-		t.state.callName = toolCall.Function.Name
+	name := defaultString(toolCall.Name, "")
+	if name != "" {
+		t.state.callName = name
 	}
-	if toolCall.Function.Arguments != "" {
-		t.state.callArguments.WriteString(toolCall.Function.Arguments)
+	if toolCall.Arguments != "" {
+		t.state.callArguments.WriteString(toolCall.Arguments)
 		t.writeResponseEvent("response.function_call_arguments.delta", map[string]any{
 			"item_id":      t.state.callItemID,
 			"output_index": t.state.outputIndex,
-			"delta":        toolCall.Function.Arguments,
+			"delta":        toolCall.Arguments,
 		})
 	}
 }
 
-func (t *chatToResponsesTranslator) openFunctionCallItem(toolCall chatToolCall) {
+func (t *chatToResponsesTranslator) openFunctionCallItem(toolCall protocol.ToolCall) {
 	t.state.currentType = "function_call"
 	t.state.callItemID = fmt.Sprintf("fc_%d", t.state.outputIndex+1)
 	t.state.callID = toolCall.ID
-	t.state.callName = toolCall.Function.Name
+	t.state.callName = defaultString(toolCall.Name, "")
 	t.writeResponseEvent("response.output_item.added", map[string]any{
 		"output_index": t.state.outputIndex,
 		"item": map[string]any{

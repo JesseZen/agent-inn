@@ -183,6 +183,44 @@ func TestRuntimeBuilderBuildsExternalRequestMiddlewareManifestArgs(t *testing.T)
 	}
 }
 
+func TestRuntimeBuilderBuildsExternalRequestMiddlewareProtocolSupport(t *testing.T) {
+	cfg := runtimeBuilderConfig()
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "plugin.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`name: external_filter
+kind: request_middleware
+version: 0.1.0
+protocol_version: "2"
+command: /bin/cat
+protocols:
+  - responses
+capabilities:
+  - input_text
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Plugins["external_filter"] = config.PluginDefinition{
+		Kind:   config.PluginKindRequestMiddleware,
+		Source: config.PluginSourceExternal,
+		Path:   manifestPath,
+	}
+	worker := cfg.Workers["cli-openai"]
+	worker.RequestModules["external_filter"] = config.ModuleConfig{Enabled: true}
+	cfg.Workers["cli-openai"] = worker
+
+	got, err := (RuntimeBuilder{}).Build(cfg, "cli-openai", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := appruntime.ModuleProtocolSupport{
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+	}
+	if !reflect.DeepEqual(got.Plugins["external_filter"].ProtocolSupport, want) {
+		t.Fatalf("bad external plugin support:\ngot  %#v\nwant %#v", got.Plugins["external_filter"].ProtocolSupport, want)
+	}
+}
+
 func TestRuntimeBuilderRejectsExternalPluginMissingManifest(t *testing.T) {
 	cfg := runtimeBuilderConfig()
 	cfg.Plugins["external_filter"] = config.PluginDefinition{

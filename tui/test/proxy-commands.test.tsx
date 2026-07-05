@@ -221,6 +221,7 @@ test("proxy workers detail exposes worker status and scoped actions", async () =
     expect(app.frame()).toContain("app (:6767)")
     expect(app.frame()).toContain("status: running")
     expect(app.frame()).toContain("upstream: openai")
+    expect(app.frame()).toContain("protocol: chat_completions")
     expect(app.frame()).toContain("log level: simple")
     expect(app.frame()).toContain("modules")
     expect(app.frame()).toContain("config_patch: active")
@@ -297,12 +298,96 @@ test("proxy workers module view shows lifecycle hooks separately", async () => {
     })
 
     expect(app.frame()).toContain("Request Middleware")
-    expect(app.frame()).toContain("Lifecycle Hooks")
     expect(app.frame()).toContain("request_log")
+    expect(app.frame()).toContain("image_filter")
+    expect(app.frame()).toContain("unavailable")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    expect(app.frame()).toContain("Lifecycle Hooks")
     expect(app.frame()).toContain("config_patch")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers module view does not open unavailable candidate module editor", async () => {
+  const app = await mountProxyApp()
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Modules & Hooks: app")
+    })
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("request_log") && app.frame().includes("unavailable")
+    })
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await app.render()
+
+    expect(app.frame()).toContain("Modules & Hooks: app")
+    expect(app.frame()).not.toContain("Edit Module: app")
+    expect(app.calls.patchModule).toEqual([])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers module view opens configured unavailable module editor and allows disable", async () => {
+  const app = await mountProxyApp()
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Modules & Hooks: app")
+    })
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("image_filter") && app.frame().includes("unavailable")
+    })
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Module: app")
+    })
+
+    expect(app.frame()).toContain("Disable")
+    expect(app.frame()).toContain("unavailable for current protocol")
+    expect(app.frame()).not.toContain("Enable")
+    expect(app.frame()).not.toContain("API Format")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.patchModule.length === 1)
+
+    expect(app.calls.patchModule).toEqual([
+      {
+        port: 6767,
+        module: "image_filter",
+        body: {
+          enabled: false,
+          params: undefined,
+        },
+      },
+    ])
+    await wait(async () => {
+      await app.render()
+      return !app.frame().includes("Edit Module: app") && !app.frame().includes("Modules & Hooks: app")
+    })
   } finally {
     await app.cleanup()
   }

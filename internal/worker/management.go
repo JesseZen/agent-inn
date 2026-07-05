@@ -46,6 +46,8 @@ func (w *Worker) writeStatus(rw http.ResponseWriter) {
 	status := map[string]any{
 		"snapshot_generation": snapshot.Generation,
 		"upstream":            snapshot.Upstream.Redacted(),
+		"protocol":            snapshot.Protocol,
+		"module_support":      snapshot.ModuleSupport,
 		"modules":             snapshot.requestModuleStates(),
 		"hooks":               snapshot.hookModules(),
 	}

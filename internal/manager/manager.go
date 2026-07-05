@@ -59,15 +59,17 @@ type Manager struct {
 }
 
 type WorkerSummary struct {
-	Name               string                         `json:"name"`
-	Port               int                            `json:"port"`
-	Role               string                         `json:"role"`
-	Upstream           upstream.RedactedUpstream      `json:"upstream"`
-	Status             string                         `json:"status"`
-	SnapshotGeneration int                            `json:"snapshot_generation"`
-	LogLevel           string                         `json:"log_level"`
-	Modules            map[string]config.ModuleConfig `json:"modules,omitempty"`
-	Hooks              map[string]config.ModuleConfig `json:"hooks,omitempty"`
+	Name               string                                      `json:"name"`
+	Port               int                                         `json:"port"`
+	Role               string                                      `json:"role"`
+	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
+	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
+	Status             string                                      `json:"status"`
+	SnapshotGeneration int                                         `json:"snapshot_generation"`
+	LogLevel           string                                      `json:"log_level"`
+	Modules            map[string]config.ModuleConfig              `json:"modules,omitempty"`
+	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
 }
 
 type Starter interface {
@@ -100,24 +102,28 @@ type ApplyRuntimeStatus struct {
 }
 
 type WorkerStatus struct {
-	SnapshotGeneration int                            `json:"snapshot_generation"`
-	Upstream           upstream.RedactedUpstream      `json:"upstream"`
-	Modules            map[string]config.ModuleConfig `json:"modules"`
-	Hooks              map[string]config.ModuleConfig `json:"hooks,omitempty"`
-	HookStatuses       map[string]modulehook.Status   `json:"hook_statuses,omitempty"`
+	SnapshotGeneration int                                         `json:"snapshot_generation"`
+	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
+	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
+	Modules            map[string]config.ModuleConfig              `json:"modules"`
+	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
+	HookStatuses       map[string]modulehook.Status                `json:"hook_statuses,omitempty"`
 }
 
 type WorkerDetail struct {
-	Name               string                         `json:"name"`
-	Port               int                            `json:"port"`
-	Role               string                         `json:"role"`
-	Upstream           upstream.RedactedUpstream      `json:"upstream"`
-	Status             string                         `json:"status"`
-	SnapshotGeneration int                            `json:"snapshot_generation"`
-	LogLevel           string                         `json:"log_level"`
-	HookStatuses       map[string]modulehook.Status   `json:"hook_statuses,omitempty"`
-	Modules            map[string]config.ModuleConfig `json:"modules,omitempty"`
-	Hooks              map[string]config.ModuleConfig `json:"hooks,omitempty"`
+	Name               string                                      `json:"name"`
+	Port               int                                         `json:"port"`
+	Role               string                                      `json:"role"`
+	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
+	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
+	Status             string                                      `json:"status"`
+	SnapshotGeneration int                                         `json:"snapshot_generation"`
+	LogLevel           string                                      `json:"log_level"`
+	HookStatuses       map[string]modulehook.Status                `json:"hook_statuses,omitempty"`
+	Modules            map[string]config.ModuleConfig              `json:"modules,omitempty"`
+	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
 }
 
 const healthyRetryResetWindow = 60 * time.Second
@@ -216,6 +222,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		name          string
 		worker        config.WorkerConfig
 		profile       config.UpstreamProfile
+		plugins       map[string]config.PluginDefinition
 		providerFound bool
 		status        string
 		generation    int
@@ -236,6 +243,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			name:          name,
 			worker:        cloneWorkerConfig(worker),
 			profile:       profile,
+			plugins:       clonePluginDefinitions(m.config.Plugins),
 			providerFound: ok,
 			status:        string(m.workerStatusLocked(name)),
 			generation:    m.workerGenerationLocked(name),
@@ -249,17 +257,31 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		if seed.providerFound {
 			runtimeUpstream, _ = upstream.Resolve(seed.worker.Upstream, seed.profile)
 		}
-		out = append(out, WorkerSummary{
+		summary := WorkerSummary{
 			Name:               seed.name,
 			Port:               seed.worker.Port,
 			Role:               seed.worker.Role,
 			Upstream:           runtimeUpstream.Redacted(),
+			Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
+			ModuleSupport:      supportForPluginDefinitions(seed.plugins),
 			Status:             seed.status,
 			SnapshotGeneration: seed.generation,
 			LogLevel:           workerLogLevel(seed.worker),
 			Modules:            cloneModules(seed.worker.RequestModules),
 			Hooks:              cloneModules(seed.worker.Hooks),
-		})
+		}
+		if summary.Status == string(WorkerStateRunning) && m.workerClient != nil {
+			status, err := m.workerClient.GetStatus(seed.worker.Port)
+			if err == nil {
+				if status.Protocol != "" {
+					summary.Protocol = status.Protocol
+				}
+				if status.ModuleSupport != nil {
+					overlayModuleSupport(summary.ModuleSupport, status.ModuleSupport)
+				}
+			}
+		}
+		out = append(out, summary)
 	}
 	return out
 }
@@ -275,6 +297,8 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Port:               worker.Port,
 		Role:               worker.Role,
 		Upstream:           runtimeUpstream.Redacted(),
+		Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
+		ModuleSupport:      supportForPluginDefinitions(m.pluginDefinitionsSnapshot()),
 		Status:             string(m.workerStatus(name)),
 		SnapshotGeneration: m.workerGeneration(name),
 		LogLevel:           workerLogLevel(worker),
@@ -301,6 +325,12 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 	if status.Upstream.Name != "" {
 		detail.Upstream = status.Upstream
 	}
+	if status.Protocol != "" {
+		detail.Protocol = status.Protocol
+	}
+	if status.ModuleSupport != nil {
+		overlayModuleSupport(detail.ModuleSupport, status.ModuleSupport)
+	}
 	if status.Modules != nil {
 		detail.Modules = cloneModules(status.Modules)
 	}
@@ -311,6 +341,56 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		detail.HookStatuses = cloneHookStatuses(status.HookStatuses)
 	}
 	return detail
+}
+
+func supportForPluginDefinitions(plugins map[string]config.PluginDefinition) map[string]appruntime.ModuleProtocolSupport {
+	externalRequest := map[string]module.ExternalRequestRuntime{}
+	externalHooks := map[string]modulehook.ExternalHookRuntime{}
+	for name, definition := range plugins {
+		if definition.Source != config.PluginSourceExternal {
+			continue
+		}
+		resolved, err := resolveExternalPlugin(name, definition)
+		if err != nil {
+			continue
+		}
+		if definition.Kind == config.PluginKindRequestMiddleware {
+			externalRequest[name] = module.ExternalRequestRuntime{ProtocolSupport: resolved.runtime.ProtocolSupport}
+		}
+		if definition.Kind == config.PluginKindLifecycleHook && !modulehook.IsLifecycleHook(name) {
+			externalHooks[name] = modulehook.ExternalHookRuntime{ProtocolSupport: resolved.runtime.ProtocolSupport}
+		}
+	}
+	support := module.RequestMiddlewareSupport(externalRequest)
+	for name, declared := range modulehook.Support(externalHooks) {
+		support[name] = cloneProtocolSupport(declared)
+	}
+	return support
+}
+
+func overlayModuleSupport(base map[string]appruntime.ModuleProtocolSupport, live map[string]appruntime.ModuleProtocolSupport) {
+	for name, declared := range live {
+		base[name] = cloneProtocolSupport(declared)
+	}
+}
+
+func cloneModuleSupport(support map[string]appruntime.ModuleProtocolSupport) map[string]appruntime.ModuleProtocolSupport {
+	out := make(map[string]appruntime.ModuleProtocolSupport, len(support))
+	for name, declared := range support {
+		out[name] = cloneProtocolSupport(declared)
+	}
+	return out
+}
+
+func cloneProtocolSupport(s appruntime.ModuleProtocolSupport) appruntime.ModuleProtocolSupport {
+	out := appruntime.ModuleProtocolSupport{}
+	if s.Protocols != nil {
+		out.Protocols = append([]appruntime.ProtocolKind(nil), s.Protocols...)
+	}
+	if s.Capabilities != nil {
+		out.Capabilities = append([]appruntime.ProtocolCapability(nil), s.Capabilities...)
+	}
+	return out
 }
 
 func workerLogLevel(worker config.WorkerConfig) string {
@@ -328,6 +408,12 @@ func (m *Manager) resolveUpstream(name string) (upstream.RuntimeUpstream, error)
 		return upstream.RuntimeUpstream{Name: name}, fmt.Errorf("upstream %q not found", name)
 	}
 	return upstream.Resolve(name, profile)
+}
+
+func (m *Manager) pluginDefinitionsSnapshot() map[string]config.PluginDefinition {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return clonePluginDefinitions(m.config.Plugins)
 }
 
 func (m *Manager) runtimeForWorker(name string) (appruntime.WorkerRuntime, error) {
@@ -1087,18 +1173,23 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 func cloneConfig(cfg config.Config) config.Config {
 	out := config.Config{
 		Settings:  cfg.Settings,
-		Plugins:   make(map[string]config.PluginDefinition, len(cfg.Plugins)),
+		Plugins:   clonePluginDefinitions(cfg.Plugins),
 		Workers:   make(map[string]config.WorkerConfig, len(cfg.Workers)),
 		Upstreams: make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
-	}
-	for name, plugin := range cfg.Plugins {
-		out.Plugins[name] = plugin
 	}
 	for name, worker := range cfg.Workers {
 		out.Workers[name] = cloneWorkerConfig(worker)
 	}
 	for name, profile := range cfg.Upstreams {
 		out.Upstreams[name] = profile
+	}
+	return out
+}
+
+func clonePluginDefinitions(plugins map[string]config.PluginDefinition) map[string]config.PluginDefinition {
+	out := make(map[string]config.PluginDefinition, len(plugins))
+	for name, plugin := range plugins {
+		out[name] = plugin
 	}
 	return out
 }

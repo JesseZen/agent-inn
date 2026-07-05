@@ -22,6 +22,14 @@ export type ModuleConfig = {
   params?: Record<string, unknown>
 }
 
+export type ProtocolKind = "responses" | "chat_completions" | "claude_code"
+export type ProtocolCapability = "input_text" | "tool_calls" | "stream_events"
+
+export type ModuleProtocolSupport = {
+  protocols?: ProtocolKind[]
+  capabilities?: ProtocolCapability[]
+}
+
 export type HookStatus = {
   state: string
   detail?: Record<string, string>
@@ -59,6 +67,7 @@ export type WorkerSummary = {
   name: string
   port: number
   role?: string
+  protocol?: ProtocolKind
   upstream: RedactedUpstream
   status: string
   snapshot_generation: number
@@ -66,6 +75,7 @@ export type WorkerSummary = {
   modules?: Record<string, ModuleConfig>
   hooks?: Record<string, ModuleConfig>
   hook_statuses?: Record<string, HookStatus>
+  module_support?: Record<string, ModuleProtocolSupport>
 }
 
 export type WorkerDetail = WorkerSummary

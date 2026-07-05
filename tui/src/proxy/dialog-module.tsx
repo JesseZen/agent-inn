@@ -42,37 +42,29 @@ export function DialogModulePicker(props: { worker: WorkerSummary }) {
         .filter(([name, definition]) => definition.kind === "lifecycle_hook" && props.worker.hooks?.[name] === undefined)
         .map(([name]) => [name, { enabled: false }] as const),
     ]
+    const moduleOption = (
+      name: string,
+      cfg: { enabled: boolean; params?: Record<string, unknown> },
+      category: string,
+      configured: boolean,
+    ) => {
+      const available = moduleAvailable(props.worker, name)
+      return {
+        title: `${cfg.enabled ? "✓" : "○"} ${name}`,
+        value: name,
+        description: availabilityDescription(props.worker, name, cfg.params ?? {}),
+        category,
+        onSelect: async () => {
+          if (!available && !configured) return
+          const worker = await sdk.client.getWorker(props.worker.port)
+          dialog.push(() => <DialogModuleEditor worker={worker} moduleName={name} available={available} />)
+        },
+      }
+    }
     return [
-      ...configuredRequestModules.map(([name, cfg]) => ({
-        title: `${cfg.enabled ? "✓" : "○"} ${name}`,
-        value: name,
-        description: describeModule(name, cfg.params ?? {}),
-        category: "Request Middleware",
-        onSelect: async () => {
-          const worker = await sdk.client.getWorker(props.worker.port)
-          dialog.push(() => <DialogModuleEditor worker={worker} moduleName={name} />)
-        },
-      })),
-      ...availableRequestModules.map(([name, cfg]) => ({
-        title: `${cfg.enabled ? "✓" : "○"} ${name}`,
-        value: name,
-        description: describeModule(name, cfg.params ?? {}),
-        category: "Request Middleware",
-        onSelect: async () => {
-          const worker = await sdk.client.getWorker(props.worker.port)
-          dialog.push(() => <DialogModuleEditor worker={worker} moduleName={name} />)
-        },
-      })),
-      ...hooks.map(([name, cfg]) => ({
-        title: `${cfg.enabled ? "✓" : "○"} ${name}`,
-        value: name,
-        description: describeModule(name, cfg.params ?? {}),
-        category: "Lifecycle Hooks",
-        onSelect: async () => {
-          const worker = await sdk.client.getWorker(props.worker.port)
-          dialog.push(() => <DialogModuleEditor worker={worker} moduleName={name} />)
-        },
-      })),
+      ...configuredRequestModules.map(([name, cfg]) => moduleOption(name, cfg, "Request Middleware", true)),
+      ...availableRequestModules.map(([name, cfg]) => moduleOption(name, cfg, "Request Middleware", false)),
+      ...hooks.map(([name, cfg]) => moduleOption(name, cfg, "Lifecycle Hooks", props.worker.hooks?.[name] !== undefined)),
     ]
   })
 
@@ -86,7 +78,7 @@ export function DialogModulePicker(props: { worker: WorkerSummary }) {
   )
 }
 
-function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string }) {
+function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; available: boolean }) {
   const dialog = useDialog()
   const sdk = useSDK()
   const sync = useSync()
@@ -95,6 +87,30 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string })
 
   const options = createMemo<DialogSelectOption<ModuleKey>[]>(() => {
     const cfg = draft()
+    if (!props.available) {
+      if (cfg.enabled) {
+        return [
+          {
+            title: "Disable",
+            value: "enabled",
+            description: "unavailable for current protocol",
+            category: "Actions",
+            onSelect: async () => {
+              await saveModule({ enabled: false, params: cfg.params })
+            },
+          },
+        ]
+      }
+      return [
+        {
+          title: "Unavailable",
+          value: "enabled",
+          description: "disabled for current protocol",
+          category: "Status",
+          onSelect: async () => {},
+        },
+      ]
+    }
     const fields = MODULE_FIELDS[props.moduleName] ?? []
     return [
       {
@@ -154,6 +170,18 @@ function describeModule(name: string, params: Record<string, unknown>) {
   if (name === "api_translate") return String(params.api_format ?? "—")
   if (name === "config_patch") return [String(params.config_path ?? "—"), String(params.state_dir ?? "—")].join(" • ")
   return "—"
+}
+
+function moduleAvailable(worker: WorkerSummary, name: string) {
+  const protocol = worker.protocol
+  const support = worker.module_support?.[name]
+  if (!protocol || !support?.protocols) return false
+  return support.protocols.includes(protocol)
+}
+
+function availabilityDescription(worker: WorkerSummary, name: string, params: Record<string, unknown>) {
+  const base = describeModule(name, params)
+  return moduleAvailable(worker, name) ? base : `${base} • unavailable`
 }
 
 function describeField(params: Record<string, unknown>, key: string) {

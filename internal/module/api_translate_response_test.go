@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jesse/agent-inn/internal/protocol"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 func TestAPITranslateResponseEmitsResponsesTextEvents(t *testing.T) {
@@ -316,6 +320,59 @@ func TestAPITranslateResponseConvertsNonStreamingJSONToResponseEvents(t *testing
 	usage := response["usage"].(map[string]any)
 	if usage["input_tokens"] != float64(3) || usage["output_tokens"] != float64(2) {
 		t.Fatalf("bad usage mapping: %#v", usage)
+	}
+}
+
+func TestAPITranslateResponseRoutesChatChunksThroughProtocolEvents(t *testing.T) {
+	upstream := &ProxyResponse{
+		StatusCode: 200,
+		Headers:    http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			chatChunk(`{"content":"Hello"}`, ""),
+			chatChunk(`{}`, "stop"),
+			"data: [DONE]\n\n",
+		}, ""))),
+		ContentType: "text/event-stream",
+	}
+	m := NewAPITranslate(ModuleConfig{Enabled: true, Params: map[string]any{"api_format": "chat_completions"}})
+
+	wrapped, err := m.WrapResponse(context.Background(), &ProxyRequest{Path: "/v1/responses"}, upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(wrapped.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := eventTypes(parseResponseSSE(t, out))
+	for _, want := range []string{"response.output_text.delta", "response.completed"} {
+		if !contains(types, want) {
+			t.Fatalf("missing event %s in %#v", want, types)
+		}
+	}
+}
+
+func TestChatChunkToProtocolStreamEventsCapturesToolCallDelta(t *testing.T) {
+	chunk := chatCompletionChunk{
+		ID: "chatcmpl_1",
+		Choices: []chatChoice{{
+			Delta: chatDelta{
+				ToolCalls: []chatToolCall{{
+					ID:       "call_1",
+					Function: chatToolFunction{Name: "lookup", Arguments: `{"q"`},
+				}},
+			},
+		}},
+	}
+
+	got := chatChunkToProtocolEvents(chunk)
+	want := []protocol.StreamEvent{{
+		Protocol: appruntime.ProtocolChatCompletions,
+		Kind:     protocol.StreamEventToolCallDelta,
+		ToolCall: &protocol.ToolCall{ID: "call_1", Name: "lookup", Arguments: `{"q"`},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events mismatch:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

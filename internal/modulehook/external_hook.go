@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/module"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
 const externalHookTimeout = 5 * time.Second
@@ -17,6 +18,7 @@ type ExternalHookRuntime struct {
 	Command         string
 	Args            []string
 	ProtocolVersion string
+	ProtocolSupport appruntime.ModuleProtocolSupport
 }
 
 type ExternalHook struct {

@@ -6,6 +6,7 @@ test("worker detail keeps request modules and lifecycle hooks separate", () => {
     name: "app",
     port: 6767,
     upstream: { name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+    protocol: "chat_completions",
     status: "running",
     snapshot_generation: 3,
     log_level: "simple",
@@ -18,6 +19,9 @@ test("worker detail keeps request modules and lifecycle hooks separate", () => {
     hook_statuses: {
       config_patch: { state: "active", detail: { provider_name: "test" } },
     },
+    module_support: {
+      api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["stream_events"] },
+    },
   }
 
   expect(worker.modules).toEqual({
@@ -28,5 +32,8 @@ test("worker detail keeps request modules and lifecycle hooks separate", () => {
   })
   expect(worker.hook_statuses).toEqual({
     config_patch: { state: "active", detail: { provider_name: "test" } },
+  })
+  expect(worker.module_support).toEqual({
+    api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["stream_events"] },
   })
 })

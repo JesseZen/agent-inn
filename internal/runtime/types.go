@@ -6,6 +6,8 @@ type Generation uint64
 type WorkerRole string
 type LogLevel string
 type APIFormat string
+type ProtocolKind string
+type ProtocolCapability string
 
 const (
 	WorkerRoleCLI WorkerRole = "cli"
@@ -14,7 +16,16 @@ const (
 	LogLevelSimple LogLevel = "simple"
 	LogLevelDetail LogLevel = "detail"
 
+	APIFormatResponses       APIFormat = "responses"
 	APIFormatChatCompletions APIFormat = "chat_completions"
+
+	ProtocolResponses       ProtocolKind = "responses"
+	ProtocolChatCompletions ProtocolKind = "chat_completions"
+	ProtocolClaudeCode      ProtocolKind = "claude_code"
+
+	ProtocolCapabilityInputText    ProtocolCapability = "input_text"
+	ProtocolCapabilityToolCalls    ProtocolCapability = "tool_calls"
+	ProtocolCapabilityStreamEvents ProtocolCapability = "stream_events"
 )
 
 type ModuleConfig struct {
@@ -22,13 +33,19 @@ type ModuleConfig struct {
 	Params  map[string]any `json:"params,omitempty"`
 }
 
+type ModuleProtocolSupport struct {
+	Protocols    []ProtocolKind       `json:"protocols,omitempty"`
+	Capabilities []ProtocolCapability `json:"capabilities,omitempty"`
+}
+
 type PluginRuntime struct {
-	Kind            string   `json:"kind"`
-	Source          string   `json:"source"`
-	Path            string   `json:"path,omitempty"`
-	Command         string   `json:"command,omitempty"`
-	Args            []string `json:"args,omitempty"`
-	ProtocolVersion string   `json:"protocol_version,omitempty"`
+	Kind            string                `json:"kind"`
+	Source          string                `json:"source"`
+	Path            string                `json:"path,omitempty"`
+	Command         string                `json:"command,omitempty"`
+	Args            []string              `json:"args,omitempty"`
+	ProtocolVersion string                `json:"protocol_version,omitempty"`
+	ProtocolSupport ModuleProtocolSupport `json:"protocol_support,omitempty"`
 }
 
 type UpstreamRuntime struct {
@@ -64,4 +81,11 @@ func (u UpstreamRuntime) Public() UpstreamPublic {
 		HasAPIKey: u.APIKey != "",
 		APIFormat: u.APIFormat,
 	}
+}
+
+func ProtocolKindFromAPIFormat(format APIFormat) ProtocolKind {
+	if format == "" {
+		return ProtocolResponses
+	}
+	return ProtocolKind(format)
 }

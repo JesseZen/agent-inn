@@ -7,7 +7,7 @@ import (
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
-func buildRuntimeModules(configs map[string]module.ModuleConfig, plugins map[string]appruntime.PluginRuntime, apiFormat appruntime.APIFormat) ([]module.Middleware, map[string]module.ModuleConfig, error) {
+func buildRuntimeModules(configs map[string]module.ModuleConfig, plugins map[string]appruntime.PluginRuntime, apiFormat appruntime.APIFormat) ([]module.Middleware, map[string]module.ModuleConfig, map[string]appruntime.ModuleProtocolSupport, error) {
 	externalRequest := map[string]module.ExternalRequestRuntime{}
 	for name, plugin := range plugins {
 		if plugin.Source == "external" && plugin.Kind == "request_middleware" {
@@ -15,6 +15,7 @@ func buildRuntimeModules(configs map[string]module.ModuleConfig, plugins map[str
 				Command:         plugin.Command,
 				Args:            append([]string(nil), plugin.Args...),
 				ProtocolVersion: plugin.ProtocolVersion,
+				ProtocolSupport: plugin.ProtocolSupport,
 				Stderr:          os.Stderr,
 			}
 		}
