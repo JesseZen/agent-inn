@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -181,6 +182,111 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	}
 	if records[0].SessionLabel != "solve problem A" || records[0].TmuxWindowID != "@12" {
 		t.Fatalf("expected label and real window id in registry, got %#v", records[0])
+	}
+}
+
+func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New(tmuxMissingSocketErrorText)
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--cd", "/tmp/work", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("expected success, got %d", code)
+	}
+
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexCmd := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{
+		Profile:    "cli-openai",
+		Workspace:  "/tmp/work",
+		WorkerPort: 11199,
+	})
+	want := [][]string{
+		manager.TmuxDetectCommand(),
+		manager.TmuxHasSessionCommandForSettings(cfg.Settings),
+		manager.TmuxStartHostCommandForSettings(cfg.Settings),
+		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
+		manager.TmuxThemeCommandForSettings(cfg.Settings),
+		manager.TmuxSelectWindowCommandForSettings(cfg.Settings, "solve problem A"),
+		manager.TmuxCreateWindowCommandForSettings(cfg.Settings, "solve problem A", codexCmd),
+		manager.TmuxAttachCommandForSettings(cfg.Settings),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("permission denied")
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Errorf("expected unexpected has-session error to fail launch")
+	}
+	if !strings.Contains(stderr.String(), "failed to inspect tmux host session") || !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("expected clear has-session failure, got %q", stderr.String())
+	}
+	for _, call := range got {
+		if len(call) > 3 && call[3] == "new-session" {
+			t.Errorf("unexpected new-session call after has-session failure: %#v", got)
+		}
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no hosted session registry records, got %#v", records)
 	}
 }
 
@@ -480,7 +586,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 					return "", errors.New("can't find session")
 				}
 				if len(args) > 3 && args[3] == "new-session" {
-					return "@1\n", nil
+					return "@1\t0\n", nil
 				}
 				return "", nil
 			})
@@ -497,7 +603,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai"},
+		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}", "codex", "--profile", "cli-openai"},
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
@@ -521,6 +627,121 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	}
 	if records[0].SessionLabel != "solve problem A" || records[0].TmuxWindowID != "@1" {
 		t.Fatalf("expected label and real window id in registry, got %#v", records[0])
+	}
+}
+
+func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "new-session" {
+					return "@1\t1\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("expected success, got %d", code)
+	}
+
+	want := [][]string{
+		manager.TmuxDetectCommand(),
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}", "codex", "--profile", "cli-openai"},
+		{"tmux", "-L", "ainn-test", "move-window", "-s", "ainn-test-host:1", "-t", "ainn-test-host:0"},
+		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
+		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotRecords := make([]struct {
+		SessionLabel string
+		TmuxWindowID string
+	}, 0, len(records))
+	for _, record := range records {
+		gotRecords = append(gotRecords, struct {
+			SessionLabel string
+			TmuxWindowID string
+		}{
+			SessionLabel: record.SessionLabel,
+			TmuxWindowID: record.TmuxWindowID,
+		})
+	}
+	wantRecords := []struct {
+		SessionLabel string
+		TmuxWindowID string
+	}{
+		{SessionLabel: "solve problem A", TmuxWindowID: "@1"},
+	}
+	if !reflect.DeepEqual(gotRecords, wantRecords) {
+		t.Fatalf("got %#v, want %#v", gotRecords, wantRecords)
+	}
+}
+
+func TestRunLaunchHostedTerminalReuseFirstWindowCapturesNewSessionIDWhenLabelIsAttachSession(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "@1\t0\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "attach-session"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one hosted session, got %#v", records)
+	}
+	got := []struct {
+		SessionLabel string
+		TmuxWindowID string
+	}{
+		{SessionLabel: records[0].SessionLabel, TmuxWindowID: records[0].TmuxWindowID},
+	}
+	want := []struct {
+		SessionLabel string
+		TmuxWindowID string
+	}{
+		{SessionLabel: "attach-session", TmuxWindowID: "@1"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
@@ -573,6 +794,48 @@ func TestRunLaunchHostedTerminalReuseFirstWindowStillUsesNewWindowOnExistingHost
 		if strings.Join(got[i], " ") != strings.Join(w, " ") {
 			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
 		}
+	}
+}
+
+func TestRunLaunchHostedTerminalCapturesNewWindowIDWhenLabelIsAttachSession(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_HAS_SESSION", "1")
+	t.Setenv("FAKE_TMUX_FAIL_COMMAND", "select-window")
+	t.Setenv("FAKE_TMUX_NEW_WINDOW_STDOUT", "@12\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "attach-session"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one hosted session, got %#v", records)
+	}
+	got := []struct {
+		SessionLabel string
+		TmuxWindowID string
+	}{
+		{SessionLabel: records[0].SessionLabel, TmuxWindowID: records[0].TmuxWindowID},
+	}
+	want := []struct {
+		SessionLabel string
+		TmuxWindowID string
+	}{
+		{SessionLabel: "attach-session", TmuxWindowID: "@12"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
@@ -629,6 +892,48 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 		if strings.Join(got[i], " ") != strings.Join(w, " ") {
 			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
 		}
+	}
+}
+
+func TestRunLaunchHostedTerminalDeletesNewRecordWhenFreshHostSetupFails(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "new-session" {
+					return "", errors.New("new-session failed")
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected failure")
+	}
+	if !strings.Contains(stderr.String(), "failed to start tmux host") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []manager.HostedSessionRecord{}) {
+		t.Fatalf("got %#v, want no hosted session records", records)
 	}
 }
 

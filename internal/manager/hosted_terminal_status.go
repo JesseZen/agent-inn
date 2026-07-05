@@ -2,10 +2,18 @@ package manager
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
+)
+
+const (
+	tmuxNoServerRunningError = "no server running"
+	tmuxCantFindSessionError = "can't find session"
+	tmuxErrorConnectingError = "error connecting to "
+	tmuxNoSuchFileError      = "No such file or directory"
 )
 
 type hostedTMuxRunner interface {
@@ -16,9 +24,14 @@ var hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 	return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 		cmd := exec.Command(args[0], args[1:]...)
 		var stdout bytes.Buffer
+		var stderr bytes.Buffer
 		cmd.Stdout = &stdout
-		cmd.Stderr = &bytes.Buffer{}
+		cmd.Stderr = &stderr
 		err := cmd.Run()
+		stderrText := strings.TrimSpace(stderr.String())
+		if err != nil && stderrText != "" {
+			err = fmt.Errorf("%w: %s", err, stderrText)
+		}
 		return stdout.String(), err
 	})
 }
@@ -97,7 +110,13 @@ func hostedWindowDetailsFromRunnerForSettings(settings config.Settings, runner h
 		return map[string]string{}, nil
 	}
 	if _, err := runner.Run(TmuxHasSessionCommandForSettings(settings)); err != nil {
-		return map[string]string{}, nil
+		errText := err.Error()
+		if strings.Contains(errText, tmuxNoServerRunningError) ||
+			strings.Contains(errText, tmuxCantFindSessionError) ||
+			(strings.Contains(errText, tmuxErrorConnectingError) && strings.Contains(errText, tmuxNoSuchFileError)) {
+			return map[string]string{}, nil
+		}
+		return nil, err
 	}
 	stdout, err := runner.Run(TmuxListWindowDetailsCommandForSettings(settings))
 	if err != nil {

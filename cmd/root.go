@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"bytes"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io"
@@ -15,11 +15,6 @@ import (
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
 	"github.com/jesse/agent-inn/internal/manager"
-)
-
-const (
-	tmuxRootChildEnvVar = "AINN_TMUX_ROOT_CHILD"
-	tmuxMainWindowName  = "ainn"
 )
 
 type rootManager interface {
@@ -40,16 +35,6 @@ type rootProgram interface {
 	CommandLine() []string
 	WorkingDir() string
 	Env() map[string]string
-}
-
-type rootTmuxRunner interface {
-	Run(args []string) (string, error)
-}
-
-type rootTmuxRunnerFunc func([]string) (string, error)
-
-func (f rootTmuxRunnerFunc) Run(args []string) (string, error) {
-	return f(args)
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -94,18 +79,6 @@ var rootProgramFactory = func(addr string, startupStatus string, configDir strin
 	return newTUIProgram(addr, startupStatus, configDir)
 }
 
-var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
-	return rootTmuxRunnerFunc(func(args []string) (string, error) {
-		cmd := exec.Command(args[0], args[1:]...)
-		var stdoutBuf bytes.Buffer
-		cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
-		cmd.Stderr = stderr
-		cmd.Stdin = os.Stdin
-		err := cmd.Run()
-		return stdoutBuf.String(), err
-	})
-}
-
 var rootLogWriter io.Writer = os.Stderr
 
 // rootLocker 抢占独占锁，避免两个 root 进程同时运行 manager + TUI 导致状态不同步。
@@ -113,16 +86,29 @@ type rootLocker interface {
 	Acquire() (release func(), err error)
 }
 
-// flockLocker 用文件锁实现独占。锁文件路径固定，进程退出时由 OS 释放。
+// flockLocker 用文件锁实现独占。锁文件路径由 canonical config-dir 推导，进程退出时由 OS 释放。
 type flockLocker struct {
 	path string
 }
 
-func defaultLockPath() string {
+func rootLockDir() string {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, constants.LockFileName)
+		return dir
 	}
-	return filepath.Join(os.TempDir(), constants.LockFileName)
+	return os.TempDir()
+}
+
+func rootLockPath(configDir string) (string, error) {
+	canonicalConfigDir, err := filepath.Abs(filepath.Clean(expandHome(configDir)))
+	if err != nil {
+		return "", fmt.Errorf("canonicalize config dir %s: %w", configDir, err)
+	}
+	canonicalConfigDir, err = filepath.EvalSymlinks(canonicalConfigDir)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize config dir %s: %w", configDir, err)
+	}
+	hash := sha256.Sum256([]byte(canonicalConfigDir))
+	return filepath.Join(rootLockDir(), fmt.Sprintf("ainn-%x.lock", hash)), nil
 }
 
 func (l flockLocker) Acquire() (func(), error) {
@@ -137,14 +123,14 @@ func (l flockLocker) Acquire() (func(), error) {
 	return func() { _ = f.Close() }, nil
 }
 
-var rootLockerFactory = func() rootLocker {
-	return flockLocker{path: defaultLockPath()}
+var rootLockerFactory = func(lockPath string) rootLocker {
+	return flockLocker{path: lockPath}
 }
 
-// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真 /tmp/ainn.lock。
+// setRootLockerFactoryForTest 替换锁工厂，让走 runRoot 的测试不依赖真实实例锁文件。
 func setRootLockerFactoryForTest(locker rootLocker) func() {
 	previous := rootLockerFactory
-	rootLockerFactory = func() rootLocker { return locker }
+	rootLockerFactory = func(string) rootLocker { return locker }
 	return func() { rootLockerFactory = previous }
 }
 
@@ -289,7 +275,14 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	configPath := filepath.Join(*configDir, config.ConfigFileName)
+	expandedConfigDir := expandHome(*configDir)
+	absConfigDir, err := filepath.Abs(expandedConfigDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to resolve config dir: %v\n", err)
+		return 1
+	}
+	resolvedConfigDir := filepath.Clean(absConfigDir)
+	configPath := filepath.Join(resolvedConfigDir, config.ConfigFileName)
 
 	cfg, err := config.LoadFile(configPath)
 	if err != nil {
@@ -297,42 +290,21 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	if cfg.Settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeMainTUIWindow && os.Getenv(tmuxRootChildEnvVar) == "" {
-		runner := rootTmuxRunnerFactory(stdout, stderr)
-		if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
-			fmt.Fprintf(stderr, "tmux is required for main-tui-window mode: %v\n", err)
-			return 1
-		}
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(stderr, "failed to locate executable: %v\n", err)
-			return 1
-		}
-		rootCmd := []string{"env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", *configDir, "--manager-port", strconv.Itoa(*managerPort)}
-		if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(cfg.Settings)); err != nil {
-			if _, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
-				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
-				return 1
-			}
-		} else if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(cfg.Settings, tmuxMainWindowName)); err != nil {
-			if _, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
-				fmt.Fprintf(stderr, "failed to recreate main tmux window: %v\n", err)
-				return 1
-			}
-		}
-		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(cfg.Settings)); err != nil {
-			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
-			return 1
-		}
-		return 0
+		return runRootTmuxBootstrap(cfg, resolvedConfigDir, *managerPort, stdout, stderr)
 	}
 
-	release, err := rootLockerFactory().Acquire()
+	lockPath, err := rootLockPath(resolvedConfigDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to start: %v\n", err)
+		return 1
+	}
+	release, err := rootLockerFactory(lockPath).Acquire()
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
 	defer release()
-	if err := rootRunner(RootOptions{ConfigDir: *configDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
+	if err := rootRunner(RootOptions{ConfigDir: resolvedConfigDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
