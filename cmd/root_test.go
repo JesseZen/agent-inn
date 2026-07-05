@@ -396,10 +396,65 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 
 	want := [][]string{
 		{"tmux", "-V"},
-		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
-		{"tmux", "-L", "ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowUsesCurrentSocketPathInsideTmux(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	t.Setenv("TMUX", "/tmp/custom/ainn-test,123,0")
+	t.Setenv("TMUX_PANE", "%2")
+
+	var got [][]string
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "list-panes" {
+					return "env " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 9090\n", nil
+				}
+				if len(args) > 3 && args[3] == "list-clients" {
+					return "client-1\t%1\nclient-2\t%2\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-S", "/tmp/custom/ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-S", "/tmp/custom/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/custom/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
+		{"tmux", "-S", "/tmp/custom/ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -454,8 +509,8 @@ func TestRunRootMainTUIWindowFailsWhenInsideTmuxClientPaneIsMissing(t *testing.T
 
 	want := [][]string{
 		{"tmux", "-V"},
-		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -1004,6 +1059,50 @@ func TestRunRootMainTUIWindowAbortsWhenHasSessionTraceWriteFails(t *testing.T) {
 	want := "-V\n-L ainn-test has-session -t ainn-test-host\n"
 	if string(got) != want {
 		t.Fatalf("expected bootstrap to stop after has-session, got %q want %q", string(got), want)
+	}
+}
+
+func TestRunRootMainTUIWindowAbortsWhenNewSessionTraceWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	callsPath := filepath.Join(t.TempDir(), "tmux-calls.log")
+	tracePath := filepath.Join(t.TempDir(), "tmux-trace.jsonl")
+	installFakeTmuxOnPath(t)
+	t.Setenv("AINN_TMUX_DEBUG_LOG", tracePath)
+	t.Setenv("FAKE_TMUX_CALLS_FILE", callsPath)
+	t.Setenv("FAKE_TMUX_HAS_SESSION_STDERR", "can't find session\n")
+	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "0\n")
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_PATH", tracePath)
+	t.Setenv("FAKE_TMUX_CHMOD_TRACE_ON_COMMAND", "new-session")
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "write tmux trace "+tracePath) {
+		t.Fatalf("expected trace write failure in stderr, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "failed to start tmux host") {
+		t.Fatalf("expected direct trace write failure, got %q", stderr.String())
+	}
+
+	got, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test new-session -d -s ainn-test-host -n ainn -P -F #{window_index} env AINN_TMUX_ROOT_CHILD=1 " + fakeTmuxCurrentExecutable(t) + " --config-dir " + dir + " --manager-port 19090\n"
+	if string(got) != want {
+		t.Fatalf("expected bootstrap to stop after new-session, got %q want %q", string(got), want)
 	}
 }
 
@@ -1842,6 +1941,9 @@ case "$cmd" in
   new-session)
     printf '%s' "${FAKE_TMUX_NEW_SESSION_STDOUT:-}"
     printf '%s' "${FAKE_TMUX_NEW_SESSION_STDERR:-}" >&2
+    if [[ "${FAKE_TMUX_CHMOD_TRACE_ON_COMMAND:-}" == "new-session" && -n "${FAKE_TMUX_CHMOD_TRACE_PATH:-}" ]]; then
+      chmod 0400 "$FAKE_TMUX_CHMOD_TRACE_PATH"
+    fi
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "new-session" ]] && exit 1
     exit 0
     ;;

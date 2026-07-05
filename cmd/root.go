@@ -174,6 +174,14 @@ func isTmuxHostMissingError(err error) bool {
 		(strings.Contains(errText, tmuxErrorConnecting) && strings.Contains(errText, tmuxNoSuchFile))
 }
 
+func printTmuxTraceWriteError(stderr io.Writer, err error) bool {
+	if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
+		fmt.Fprintln(stderr, err)
+		return true
+	}
+	return false
+}
+
 var rootLogWriter io.Writer = os.Stderr
 
 // rootLocker 抢占独占锁，避免两个 root 进程同时运行 manager + TUI 导致状态不同步。
@@ -380,8 +388,7 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 	if cfg.Settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeMainTUIWindow && os.Getenv(tmuxRootChildEnvVar) == "" {
 		runner := rootTmuxRunnerFactory(stdout, stderr)
 		if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
-			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-				fmt.Fprintln(stderr, err)
+			if printTmuxTraceWriteError(stderr, err) {
 				return 1
 			}
 			fmt.Fprintf(stderr, "tmux is required for main-tui-window mode: %v\n", err)
@@ -402,45 +409,59 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "failed to locate executable: %v\n", err)
 			return 1
 		}
+		tmuxHostCommand := func(args []string) []string { return args }
+		if insideTmux {
+			tmuxHostCommand = func(args []string) []string {
+				args[1] = "-S"
+				args[2] = currentSocketPath
+				return args
+			}
+		}
 		rootCmd := []string{"env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", *configDir, "--manager-port", strconv.Itoa(*managerPort)}
-		if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(cfg.Settings)); err != nil {
-			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-				fmt.Fprintln(stderr, err)
+		if _, err := runner.Run(tmuxHostCommand(manager.TmuxHasSessionCommandForSettings(cfg.Settings))); err != nil {
+			if printTmuxTraceWriteError(stderr, err) {
 				return 1
 			}
 			if !isTmuxHostMissingError(err) {
 				fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 				return 1
 			}
-			createdWindowIndex, err := runner.Run(manager.TmuxStartMainWindowHostCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd))
+			createdWindowIndex, err := runner.Run(tmuxHostCommand(manager.TmuxStartMainWindowHostCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)))
 			if err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
+					return 1
+				}
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
 			createdWindowIndex = strings.TrimSpace(createdWindowIndex)
 			if createdWindowIndex != tmuxMainWindowIndex {
-				if _, err := runner.Run(manager.TmuxMoveWindowToMainWindowCommandForSettings(cfg.Settings, createdWindowIndex)); err != nil {
+				if _, err := runner.Run(tmuxHostCommand(manager.TmuxMoveWindowToMainWindowCommandForSettings(cfg.Settings, createdWindowIndex))); err != nil {
+					if printTmuxTraceWriteError(stderr, err) {
+						return 1
+					}
 					fmt.Fprintf(stderr, "failed to move tmux main window: %v\n", err)
 					return 1
 				}
 			}
-		} else if paneStartCommand, err := runner.Run(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings)); err != nil {
-			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-				fmt.Fprintln(stderr, err)
+		} else if paneStartCommand, err := runner.Run(tmuxHostCommand(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings))); err != nil {
+			if printTmuxTraceWriteError(stderr, err) {
 				return 1
 			}
 			if !strings.Contains(err.Error(), "can't find window") {
 				fmt.Fprintf(stderr, "failed to inspect main tmux window: %v\n", err)
 				return 1
 			}
-			if _, err := runner.Run(manager.TmuxCreateMainWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)); err != nil {
+			if _, err := runner.Run(tmuxHostCommand(manager.TmuxCreateMainWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd))); err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
+					return 1
+				}
 				fmt.Fprintf(stderr, "failed to create main tmux window: %v\n", err)
 				return 1
 			}
 		} else if !strings.Contains(paneStartCommand, exe) {
-			if _, err := runner.Run(manager.TmuxRespawnMainWindowCommandForSettings(cfg.Settings, rootCmd)); err != nil {
-				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-					fmt.Fprintln(stderr, err)
+			if _, err := runner.Run(tmuxHostCommand(manager.TmuxRespawnMainWindowCommandForSettings(cfg.Settings, rootCmd))); err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
 					return 1
 				}
 				fmt.Fprintf(stderr, "failed to respawn main tmux window: %v\n", err)
@@ -450,8 +471,7 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		if insideTmux {
 			clientRows, err := runner.Run(manager.TmuxListClientPanesCommand(currentSocketPath))
 			if err != nil {
-				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-					fmt.Fprintln(stderr, err)
+				if printTmuxTraceWriteError(stderr, err) {
 					return 1
 				}
 				fmt.Fprintf(stderr, "failed to identify tmux client: %v\n", err)
@@ -470,9 +490,8 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "failed to identify tmux client: no client found for pane %s\n", currentPaneID)
 				return 1
 			}
-			if _, err := runner.Run(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings, clientName)); err != nil {
-				if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-					fmt.Fprintln(stderr, err)
+			if _, err := runner.Run(tmuxHostCommand(manager.TmuxSwitchClientToMainWindowCommandForSettings(cfg.Settings, clientName))); err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
 					return 1
 				}
 				fmt.Fprintf(stderr, "failed to switch tmux client: %v\n", err)
@@ -480,15 +499,17 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 			}
 			return 0
 		}
-		if _, err := runner.Run(manager.TmuxSelectMainWindowCommandForSettings(cfg.Settings)); err != nil {
-			if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
-				fmt.Fprintln(stderr, err)
+		if _, err := runner.Run(tmuxHostCommand(manager.TmuxSelectMainWindowCommandForSettings(cfg.Settings))); err != nil {
+			if printTmuxTraceWriteError(stderr, err) {
 				return 1
 			}
 			fmt.Fprintf(stderr, "failed to select main tmux window: %v\n", err)
 			return 1
 		}
-		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(cfg.Settings)); err != nil {
+		if _, err := runner.Run(tmuxHostCommand(manager.TmuxAttachCommandForSettings(cfg.Settings))); err != nil {
+			if printTmuxTraceWriteError(stderr, err) {
+				return 1
+			}
 			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
 			return 1
 		}
