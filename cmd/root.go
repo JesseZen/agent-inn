@@ -29,6 +29,8 @@ const (
 	tmuxTraceWriteError = "write tmux trace "
 	tmuxNoServerRunning = "no server running"
 	tmuxCantFindSession = "can't find session"
+	tmuxErrorConnecting = "error connecting to "
+	tmuxNoSuchFile      = "No such file or directory"
 )
 
 type rootManager interface {
@@ -167,7 +169,9 @@ var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRun
 
 func isTmuxHostMissingError(err error) bool {
 	errText := err.Error()
-	return strings.Contains(errText, tmuxNoServerRunning) || strings.Contains(errText, tmuxCantFindSession)
+	return strings.Contains(errText, tmuxNoServerRunning) ||
+		strings.Contains(errText, tmuxCantFindSession) ||
+		(strings.Contains(errText, tmuxErrorConnecting) && strings.Contains(errText, tmuxNoSuchFile))
 }
 
 var rootLogWriter io.Writer = os.Stderr

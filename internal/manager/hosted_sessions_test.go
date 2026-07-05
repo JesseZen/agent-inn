@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+const tmuxMissingSocketErrorText = "error connecting to /private/tmp/ainn-tmux-repro/tmux-501/ainn-test (No such file or directory)"
+
 func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -97,6 +99,51 @@ func TestHostedSessionRegistrySummariesMatchRealTmuxWindowIDs(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestHostedSessionRegistrySummariesTreatsMissingTmuxSocketAsStale(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	oldFactory := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			gotCalls = append(gotCalls, append([]string{}, args...))
+			if reflect.DeepEqual(args, TmuxHasSessionCommand()) {
+				return "", errors.New(tmuxMissingSocketErrorText)
+			}
+			return "@12\tworker 1\n", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldFactory }()
+
+	got, err := registry.Summaries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []HostedSessionSummary{{
+		HostedSessionRecord: created,
+		Status:              hostedSessionStatusStale,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	wantCalls := [][]string{TmuxHasSessionCommand()}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
 	}
 }
 
@@ -281,6 +328,47 @@ func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxHostMissing(t *testing.T
 	want := [][]string{TmuxHasSessionCommand()}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tmux calls: %#v", got)
+	}
+}
+
+func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxSocketMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "ainn:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		if reflect.DeepEqual(args, TmuxHasSessionCommand()) {
+			return "", errors.New(tmuxMissingSocketErrorText)
+		}
+		return "", nil
+	})
+
+	if err := registry.Remove(created.SessionID, runner); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []HostedSessionRecord{}) {
+		t.Fatalf("got records %#v, want none", records)
+	}
+	want := [][]string{TmuxHasSessionCommand()}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, want)
 	}
 }
 

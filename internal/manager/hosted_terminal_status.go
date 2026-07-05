@@ -12,6 +12,8 @@ import (
 const (
 	tmuxNoServerRunningError = "no server running"
 	tmuxCantFindSessionError = "can't find session"
+	tmuxErrorConnectingError = "error connecting to "
+	tmuxNoSuchFileError      = "No such file or directory"
 )
 
 type hostedTMuxRunner interface {
@@ -109,7 +111,9 @@ func hostedWindowDetailsFromRunnerForSettings(settings config.Settings, runner h
 	}
 	if _, err := runner.Run(TmuxHasSessionCommandForSettings(settings)); err != nil {
 		errText := err.Error()
-		if strings.Contains(errText, tmuxNoServerRunningError) || strings.Contains(errText, tmuxCantFindSessionError) {
+		if strings.Contains(errText, tmuxNoServerRunningError) ||
+			strings.Contains(errText, tmuxCantFindSessionError) ||
+			(strings.Contains(errText, tmuxErrorConnectingError) && strings.Contains(errText, tmuxNoSuchFileError)) {
 			return map[string]string{}, nil
 		}
 		return nil, err
