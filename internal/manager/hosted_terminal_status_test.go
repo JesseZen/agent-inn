@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -107,5 +108,17 @@ func TestHostedSessionStatusForWindow(t *testing.T) {
 func TestHostedSessionStatusForTmuxWindowID(t *testing.T) {
 	if got := hostedSessionStatusForWindow(hostedWindowDetails("@1\tone\n@2\ttwo\n"), HostedSessionRecord{SessionLabel: "one", TmuxWindowID: "@1"}); got != hostedSessionStatusActive {
 		t.Fatalf("got %q, want active", got)
+	}
+}
+
+func TestHostedTMuxRunnerIncludesStderrOnError(t *testing.T) {
+	runner := hostedTMuxRunnerFactory()
+
+	_, err := runner.Run([]string{"sh", "-c", "printf 'missing host session' >&2; exit 1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "missing host session") {
+		t.Fatalf("got error %q, want stderr included", err.Error())
 	}
 }

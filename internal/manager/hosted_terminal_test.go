@@ -42,7 +42,23 @@ func TestTmuxStartHostWithWindowCommandForSettings(t *testing.T) {
 			},
 		},
 	}, "solve problem A", []string{"codex", "--profile", "cli-openai"})
-	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}", "codex", "--profile", "cli-openai"}
+	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}", "codex", "--profile", "cli-openai"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxStartMainWindowHostCommandForSettings(t *testing.T) {
+	got := TmuxStartMainWindowHostCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:    "ainn",
+				HostSession:   "ainn-host",
+				HostStartMode: "main-tui-window",
+			},
+		},
+	}, "ainn", []string{"env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"})
+	want := []string{"tmux", "-L", "ainn", "new-session", "-d", "-s", "ainn-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -64,10 +80,108 @@ func TestTmuxSelectWindowCommand(t *testing.T) {
 	}
 }
 
+func TestTmuxSelectMainWindowCommandForSettings(t *testing.T) {
+	got := TmuxSelectMainWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	})
+	want := []string{"tmux", "-L", "ainn", "select-window", "-t", "ainn-host:0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestTmuxAttachCommand(t *testing.T) {
 	got := TmuxAttachCommand()
 	want := []string{"tmux", "-L", "ainn", "attach-session", "-t", "ainn-host"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxMainWindowPaneStartCommandForSettings(t *testing.T) {
+	got := TmuxMainWindowPaneStartCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	})
+	want := []string{"tmux", "-L", "ainn", "list-panes", "-t", "ainn-host:0", "-F", "#{pane_start_command}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxCreateMainWindowCommandForSettings(t *testing.T) {
+	got := TmuxCreateMainWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	}, "ainn", []string{"env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"})
+	want := []string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host:0", "-n", "ainn", "-P", "-F", "#{window_id}", "env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxMoveWindowToMainWindowCommandForSettings(t *testing.T) {
+	got := TmuxMoveWindowToMainWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	}, "1")
+	want := []string{"tmux", "-L", "ainn", "move-window", "-s", "ainn-host:1", "-t", "ainn-host:0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxRespawnMainWindowCommandForSettings(t *testing.T) {
+	got := TmuxRespawnMainWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	}, []string{"env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"})
+	want := []string{"tmux", "-L", "ainn", "respawn-pane", "-k", "-t", "ainn-host:0", "env", "AINN_TMUX_ROOT_CHILD=1", "/tmp/ainn"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxListClientPanesCommand(t *testing.T) {
+	got := TmuxListClientPanesCommand("/tmp/tmux-501/ainn")
+	want := []string{"tmux", "-S", "/tmp/tmux-501/ainn", "list-clients", "-F", "#{client_name}\t#{pane_id}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxSwitchClientToMainWindowCommandForSettings(t *testing.T) {
+	got := TmuxSwitchClientToMainWindowCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn",
+				HostSession: "ainn-host",
+			},
+		},
+	}, "client-1")
+	want := []string{"tmux", "-L", "ainn", "switch-client", "-c", "client-1", "-t", "ainn-host:0"}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
