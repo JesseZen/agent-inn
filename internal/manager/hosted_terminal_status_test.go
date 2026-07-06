@@ -116,6 +116,71 @@ func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
 	}
 }
 
+func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	unread := HostedSessionRecord{
+		TmuxWindowID:   "@12",
+		TurnState:      HostedTurnStateDone,
+		TurnGeneration: 2,
+	}
+	read := unread
+	read.TurnAcknowledgedGeneration = 2
+
+	gotUnread := TmuxHostedTurnStatusCommandForRecord(settings, unread)
+	wantUnread := []string{
+		"tmux", "-L", "ainn-test",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-format", "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-format", "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]",
+	}
+	if strings.Join(gotUnread, "\n") != strings.Join(wantUnread, "\n") {
+		t.Fatalf("unread got %#v, want %#v", gotUnread, wantUnread)
+	}
+
+	gotRead := TmuxHostedTurnStatusCommandForRecord(settings, read)
+	wantRead := []string{
+		"tmux", "-L", "ainn-test",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-format", "#[fg=colour244,bg=colour235] #I:+ #W #[default]",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]",
+	}
+	if strings.Join(gotRead, "\n") != strings.Join(wantRead, "\n") {
+		t.Fatalf("read got %#v, want %#v", gotRead, wantRead)
+	}
+}
+
+func TestTmuxAcknowledgeTurnHookCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxAcknowledgeTurnHookCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin")
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"set-hook", "-t", "ainn-test-host",
+		"after-select-window[90]",
+		"run-shell -b '/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id}",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestHostedSessionStatusForWindow(t *testing.T) {
 	if got := hostedSessionStatusForWindow(hostedWindowDetails("@1\tone\n@2\ttwo\n"), HostedSessionRecord{SessionLabel: "two", TmuxWindowID: "@2"}); got != hostedSessionStatusActive {
 		t.Fatalf("got %q, want active", got)
