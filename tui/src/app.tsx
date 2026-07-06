@@ -820,7 +820,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Help",
         slashName: "help",
         run: () => {
-          dialog.replace(() => <DialogHelp />)
+          dialog.push(() => <DialogHelp />)
         },
         category: "System",
       },

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { TextareaRenderable } from "@opentui/core"
+import { InputRenderable, TextareaRenderable } from "@opentui/core"
 import { resolveSlashCommand } from "../src/keymap"
 import { mountProxyApp, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 
@@ -24,7 +24,7 @@ test("proxy logs opens worker logs dialog with initial log lines", async () => {
   }
 })
 
-test("command palette opened from help returns to help", async () => {
+test("command palette opens help and returns to it from nested commands", async () => {
   const app = await mountProxyApp()
 
   try {
@@ -32,12 +32,23 @@ test("command palette opened from help returns to help", async () => {
       await app.render()
       return app.frame().includes("Ask anything")
     })
-    await wait(() =>
-      app.api.keymap
-        .getCommands({ visibility: "registered" })
-        .some((command) => command.name === "command.palette.show"),
-    )
-    app.api.keymap.runCommand("help.show")
+    app.mockInput.pressKey("p", { ctrl: true })
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Commands")
+    })
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+
+    await app.mockInput.typeText("help")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Help")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
       const frame = app.frame()
@@ -56,6 +67,38 @@ test("command palette opened from help returns to help", async () => {
       const frame = app.frame()
       return frame.includes("Help") && frame.includes("Press")
     })
+
+    app.mockInput.pressKey("p", { ctrl: true })
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Commands")
+    })
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+
+    await app.mockInput.typeText("help")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Help")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Help") && frame.includes("Press") && !frame.includes("Commands")
+    })
+    expect({ depth: app.api.ui.dialog.depth }).toEqual({ depth: 2 })
+
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Help") && frame.includes("Press")
+    })
+    expect({ depth: app.api.ui.dialog.depth }).toEqual({ depth: 1 })
   } finally {
     await app.cleanup()
   }
