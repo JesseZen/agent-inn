@@ -26,15 +26,15 @@ function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
   }
 }
 
-test("default prompt input keys keep return available for multiline text", () => {
+test("default prompt input keys submit with return and keep shift return for newline", () => {
   const config = createResolvedKeymapConfig()
 
   expect({
     submit: config.keybinds.get("input.submit").map((binding) => binding.key),
     newline: config.keybinds.get("input.newline").map((binding) => binding.key),
   }).toEqual({
-    submit: ["alt+return"],
-    newline: ["return,shift+return,ctrl+return,ctrl+j"],
+    submit: ["return"],
+    newline: ["shift+return,ctrl+return,alt+return,ctrl+j"],
   })
 })
 
@@ -232,7 +232,7 @@ test("prompt submit falls back to remote slash commands when no local slash exis
   }
 })
 
-test("managed prompt input keeps return as newline by default", async () => {
+test("managed prompt input submits with return and inserts newline with shift return by default", async () => {
   let textarea!: TextareaRenderable
   let submitted = 0
 
@@ -240,52 +240,6 @@ test("managed prompt input keeps return as newline by default", async () => {
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
     const config = createResolvedKeymapConfig()
-    const offKeymap = registerAinnKeymap(keymap, renderer, config)
-    onCleanup(offKeymap)
-
-    return (
-      <AinnKeymapProvider keymap={keymap}>
-        <textarea
-          ref={(value: TextareaRenderable) => {
-            textarea = value
-            textarea.focus()
-          }}
-          onSubmit={() => {
-            submitted += 1
-          }}
-        />
-      </AinnKeymapProvider>
-    )
-  }
-
-  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
-  try {
-    textarea.focus()
-
-    app.mockInput.pressEnter({ shift: true })
-    app.mockInput.pressEnter()
-    app.mockInput.pressEnter({ meta: true })
-
-    expect({ submitted, text: textarea.plainText }).toEqual({
-      submitted: 1,
-      text: "\n\n",
-    })
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("managed prompt input lets users bind return to submit", async () => {
-  let textarea!: TextareaRenderable
-  let submitted = 0
-
-  function Harness() {
-    const renderer = useRenderer()
-    const keymap = createDefaultOpenTuiKeymap(renderer)
-    const config = createResolvedKeymapConfig({
-      input_submit: "return",
-      input_newline: "shift+return,ctrl+return,alt+return,ctrl+j",
-    })
     const offKeymap = registerAinnKeymap(keymap, renderer, config)
     onCleanup(offKeymap)
 
@@ -320,11 +274,54 @@ test("managed prompt input lets users bind return to submit", async () => {
   }
 })
 
-test("resolved keybinds remove default return newline when return is rebound to submit", () => {
+test("managed prompt input lets users bind alt return to submit", async () => {
+  let textarea!: TextareaRenderable
+  let submitted = 0
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createResolvedKeymapConfig({
+      input_submit: "alt+return",
+      input_newline: "shift+return,ctrl+return,ctrl+j",
+    })
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
+    onCleanup(offKeymap)
+
+    return (
+      <AinnKeymapProvider keymap={keymap}>
+        <textarea
+          ref={(value: TextareaRenderable) => {
+            textarea = value
+            textarea.focus()
+          }}
+          onSubmit={() => {
+            submitted += 1
+          }}
+        />
+      </AinnKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
+  try {
+    textarea.focus()
+
+    app.mockInput.pressEnter({ shift: true })
+    app.mockInput.pressEnter({ meta: true })
+
+    expect({ submitted, text: textarea.plainText }).toEqual({
+      submitted: 1,
+      text: "\n",
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("resolved keybinds keep return submit out of default newline keys", () => {
   const config = createTuiResolvedConfig({
-    keybinds: {
-      input_submit: "return",
-    },
+    keybinds: {},
   })
 
   expect({
@@ -332,7 +329,7 @@ test("resolved keybinds remove default return newline when return is rebound to 
     newline: config.keybinds.get("input.newline").map((binding) => binding.key),
   }).toEqual({
     submit: ["return"],
-    newline: ["shift+return,ctrl+return,ctrl+j"],
+    newline: ["shift+return,ctrl+return,alt+return,ctrl+j"],
   })
 })
 
@@ -358,9 +355,9 @@ test("resolved keybinds remove default newline keys claimed by submit overrides"
     strokeNewline: strokeConfig.keybinds.get("input.newline").map((binding) => binding.key),
     objectNewline: objectConfig.keybinds.get("input.newline").map((binding) => binding.key),
   }).toEqual({
-    stringNewline: ["return,shift+return,ctrl+j"],
-    strokeNewline: ["return,ctrl+return,ctrl+j"],
-    objectNewline: ["return,shift+return,ctrl+j"],
+    stringNewline: ["shift+return,alt+return,ctrl+j"],
+    strokeNewline: ["ctrl+return,alt+return,ctrl+j"],
+    objectNewline: ["shift+return,alt+return,ctrl+j"],
   })
 })
 
@@ -386,8 +383,8 @@ test("resolved keybinds normalize enter aliases when removing submit collisions"
     ctrlEnterNewline: ctrlEnterConfig.keybinds.get("input.newline").map((binding) => binding.key),
     strokeNewline: strokeConfig.keybinds.get("input.newline").map((binding) => binding.key),
   }).toEqual({
-    enterNewline: ["shift+return,ctrl+return,ctrl+j"],
-    ctrlEnterNewline: ["return,shift+return,ctrl+j"],
-    strokeNewline: ["return,ctrl+return,ctrl+j"],
+    enterNewline: ["shift+return,ctrl+return,alt+return,ctrl+j"],
+    ctrlEnterNewline: ["shift+return,alt+return,ctrl+j"],
+    strokeNewline: ["ctrl+return,alt+return,ctrl+j"],
   })
 })

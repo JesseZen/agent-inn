@@ -208,6 +208,10 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 				return 1
 			}
 		}
+		if _, err := runner.Run(manager.TmuxEnableExtendedKeysCommandForSettings(settings)); err != nil {
+			fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
+			return 1
+		}
 		if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
 			fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 			return 1
@@ -326,6 +330,11 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			fmt.Fprintf(stderr, "failed to enable tmux mouse support: %v\n", err)
 			return 1
 		}
+	}
+	if _, err := runner.Run(manager.TmuxEnableExtendedKeysCommandForSettings(settings)); err != nil {
+		cleanupIncompleteSession()
+		fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
+		return 1
 	}
 	if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
 		cleanupIncompleteSession()

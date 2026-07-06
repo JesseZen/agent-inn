@@ -200,7 +200,7 @@ async function mountPrompt(input: { root: string; keybinds?: Record<string, unkn
   }
 }
 
-test("main prompt keeps return as newline and alt+return submits by default", async () => {
+test("main prompt submits with return and inserts newline with shift return by default", async () => {
   await using tmp = await tmpdir()
   const prompt = await mountPrompt({ root: tmp.path })
 
@@ -213,7 +213,7 @@ test("main prompt keeps return as newline and alt+return submits by default", as
       text: "hello\n",
     })
 
-    prompt.app.mockInput.pressEnter({ meta: true })
+    prompt.app.mockInput.pressEnter()
     await wait(() => prompt.submitted() === 1)
 
     expect({ submitted: prompt.submitted(), text: prompt.textarea().plainText }).toEqual({
@@ -225,19 +225,19 @@ test("main prompt keeps return as newline and alt+return submits by default", as
   }
 })
 
-test("main prompt lets return submit when input_submit overrides the default", async () => {
+test("main prompt lets alt return submit when input_submit overrides the default", async () => {
   await using tmp = await tmpdir()
   const prompt = await mountPrompt({
     root: tmp.path,
     keybinds: {
-      input_submit: "return",
+      input_submit: "alt+return",
     },
   })
 
   try {
     prompt.promptRef().set({ input: "hello", parts: [] })
 
-    prompt.app.mockInput.pressEnter()
+    prompt.app.mockInput.pressEnter({ meta: true })
     await wait(() => prompt.submitted() === 1)
 
     expect({ submitted: prompt.submitted(), text: prompt.textarea().plainText }).toEqual({
