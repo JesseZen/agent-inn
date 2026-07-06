@@ -277,7 +277,8 @@ export const {
             .then((manager) => {
               if (managerError && event.type === "worker.health.changed") {
                 const workerName = event.payload.worker
-                if (typeof workerName === "string" && manager.workers.some((worker) => worker.name === workerName && worker.status === "failed")) {
+                const workerStatus = event.payload.status
+                if (typeof workerName === "string" && typeof workerStatus === "string" && manager.workers.some((worker) => worker.name === workerName && worker.status === workerStatus)) {
                   setStore("error", managerError)
                 }
               }
