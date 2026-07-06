@@ -196,7 +196,7 @@ test("computeGroupEdges connects same-column worker with vertical line", () => {
   const layout = computeLayout([worker], [upstream])
   const group = findGroup(layout, "ab")
   // group width = 6, upstream center = 3, worker center = 3 → vertical line
-  const edges = computeGroupEdges(group)
+  const edges = computeGroupEdges(group, group.workerRows[0])
   expect(sortCells(edges.cells)).toEqual([{ x: 3, y: 0, char: "│" }])
 })
 
@@ -206,7 +206,7 @@ test("computeGroupEdges creates branch when worker is off-center", () => {
   const layout = computeLayout([worker], [upstream])
   const group = findGroup(layout, "openai")
   // group width = 10, upstream center = 5, worker start = 1, worker center = 4 → branch
-  const edges = computeGroupEdges(group)
+  const edges = computeGroupEdges(group, group.workerRows[0])
   expect(sortCells(edges.cells)).toEqual([
     { x: 4, y: 0, char: "┌" },
     { x: 5, y: 0, char: "┘" },
@@ -220,7 +220,7 @@ test("computeGroupEdges merges shared upstream branch with T-junction", () => {
   const layout = computeLayout([w1, w2], [upstream])
   const group = findGroup(layout, "openai")
 
-  const edges = computeGroupEdges(group)
+  const edges = computeGroupEdges(group, group.workerRows[0])
   const cellMap = new Map(edges.cells.map((c) => [c.x, c.char]))
 
   // group width = max(10, 7+17+2) = 26
@@ -249,9 +249,10 @@ test("computeGroupEdges returns empty for group with no workers", () => {
   const syntheticGroup = {
     upstream: { id: "upstream:orphan", kind: "upstream" as const, label: "orphan", width: 10, height: 3, data: orphan },
     workers: [],
+    workerRows: [{ workers: [], width: 0 }],
     width: 10,
   }
-  expect(computeGroupEdges(syntheticGroup).cells).toEqual([])
+  expect(computeGroupEdges(syntheticGroup, syntheticGroup.workerRows[0]).cells).toEqual([])
 })
 
 test("computeGroupEdges is deterministic for same input", () => {
@@ -259,9 +260,26 @@ test("computeGroupEdges is deterministic for same input", () => {
   const worker = makeWorker("app", upstream)
   const layout = computeLayout([worker], [upstream])
   const group = findGroup(layout, "openai")
-  const a = computeGroupEdges(group)
-  const b = computeGroupEdges(group)
+  const a = computeGroupEdges(group, group.workerRows[0])
+  const b = computeGroupEdges(group, group.workerRows[0])
   expect(a).toEqual(b)
+})
+
+test("computeGroupEdges uses centers from the selected worker row", () => {
+  const upstream = makeUpstream("shared")
+  const w1 = makeWorker("alpha-worker", upstream)
+  const w2 = makeWorker("beta-worker", upstream)
+  const layout = computeLayout([w1, w2], [upstream], 20)
+  const group = findGroup(layout, "shared")
+
+  const first = computeGroupEdges(group, group.workerRows[0])
+  const second = computeGroupEdges(group, group.workerRows[1])
+
+  expect(first).toEqual({ cells: [{ x: 8, y: 0, char: "│" }] })
+  expect(sortCells(second.cells)).toEqual([
+    { x: 7, y: 0, char: "┌" },
+    { x: 8, y: 0, char: "┘" },
+  ])
 })
 
 test("isValidDrop accepts worker↔upstream, rejects same kind or same node", () => {
