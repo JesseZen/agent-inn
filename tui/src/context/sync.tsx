@@ -272,9 +272,14 @@ export const {
             setStore("upstreamProbes", probe.upstream, reconcile(probe))
             return
           }
-          void refreshManagerData().catch((error) => {
-            setStore("error", error instanceof Error ? error.message : String(error))
-          })
+          const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
+          void refreshManagerData()
+            .then(() => {
+              if (managerError) setStore("error", managerError)
+            })
+            .catch((error) => {
+              setStore("error", error instanceof Error ? error.message : String(error))
+            })
         })
         .then((off) => {
           unsubscribe = off
