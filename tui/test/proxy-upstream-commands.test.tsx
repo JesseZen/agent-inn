@@ -221,6 +221,34 @@ test("proxy upstream delete cancel stays on editor", async () => {
   }
 })
 
+test("proxy upstream delete visible esc stays on editor", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamEditor(app, "openai")
+    await runCommand(app, "dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete upstream")
+    })
+
+    const lines = app.frame().split("\n")
+    const y = lines.findIndex((line) => line.includes("Delete upstream"))
+    const x = lines[y]?.indexOf("esc") ?? -1
+    await app.setup.mockMouse.click(x, y)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Upstream: openai") && !app.frame().includes("Delete upstream")
+    })
+
+    expect(app.calls.deleteUpstream).toEqual([])
+    expect(app.frame()).toContain("Edit Upstream: openai")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy upstream editor ESC returns to upstream list when stack depth > 1", async () => {
   const app = await mountProxyApp()
 
