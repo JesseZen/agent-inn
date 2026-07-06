@@ -93,7 +93,7 @@ export function DialogTopology() {
   return (
     <box flexDirection="column">
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.text} attributes={TextAttributes.BOLD}>
+        <text fg={theme.text} attributes={TextAttributes.BOLD} selectable={false}>
           Topology
         </text>
         <EscHint dialog={dialog} />
@@ -102,15 +102,15 @@ export function DialogTopology() {
         when={hasData()}
         fallback={
           <box justifyContent="center" alignItems="center">
-            <text fg={theme.textMuted}>No workers or upstreams configured</text>
+            <text fg={theme.textMuted} selectable={false}>No workers or upstreams configured</text>
           </box>
         }
       >
         <box flexDirection="row" gap={2} marginTop={1}>
-          <text fg={theme.borderActive}>■ upstream</text>
-          <text fg={theme.success}>■ running</text>
-          <text fg={theme.warning}>■ missing key</text>
-          <text fg={theme.error}>■ failed</text>
+          <text fg={theme.borderActive} selectable={false}>■ upstream</text>
+          <text fg={theme.success} selectable={false}>■ running</text>
+          <text fg={theme.warning} selectable={false}>■ missing key</text>
+          <text fg={theme.error} selectable={false}>■ failed</text>
         </box>
         <box flexDirection="column" gap={1} marginTop={1}>
           <For each={layout().groupRows}>
@@ -138,7 +138,7 @@ export function DialogTopology() {
           </For>
           <Show when={layout().orphanRows.length > 0}>
             <box flexDirection="column" gap={1}>
-              <text fg={theme.textMuted}>orphan upstreams</text>
+              <text fg={theme.textMuted} selectable={false}>orphan upstreams</text>
               <For each={layout().orphanRows}>
                 {(row) => (
                   <box flexDirection="row" gap={TOPOLOGY_COL_GAP}>
@@ -302,7 +302,7 @@ function DragHint(props: {
     <Show when={props.source}>
       {(src) => (
         <box height={1} marginTop={1}>
-          <text fg={props.theme.borderActive}>Drag: {dropLabel(src(), target())}</text>
+          <text fg={props.theme.borderActive} selectable={false}>Drag: {dropLabel(src(), target())}</text>
         </box>
       )}
     </Show>
@@ -325,7 +325,7 @@ function EdgeRow(props: { group: TopologyGroup; row: TopologyWorkerRow; hoveredI
 
   return (
     <box height={1} width={props.group.width}>
-      <text fg={isHighlighted() ? props.theme.borderActive : props.theme.textMuted}>{line()}</text>
+      <text fg={isHighlighted() ? props.theme.borderActive : props.theme.textMuted} selectable={false}>{line()}</text>
     </box>
   )
 }

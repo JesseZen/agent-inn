@@ -955,6 +955,25 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
   }
 })
 
+test("topology dialog does not start a text selection", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.topology")
+    await app.render()
+    await app.render()
+
+    await app.setup.mockMouse.pressDown(1, 7)
+    await app.setup.mockMouse.moveTo(8, 7)
+    await app.render()
+    const selection = app.setup.renderer.getSelection()
+    await app.setup.mockMouse.release(8, 7)
+    expect(selection === null).toBe(true)
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("topology dialog drag upstream to worker calls patchWorker", async () => {
   const app = await mountProxyApp()
 
