@@ -274,8 +274,13 @@ export const {
           }
           const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
           void refreshManagerData()
-            .then(() => {
-              if (managerError) setStore("error", managerError)
+            .then((manager) => {
+              if (managerError && event.type === "worker.health.changed") {
+                const workerName = event.payload.worker
+                if (typeof workerName === "string" && manager.workers.some((worker) => worker.name === workerName && worker.status === "failed")) {
+                  setStore("error", managerError)
+                }
+              }
             })
             .catch((error) => {
               setStore("error", error instanceof Error ? error.message : String(error))

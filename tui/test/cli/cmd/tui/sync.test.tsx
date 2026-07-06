@@ -79,6 +79,7 @@ describe("tui sync", () => {
     const newWorker = {
       ...oldWorker,
       upstream: newUpstream,
+      status: "failed",
       snapshot_generation: 2,
       log_level: "detail",
     }
@@ -129,6 +130,61 @@ describe("tui sync", () => {
       })
       expect(sync.data.config_status).toEqual({ generation: 2, dirty: true, last_save_error: "save failed" })
       expect(sync.data.error).toBe("worker failed")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("replayed worker error events do not stale after healthy manager refresh", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const encoder = new TextEncoder()
+    const upstream = { name: "openai", base_url: "https://api.example/v1", has_api_key: true }
+    const worker = {
+      name: "app",
+      port: 6767,
+      role: "app",
+      upstream,
+      status: "running",
+      snapshot_generation: 1,
+      log_level: "simple",
+    }
+    let workersRequests = 0
+    let events!: ReadableStreamDefaultController<Uint8Array>
+
+    const { app, sync } = await mount((url) => {
+      if (url.pathname === "/api/workers") {
+        workersRequests++
+        return json({ workers: [{ ...worker, snapshot_generation: workersRequests }] })
+      }
+      if (url.pathname === "/api/upstreams") return json({ upstreams: { openai: upstream } })
+      if (url.pathname === "/api/config")
+        return json({
+          config: {},
+          status: { generation: 1, dirty: false, last_save_error: "" },
+        })
+      if (url.pathname === "/api/events")
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              events = controller
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      return undefined
+    }, tmp.path)
+
+    try {
+      const before = workersRequests
+      events.enqueue(
+        encoder.encode('id: 1\nevent: worker.health.changed\ndata: {"worker":"app","status":"failed","error":"worker failed"}\n\n'),
+      )
+      await wait(() => workersRequests > before && sync.data.workers[0]?.snapshot_generation === workersRequests)
+      await Bun.sleep(30)
+
+      expect(sync.data.workers).toEqual([{ ...worker, snapshot_generation: workersRequests }])
+      expect(sync.data.error).toBeUndefined()
     } finally {
       app.renderer.destroy()
     }
