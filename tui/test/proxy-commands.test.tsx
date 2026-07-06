@@ -885,7 +885,13 @@ test("proxy topology command is registered and opens topology dialog", async () 
 
     app.api.keymap.dispatchCommand("proxy.topology")
     await app.render()
-    expect(app.frame()).toContain("Topology")
+    const frame = app.frame()
+    expect(frame).toContain("Topology")
+    expect(frame).toContain("■ upstream")
+    expect(frame).toContain("■ running")
+    expect(frame).toContain("orphan upstreams")
+    expect(frame).toContain("app")
+    expect(frame).toContain("anthropic")
   } finally {
     await app.cleanup()
   }
@@ -899,7 +905,7 @@ test("topology dialog click on worker navigates to worker status", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.click(5, 13)
+    await app.setup.mockMouse.click(5, 16)
     await app.render()
     await app.render()
 
@@ -919,7 +925,7 @@ test("topology dialog click on upstream navigates to upstream editor", async () 
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.click(13, 9)
+    await app.setup.mockMouse.click(22, 12)
     await app.render()
     await app.render()
 
@@ -939,7 +945,7 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.drag(5, 13, 38, 9)
+    await app.setup.mockMouse.drag(5, 16, 5, 22)
     await app.render()
     await app.render()
 
@@ -957,7 +963,7 @@ test("topology dialog drag upstream to worker calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.drag(38, 9, 5, 13)
+    await app.setup.mockMouse.drag(5, 22, 5, 16)
     await app.render()
     await app.render()
 
