@@ -70,7 +70,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
     return loadedProject()
   })
 
-  const [directories, { refetch }] = createResource(
+  const [directories, { refetch }] = createResource<ProjectDirectory[] | undefined, string>(
     () => (props.initialRemoving ? undefined : props.projectID),
     async (projectID, info): Promise<ProjectDirectory[] | undefined> => {
       try {
@@ -90,7 +90,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
       }
     },
   )
-  const directoryData = createMemo(() => directories() ?? props.initialDirectories)
+  const directoryData = createMemo<ProjectDirectory[] | undefined>(() => directories() ?? props.initialDirectories)
   // Show the locked error view only when we have nothing to display. A refresh
   // that fails after the list rendered keeps the list and its actions.
   const showError = createMemo(() => Boolean(loadError()) && !directoryData())

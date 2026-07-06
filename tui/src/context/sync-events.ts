@@ -21,7 +21,7 @@ import type {
   ConsoleState,
 } from "@agent-inn/sdk/v2"
 import type { ProxyConfig, ProxyConfigStatus, RedactedUpstream, UpstreamProbeResult, WorkerSummary } from "./sdk"
-import { produce, reconcile } from "solid-js/store"
+import { produce, reconcile, type SetStoreFunction } from "solid-js/store"
 import { batch } from "solid-js"
 
 export type SyncStore = {
@@ -91,7 +91,7 @@ export function search<T>(items: T[], target: string, key: (item: T) => string) 
 
 type SyncEventHandlerDeps = {
   store: SyncStore
-  setStore: (path: any[], ...args: any[]) => void
+  setStore: SetStoreFunction<SyncStore>
   sdk: any
   project: any
   touchMessage: (sessionID: string, messageID: string) => void
