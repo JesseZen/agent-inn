@@ -54,7 +54,7 @@ export function DialogHostedTerminal() {
     },
     ...sessions().map((session) => ({
       title: session.session_label,
-      value: { type: "session", session },
+      value: { type: "session" as const, session },
       description: `${session.worker_name} • ${session.status}`,
       category: "Existing sessions",
     })),

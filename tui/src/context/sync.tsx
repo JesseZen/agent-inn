@@ -134,17 +134,18 @@ export const {
       return { workers, upstreams, config }
     }
 
-    event.subscribe(
-      createSyncEventHandler({
-        store,
-        setStore,
-        sdk,
-        project,
-        touchMessage,
-        touchPart,
-        onServerDisposed: () => void bootstrap(),
-      }),
-    )
+    const syncEventHandler = createSyncEventHandler({
+      store,
+      setStore,
+      sdk,
+      project,
+      touchMessage,
+      touchPart,
+      onServerDisposed: () => void bootstrap(),
+    })
+    event.subscribe((incoming, metadata) => {
+      syncEventHandler(incoming, metadata as { workspace: string })
+    })
 
     const exit = useExit()
     const args = useArgs()

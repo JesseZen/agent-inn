@@ -115,7 +115,7 @@ describe("tui sync", () => {
       manager = {
         workers: [newWorker],
         upstreams: { openai: newUpstream },
-        config: { plugins: { request_log: { kind: "request_middleware", source: "builtin" } } },
+        config: { plugins: { model_override: { kind: "request_middleware", source: "builtin" } } },
         status: { generation: 2, dirty: true, last_save_error: "save failed" },
       }
       events.enqueue(
@@ -126,7 +126,7 @@ describe("tui sync", () => {
       expect(sync.data.workers).toEqual([newWorker])
       expect(sync.data.upstreams).toEqual([newUpstream])
       expect(sync.data.manager_config).toEqual({
-        plugins: { request_log: { kind: "request_middleware", source: "builtin" } },
+        plugins: { model_override: { kind: "request_middleware", source: "builtin" } },
       })
       expect(sync.data.config_status).toEqual({ generation: 2, dirty: true, last_save_error: "save failed" })
       expect(sync.data.error).toBe("worker failed")
