@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/manager"
 )
+
+var hostedSessionMarkInput io.Reader = os.Stdin
 
 func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -34,6 +39,8 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 	sessionID := flags.String("session-id", "", "hosted session id")
 	state := flags.String("state", "", "turn state")
 	reason := flags.String("reason", "", "turn state reason")
+	launcherSessionID := flags.String("launcher-session-id", "", "launcher session id")
+	captureLauncherSessionID := flags.Bool("capture-launcher-session-id", false, "read launcher session id from hook input")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -49,6 +56,18 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintf(stderr, "invalid hosted session turn state %q\n", *state)
 		return 2
 	}
+	if *captureLauncherSessionID {
+		var payload struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.NewDecoder(hostedSessionMarkInput).Decode(&payload); err != nil {
+			if !errors.Is(err, io.EOF) {
+				fmt.Fprintf(stderr, "failed to parse hook input: %v\n", err)
+				return 2
+			}
+		}
+		*launcherSessionID = payload.SessionID
+	}
 
 	cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
 	if err != nil {
@@ -56,7 +75,7 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
-	session, err := registry.MarkTurnState(*sessionID, *state, *reason)
+	session, err := registry.MarkTurnState(*sessionID, *state, *reason, *launcherSessionID)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to mark hosted session: %v\n", err)
 		return 1

@@ -330,11 +330,70 @@ test("hosted terminal duplicate label alert returns to worker picker", async () 
   }
 })
 
-test("stale hosted session cannot be opened", async () => {
+test("stale hosted session launches reopen through CLI", async () => {
+  const originalPath = process.env.PATH
+  const originalExecutable = process.env.AINN_EXECUTABLE
+  const bin = await mkdtemp(path.join(tmpdir(), "ainn-hosted-terminal."))
+  const callsPath = path.join(bin, "ainn-calls.log")
+  const fakeAinn = path.join(bin, "ainn")
+  const fakeTmux = path.join(bin, "tmux")
+  const fakeOsa = path.join(bin, "osascript")
+  await Bun.write(fakeAinn, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${callsPath}'\nexit 0\n`)
+  await Bun.write(fakeTmux, "#!/bin/sh\nif [ \"$3\" = \"list-clients\" ]; then echo '/dev/ttys001: ainn-host'; fi\nexit 0\n")
+  await Bun.write(fakeOsa, "#!/bin/sh\nexit 0\n")
+  await chmod(fakeAinn, 0o755)
+  await chmod(fakeTmux, 0o755)
+  await chmod(fakeOsa, 0o755)
+  process.env.PATH = `${bin}:${originalPath ?? ""}`
+  process.env.AINN_EXECUTABLE = fakeAinn
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      let onStdoutData: ((chunk: Buffer) => void) | undefined
+      const child = {
+        stdout: {
+          on(event: string, handler: (data: Buffer) => void) {
+            if (event === "data") onStdoutData = handler
+          },
+        },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") {
+            queueMicrotask(() => {
+              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
+              handler(0)
+            })
+          }
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
         workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/settings")
+      return json({
+        settings: {
+          state_dir: "~/.ainn",
+          log_dir: "~/.ainn/logs",
+          launch: { default_mode: "hosted-terminal" },
+          terminal: {
+            host: "tmux",
+            opener: "default",
+            tmux: {
+              socket_name: "ainn",
+              host_session: "ainn-host",
+              host_start_mode: "new-window",
+              turn_status_hooks: false,
+            },
+          },
+        },
       })
     if (url.pathname === "/api/hosted-sessions")
       return json({
@@ -360,8 +419,24 @@ test("stale hosted session cannot be opened", async () => {
       const frame = app.setup.captureCharFrame()
       return frame.includes("Hosted Terminal") && frame.includes("solve problem A")
     })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      const text = await Bun.file(callsPath).text().catch(() => "")
+      return text.includes("launch --worker 1234 --mode hosted-terminal --no-attach --profile test-cli") ||
+        spawns.some((spawned) =>
+          spawned.cmd.endsWith("ainn") &&
+          spawned.args.join(" ") === "launch --worker 1234 --mode hosted-terminal --no-attach --profile test-cli --config-dir " + Global.Path.config + " --session-id hs_1"
+        )
+    })
   } finally {
-    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    process.env.PATH = originalPath
+    if (originalExecutable === undefined) {
+      delete process.env.AINN_EXECUTABLE
+    } else {
+      process.env.AINN_EXECUTABLE = originalExecutable
+    }
     await app.cleanup()
   }
 })

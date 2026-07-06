@@ -634,7 +634,7 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	}
 }
 
-func TestRunLaunchHostedTerminalExistingSessionWithReusedWindowIDIsStale(t *testing.T) {
+func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
@@ -652,6 +652,9 @@ func TestRunLaunchHostedTerminalExistingSessionWithReusedWindowIDIsStale(t *test
 				if strings.Join(args, " ") == strings.Join(manager.TmuxListWindowDetailsCommandForSettings(config.Settings{}), " ") {
 					return "@12\tother session\n", nil
 				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@77\n", nil
+				}
 				return "", nil
 			})
 		}
@@ -661,9 +664,13 @@ func TestRunLaunchHostedTerminalExistingSessionWithReusedWindowIDIsStale(t *test
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
-		SessionLabel: "solve problem A",
-		WorkerName:   "cli-openai",
-		WorkerPort:   11199,
+		SessionLabel:      "solve problem A",
+		WorkerName:        "cli-openai",
+		WorkerPort:        11199,
+		Workspace:         "/tmp/work",
+		AddDirs:           []string{"/tmp/shared"},
+		Model:             "gpt-5.5",
+		LauncherSessionID: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -674,11 +681,30 @@ func TestRunLaunchHostedTerminalExistingSessionWithReusedWindowIDIsStale(t *test
 
 	var stderr bytes.Buffer
 	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
-	if code == 0 {
-		t.Fatal("expected stale session failure")
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "is stale") {
-		t.Fatalf("unexpected stderr: %s", stderr.String())
+	updated, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sessionView struct {
+		SessionID         string
+		TmuxWindowID      string
+		LauncherSessionID string
+	}
+	gotSession := sessionView{
+		SessionID:         updated.SessionID,
+		TmuxWindowID:      updated.TmuxWindowID,
+		LauncherSessionID: updated.LauncherSessionID,
+	}
+	wantSession := sessionView{
+		SessionID:         created.SessionID,
+		TmuxWindowID:      "@77",
+		LauncherSessionID: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+	}
+	if !ok || !reflect.DeepEqual(gotSession, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", gotSession, ok, wantSession)
 	}
 
 	want := [][]string{
@@ -689,14 +715,102 @@ func TestRunLaunchHostedTerminalExistingSessionWithReusedWindowIDIsStale(t *test
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
 		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
 		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
+		manager.TmuxAttachCommand(),
 	}
-	if len(got) != len(want) {
-		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
-	for i, w := range want {
-		if strings.Join(got[i], " ") != strings.Join(w, " ") {
-			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
+}
+
+func TestRunLaunchHostedTerminalReopensStaleClaudeCodeSession(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+settings:
+  state_dir: ` + stateDir + `
+  log_dir: ` + filepath.Join(configDir, "logs") + `
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: default
+    tmux:
+      socket_name: ainn
+      host_session: ainn-host
+      host_start_mode: new-window
+workers:
+  claude-main:
+    port: 11199
+    upstream: anthropic
+    launcher: claudecode
+upstreams:
+  anthropic:
+    base_url: https://api.anthropic.com
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if strings.Join(args, " ") == strings.Join(manager.TmuxListWindowDetailsCommandForSettings(config.Settings{}), " ") {
+					return "@12\tother session\n", nil
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@77\n", nil
+				}
+				return "", nil
+			})
 		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel:      "solve problem A",
+		WorkerName:        "claude-main",
+		WorkerPort:        11199,
+		LauncherSessionID: "9e98a56c-7224-4bf2-9263-b4e470e9673d",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.UpdateWindowID(created.SessionID, "@12"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "claude-main", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+
+	want := [][]string{
+		manager.TmuxDetectCommand(),
+		manager.TmuxHasSessionCommand(),
+		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
+		tmuxExtendedKeysCommand("ainn"),
+		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
+		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
+		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11199", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
+		manager.TmuxAttachCommand(),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
 }
 

@@ -157,10 +157,6 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           return
         }
         const session = option.value.session
-        if (session.status === "stale") {
-          void DialogAlert.show(dialog, "Open hosted session failed", `Session ${session.session_label} is stale. Delete it or create a new one.`)
-          return
-        }
         void sdk.client.getSettings().then((settings) =>
         void launchProxySession({
           executable: import.meta.env?.AINN_EXECUTABLE || undefined,

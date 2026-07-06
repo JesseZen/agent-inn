@@ -43,6 +43,7 @@ type HostedSessionRecord struct {
 	Model                      string    `json:"model,omitempty"`
 	AddDirs                    []string  `json:"add_dirs,omitempty"`
 	TmuxWindowID               string    `json:"tmux_window_id,omitempty"`
+	LauncherSessionID          string    `json:"launcher_session_id,omitempty"`
 	TurnState                  string    `json:"turn_state,omitempty"`
 	TurnStateReason            string    `json:"turn_state_reason,omitempty"`
 	TurnGeneration             int       `json:"turn_generation,omitempty"`
@@ -237,7 +238,7 @@ func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string
 	})
 }
 
-func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string) (HostedSessionRecord, error) {
+func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string, launcherSessionID string) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
@@ -255,6 +256,10 @@ func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, re
 		}
 		session.TurnState = state
 		session.TurnStateReason = strings.TrimSpace(reason)
+		launcherSessionID = strings.TrimSpace(launcherSessionID)
+		if launcherSessionID != "" {
+			session.LauncherSessionID = launcherSessionID
+		}
 		file.Sessions[sessionID] = session
 		updated = session
 		return nil
