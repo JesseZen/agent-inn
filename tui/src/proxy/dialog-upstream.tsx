@@ -69,7 +69,8 @@ export function DialogUpstream() {
       options={options()}
       placeholder="Search upstreams..."
       onSelect={async (opt) => {
-        if (opt.value.type === "create") {
+        const value = opt.value
+        if (value.type === "create") {
           const name = await DialogPrompt.show(dialog, "New Upstream Name", { placeholder: "e.g. groq" })
           if (name === null) return
           const upstreamName = name.trim()
@@ -81,7 +82,7 @@ export function DialogUpstream() {
           return
         }
 
-        if (opt.value.type === "test-all") {
+        if (value.type === "test-all") {
           try {
             const results = await sdk.client.testAllUpstreams()
             for (const result of results) {
@@ -94,7 +95,7 @@ export function DialogUpstream() {
           return
         }
 
-        const upstream = sync.data.upstreams.find((item) => item.name === opt.value.name)
+        const upstream = sync.data.upstreams.find((item) => item.name === value.name)
         if (!upstream) return
         dialog.push(() => (
           <DialogUpstreamEditor

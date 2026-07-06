@@ -19,6 +19,13 @@ import {
   type WorkerSummary,
 } from "../src/proxy/backend"
 
+type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal"> & {
+  launch?: Partial<ProxySettings["launch"]>
+  terminal?: Partial<Omit<ProxySettings["terminal"], "tmux">> & {
+    tmux?: Partial<ProxySettings["terminal"]["tmux"]>
+  }
+}
+
 export async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
   while (!(await fn())) {
@@ -143,7 +150,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
     patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
-    patchSettings: [] as Array<Partial<ProxySettings>>,
+    patchSettings: [] as ProxySettingsPatch[],
     deleteWorker: [] as number[],
     deleteUpstream: [] as string[],
     restartWorker: [] as number[],
@@ -226,9 +233,9 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
     return undefined
   })
 
-  const override = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : undefined
-    const url = new URL(request ? request.url : String(input))
+  const override = (async (requestInput: RequestInfo | URL, init?: RequestInit) => {
+    const request = requestInput instanceof Request ? requestInput : undefined
+    const url = new URL(request ? request.url : String(requestInput))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
@@ -392,7 +399,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
     }
 
     if (url.pathname === "/api/settings" && method === "PATCH") {
-      const body = JSON.parse(String(init?.body ?? "null")) as Partial<ProxySettings>
+      const body = JSON.parse(String(init?.body ?? "null")) as ProxySettingsPatch
       calls.patchSettings.push(body)
       config.settings = {
         ...config.settings,
@@ -414,7 +421,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
       })
     }
 
-    return fetch.fetch(input, init)
+    return fetch.fetch(requestInput, init)
   }) as typeof fetch.fetch
 
   return { calls, fetch: override, hostedSessions }

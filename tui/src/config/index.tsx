@@ -90,14 +90,23 @@ function keyStrokeName(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return
   if ("key" in input) return keyStrokeName(input.key)
   if (!("name" in input) || typeof input.name !== "string") return
+  const key = input as {
+    name: string
+    ctrl?: boolean
+    alt?: boolean
+    shift?: boolean
+    meta?: boolean
+    super?: boolean
+    hyper?: boolean
+  }
   return [
-    input.ctrl ? "ctrl" : undefined,
-    input.alt ? "alt" : undefined,
-    input.shift ? "shift" : undefined,
-    input.meta ? "meta" : undefined,
-    input.super ? "super" : undefined,
-    input.hyper ? "hyper" : undefined,
-    input.name,
+    key.ctrl ? "ctrl" : undefined,
+    key.alt ? "alt" : undefined,
+    key.shift ? "shift" : undefined,
+    key.meta ? "meta" : undefined,
+    key.super ? "super" : undefined,
+    key.hyper ? "hyper" : undefined,
+    key.name,
   ]
     .filter(Boolean)
     .join("+")

@@ -22,6 +22,9 @@ function createCommandShimDialog(dialog: CommandShimDialog): LegacyDialog {
     replace(render, onClose) {
       dialog.replace(render, onClose)
     },
+    push(render, onClose) {
+      dialog.push(render, onClose)
+    },
     clear() {
       dialog.clear()
     },
