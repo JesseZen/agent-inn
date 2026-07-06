@@ -51,6 +51,59 @@ func TestRunLaunchRunsBuiltCommand(t *testing.T) {
 	}
 }
 
+func TestRunLaunchUsesClaudeCodeWorkerConfig(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+settings:
+  state_dir: ` + stateDir + `
+workers:
+  claude-main:
+    launcher: claudecode
+    port: 11199
+    upstream: anthropic
+upstreams:
+  anthropic:
+    base_url: https://api.anthropic.com/v1
+    api_format: anthropic
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append([]string{}, args...)
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("expected success, got %d", code)
+	}
+	want := []string{
+		"env",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
+		"ANTHROPIC_AUTH_TOKEN=ainn",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+		"claude",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected launch args:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestRunLaunchExplicitExternalWindowMode(t *testing.T) {
 	var got []string
 	restore := func() func() {

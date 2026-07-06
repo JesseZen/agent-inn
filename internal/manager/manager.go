@@ -62,6 +62,7 @@ type WorkerSummary struct {
 	Name               string                                      `json:"name"`
 	Port               int                                         `json:"port"`
 	Role               string                                      `json:"role"`
+	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
@@ -115,6 +116,7 @@ type WorkerDetail struct {
 	Name               string                                      `json:"name"`
 	Port               int                                         `json:"port"`
 	Role               string                                      `json:"role"`
+	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
@@ -261,6 +263,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Name:               seed.name,
 			Port:               seed.worker.Port,
 			Role:               seed.worker.Role,
+			Launcher:           seed.worker.Launcher,
 			Upstream:           runtimeUpstream.Redacted(),
 			Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 			ModuleSupport:      supportForPluginDefinitions(seed.plugins),
@@ -296,6 +299,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Name:               name,
 		Port:               worker.Port,
 		Role:               worker.Role,
+		Launcher:           worker.Launcher,
 		Upstream:           runtimeUpstream.Redacted(),
 		Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 		ModuleSupport:      supportForPluginDefinitions(m.pluginDefinitionsSnapshot()),
@@ -833,6 +837,7 @@ func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) 
 		"worker":    name,
 		"port":      worker.Port,
 		"role":      worker.Role,
+		"launcher":  worker.Launcher,
 		"upstream":  worker.Upstream,
 		"log_level": workerLogLevel(worker),
 		"modules":   cloneModules(worker.RequestModules),
@@ -1205,6 +1210,7 @@ func buildPortIndex(workers map[string]config.WorkerConfig) map[int]string {
 func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
 	return config.WorkerConfig{
 		Role:           worker.Role,
+		Launcher:       worker.Launcher,
 		Port:           worker.Port,
 		Upstream:       worker.Upstream,
 		LogLevel:       workerLogLevel(worker),

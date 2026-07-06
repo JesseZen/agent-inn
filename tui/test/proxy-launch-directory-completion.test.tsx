@@ -181,14 +181,14 @@ test("launch directory prompt ESC returns to worker picker", async () => {
     await wait(async () => {
       await setup.renderOnce()
       const frame = setup.captureCharFrame()
-      return frame.includes("Launch Codex") && frame.includes(directory)
+      return frame.includes("Launch Worker") && frame.includes(directory)
     })
 
     setup.mockInput.pressEscape()
     await wait(async () => {
       await setup.renderOnce()
       const frame = setup.captureCharFrame()
-      return frame.includes("Launch Codex CLI") && frame.includes("test-cli")
+      return frame.includes("Launch Worker") && frame.includes("test-cli")
     })
 
     setup.renderer.destroy()

@@ -114,7 +114,7 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 | `/workers` | | Manage workers (create, inspect, edit fields/modules, view logs, restart/stop) |
 | `/upstream` | | Manage upstreams (create, edit base_url/api_key/api_format) |
 | `/logs` | | View Worker logs |
-| `/launch` | | Launch Codex CLI through a cli-role worker |
+| `/launch` | | Launch the configured CLI through a cli-role worker |
 | `/exit` | `/quit` `/q` | Exit |
 
 ### Keyboard Shortcuts
@@ -150,6 +150,7 @@ workers:
     port: 6767            # Local listen port
     upstream: joycode     # Bound Upstream
     role: cli             # "cli" (default) or "app"
+    launcher: codex       # "codex" (default) or "claudecode"
     log_level: simple     # "simple" or "detail"
     modules:
       config_patch:       # Auto-modify ~/.codex/config.toml
@@ -177,11 +178,16 @@ upstreams:
     api_key: sk-...                    # Plain key is supported
     # <UPSTREAM_NAME>_API_KEY env var wins over config if set (e.g. OPENAI_API_KEY)
     # No api_format = native Responses API passthrough
+
+  anthropic:
+    base_url: https://api.anthropic.com/v1
+    api_key: sk-...
+    api_format: anthropic              # Native Anthropic API passthrough for Claude Code
 ```
 
-Leaving `api_format` empty or unset = native passthrough, no translation.
+Leaving `api_format` empty or unset = native Responses API passthrough, no translation.
 
-`role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `log_level` defaults to `"simple"`;
+`role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `launcher` defaults to `"codex"`, and `log_level` defaults to `"simple"`.
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
 
@@ -216,8 +222,8 @@ cd tui && bun run typecheck
 ./ainn version           # Show version
 ./ainn worker ...        # Worker process (auto-started by Manager, no need to run manually)
 ./ainn launch --config-dir <dir> --worker <port> [--profile <name>] [--cd <dir>] [--add-dir <dir>] [--model <model>] [--mode <external-window|hosted-terminal>]
-                                # Launch Codex CLI connected to a worker
-                                # --mode hosted-terminal runs Codex inside a AINN-owned tmux host (requires tmux)
+                                # Launch the worker's configured CLI
+                                # --mode hosted-terminal runs it inside a AINN-owned tmux host (requires tmux)
 ```
 
 ## TODO

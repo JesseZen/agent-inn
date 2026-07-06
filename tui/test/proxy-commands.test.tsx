@@ -9,7 +9,7 @@ test("proxy logs opens worker logs dialog with initial log lines", async () => {
   try {
     app.api.keymap.dispatchCommand("proxy.logs")
     await app.render()
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await runCommand(app, "dialog.select.submit")
     await wait(() => app.calls.getLogs === 1)
     await wait(async () => {
       await app.render()
@@ -31,7 +31,7 @@ test("proxy config save clears dirty state on reopen", async () => {
     app.api.keymap.dispatchCommand("proxy.settings")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.end")
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await runCommand(app, "dialog.select.submit")
     await wait(() => app.calls.saveConfig === 1)
     await app.render()
 
@@ -54,7 +54,7 @@ test("proxy settings editor patches settings through manager API", async () => {
       return frame.includes("Settings") && frame.includes("State Dir") && frame.includes("~/.ainn")
     })
 
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await runCommand(app, "dialog.select.submit")
     await wait(async () => {
       await app.render()
       return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
@@ -100,7 +100,7 @@ test("proxy settings host start mode save shows note when hosted sessions alread
       app.api.keymap.dispatchCommand("dialog.select.next")
       await app.render()
     }
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await runCommand(app, "dialog.select.submit")
     await app.render()
     await app.render()
     const editor = app.setup.renderer.currentFocusedEditor
@@ -229,8 +229,85 @@ test("proxy workers detail exposes worker status and scoped actions", async () =
     expect(app.frame()).toContain("Switch Upstream")
     expect(app.frame()).toContain("Manage Modules")
     expect(app.frame()).toContain("View Logs")
+    expect(app.frame()).toContain("Launcher")
     expect(app.frame()).toContain("Restart Worker")
-    expect(app.frame()).toContain("Stop Worker")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers create claudecode worker payload", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await runCommand(app, "proxy.workers")
+    await runCommand(app, "dialog.select.submit")
+    await app.mockInput.typeText("11201")
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Name")
+    })
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Select Launcher")
+    })
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Select Upstream")
+    })
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.createWorker.length === 1)
+    app.mockInput.pressEscape()
+    await app.render()
+
+    expect(app.calls.createWorker).toEqual([
+      { name: "worker-11201", port: 11201, upstream: "anthropic", launcher: "claudecode" },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers detail shows claudecode launcher and anthropic protocol", async () => {
+  const app = await mountProxyApp({
+    workers: [
+      {
+        name: "worker-11201",
+        port: 11201,
+        role: "cli",
+        launcher: "claudecode",
+        protocol: "anthropic",
+        upstream: { name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true, api_format: "anthropic" },
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+        modules: {},
+        hooks: {},
+        module_support: {
+          api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
+          image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+          request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
+        },
+      },
+    ],
+  })
+
+  try {
+    await runCommand(app, "proxy.workers")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+
+    expect(app.frame()).toContain("worker-11201 (:11201)")
+    expect(app.frame()).toContain("launcher: claudecode")
+    expect(app.frame()).toContain("worker-11201")
+    expect(app.frame()).toContain("protocol: anthropic")
   } finally {
     await app.cleanup()
   }
@@ -396,20 +473,20 @@ test("proxy workers module view opens configured unavailable module editor and a
 test("proxy workers detail controls worker lifecycle", async () => {
   const app = await mountProxyApp()
 
-	try {
-		await openWorkerDetail(app)
-		await runCommand(app, "dialog.select.end")
-		await runCommand(app, "dialog.select.prev")
-		await runCommand(app, "dialog.select.prev")
-		app.api.keymap.dispatchCommand("dialog.select.submit")
-		await wait(() => app.calls.restartWorker.length === 1)
-		expect(app.calls.restartWorker).toEqual([6767])
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.end")
+    await runCommand(app, "dialog.select.prev")
+    await runCommand(app, "dialog.select.prev")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.restartWorker.length === 1)
+    expect(app.calls.restartWorker).toEqual([6767])
 
-		await openWorkerDetail(app)
-		await runCommand(app, "dialog.select.end")
-		await runCommand(app, "dialog.select.prev")
-		app.api.keymap.dispatchCommand("dialog.select.submit")
-		await wait(() => app.calls.stopWorker.length === 1)
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.end")
+    await runCommand(app, "dialog.select.prev")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.stopWorker.length === 1)
     expect(app.calls.stopWorker).toEqual([6767])
   } finally {
     await app.cleanup()
@@ -419,10 +496,10 @@ test("proxy workers detail controls worker lifecycle", async () => {
 test("proxy workers detail deletes worker config after confirmation", async () => {
   const app = await mountProxyApp()
 
-  try {
-    await openWorkerDetail(app)
-    await runCommand(app, "dialog.select.end")
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+	try {
+		await openWorkerDetail(app)
+		await runCommand(app, "dialog.select.end")
+		app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
       return app.frame().includes("Delete worker")
@@ -470,7 +547,7 @@ test("proxy launch registers a launch command", async () => {
   try {
     app.api.keymap.dispatchCommand("proxy.launch")
     await app.render()
-    expect(app.frame()).toContain("Launch Codex CLI")
+    expect(app.frame()).toContain("Launch Worker")
   } finally {
     await app.cleanup()
   }
@@ -591,6 +668,32 @@ test("proxy workers editor patches log_level field", async () => {
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers editor patches launcher field", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await runCommand(app, "proxy.workers")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("app (:6767)")
+
+    for (let i = 0; i < 4; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Launcher: app")
+
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.patchWorker.some((c) => c.launcher === "claudecode"))
+    await app.render()
+
+    expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "simple", launcher: "claudecode" }])
   } finally {
     await app.cleanup()
   }

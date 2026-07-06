@@ -25,10 +25,17 @@ type Field = {
   hidden?: boolean
 }
 
+const API_FORMAT_OPTIONS = [
+  { title: "responses", value: "responses", description: "OpenAI Responses API" },
+  { title: "chat_completions", value: "chat_completions", description: "OpenAI-compatible Chat Completions API" },
+  { title: "anthropic", value: "anthropic", description: "Anthropic Messages API" },
+  { title: "unset", value: "", description: "Native Responses passthrough" },
+]
+
 const FIELDS: Field[] = [
   { key: "base_url", title: "Base URL", placeholder: "https://example.com/v1" },
   { key: "api_key", title: "API Key", placeholder: "sk-...", hidden: true },
-  { key: "api_format", title: "API Format", placeholder: "responses or chat_completions" },
+  { key: "api_format", title: "API Format", placeholder: "responses, chat_completions, or anthropic" },
 ]
 
 export function DialogUpstream() {
@@ -196,6 +203,31 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
     }
     if (!dirty) return
     return { api_key: value === "******" ? "" : value }
+  }
+
+  if (field.key === "api_format") {
+    const result = await new Promise<string | null>((resolve) => {
+      dialog.push(
+        () => (
+          <DialogSelect
+            title={`${field.title}: ${draft.base_url || "upstream"}`}
+            options={API_FORMAT_OPTIONS.map((option) => ({
+              ...option,
+              category: option.value === draft.api_format ? "Current" : "Options",
+            }))}
+            placeholder="Select API format..."
+            current={draft.api_format}
+            onSelect={(opt) => {
+              resolve(opt.value)
+              dialog.pop()
+            }}
+          />
+        ),
+        () => resolve(null),
+      )
+    })
+    if (result === null) return
+    return { api_format: result }
   }
 
   const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.base_url || "upstream"}`, {

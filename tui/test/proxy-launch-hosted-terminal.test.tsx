@@ -129,7 +129,7 @@ test("launch dialog prompts for mode before worker selection", async () => {
   try {
     await app.openLaunchDialog()
     const frame = app.setup.captureCharFrame()
-    expect(frame.includes("Launch Codex CLI")).toBe(true)
+    expect(frame.includes("Launch Worker")).toBe(true)
     expect(frame.includes("External window")).toBe(true)
     expect(frame.includes("Hosted terminal")).toBe(true)
   } finally {

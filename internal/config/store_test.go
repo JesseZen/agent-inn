@@ -74,6 +74,9 @@ upstreams:
 	if cfg.Workers["codex-app"].Role != "cli" {
 		t.Fatalf("expected default cli role, got %q", cfg.Workers["codex-app"].Role)
 	}
+	if cfg.Workers["codex-app"].Launcher != "codex" {
+		t.Fatalf("expected worker launcher defaults, got %#v", cfg.Workers["codex-app"])
+	}
 }
 
 func TestLoadAppliesSettingsDefaults(t *testing.T) {

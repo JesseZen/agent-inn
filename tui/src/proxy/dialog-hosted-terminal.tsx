@@ -67,9 +67,9 @@ export function DialogHostedTerminal() {
         placeholder="Search workers..."
         onSelect={async (worker) => {
           const basePath = project.instance.directory() || sync.path.directory
-          const workspace = await DialogPrompt.show(dialog, "Launch Codex", {
+          const workspace = await DialogPrompt.show(dialog, "Launch Worker", {
             placeholder: "Workspace directory",
-            description: () => <text>Launch Codex in this workspace.</text>,
+            description: () => <text>Launch this worker in the workspace.</text>,
             value: basePath,
             directoryCompletion: basePath
               ? {

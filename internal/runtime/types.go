@@ -18,10 +18,11 @@ const (
 
 	APIFormatResponses       APIFormat = "responses"
 	APIFormatChatCompletions APIFormat = "chat_completions"
+	APIFormatAnthropic       APIFormat = "anthropic"
 
 	ProtocolResponses       ProtocolKind = "responses"
 	ProtocolChatCompletions ProtocolKind = "chat_completions"
-	ProtocolClaudeCode      ProtocolKind = "claude_code"
+	ProtocolAnthropic       ProtocolKind = "anthropic"
 
 	ProtocolCapabilityInputText    ProtocolCapability = "input_text"
 	ProtocolCapabilityToolCalls    ProtocolCapability = "tool_calls"

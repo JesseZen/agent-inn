@@ -21,7 +21,6 @@ var lifecycleHookDefinitions = []hookDefinition{
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
-				appruntime.ProtocolClaudeCode,
 			},
 		},
 		build: func(cfg module.ModuleConfig, deps BuildDependencies) (Hook, error) {

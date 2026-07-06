@@ -148,12 +148,52 @@ func TestBuildRequestMiddlewaresReturnsProtocolSupport(t *testing.T) {
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
-				appruntime.ProtocolClaudeCode,
+				appruntime.ProtocolAnthropic,
 			},
 		},
 	}
 	if !reflect.DeepEqual(support, want) {
 		t.Fatalf("bad support:\ngot  %#v\nwant %#v", support, want)
+	}
+}
+
+func TestRequestMiddlewareSupportForAnthropicExcludesIncompatibleModules(t *testing.T) {
+	got := RequestMiddlewareSupport(nil)
+	want := map[string]appruntime.ModuleProtocolSupport{
+		"api_translate": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+			},
+			Capabilities: []appruntime.ProtocolCapability{
+				appruntime.ProtocolCapabilityInputText,
+				appruntime.ProtocolCapabilityToolCalls,
+				appruntime.ProtocolCapabilityStreamEvents,
+			},
+		},
+		"image_filter": {
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
+		},
+		"model_override": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+			},
+			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+		},
+		"request_log": {
+			Protocols: []appruntime.ProtocolKind{
+				appruntime.ProtocolResponses,
+				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolAnthropic,
+			},
+		},
+	}
+	for name, support := range want {
+		if !reflect.DeepEqual(got[name], support) {
+			t.Fatalf("bad support for %s:\ngot  %#v\nwant %#v", name, got[name], support)
+		}
 	}
 }
 

@@ -36,6 +36,7 @@ workers:
     codex-app:
         port: 6767
         upstream: joycode
+        launcher: codex
         log_level: simple
         request_modules:
             api_translate:
@@ -56,3 +57,7 @@ upstreams:
         base_url: https://api.joycode.dev/v1
         api_key: sk-...
         api_format: chat_completions
+    anthropic:
+        base_url: https://api.anthropic.com/v1
+        api_key: sk-...
+        api_format: anthropic

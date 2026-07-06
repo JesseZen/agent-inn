@@ -18,18 +18,18 @@ export function DialogLaunch() {
     {
       title: "External window",
       value: "external-window",
-      description: "Open Codex CLI in a new terminal window",
+      description: "Open the worker launcher in a new terminal window",
     },
     {
       title: "Hosted terminal",
       value: "hosted-terminal",
-      description: "Run Codex CLI inside a AINN-managed tmux session",
+      description: "Run the worker launcher inside a AINN-managed tmux session",
     },
   ]
 
   return (
     <DialogSelect
-      title="Launch Codex CLI"
+      title="Launch Worker"
       flat
       options={options}
       placeholder="Select launch mode..."
@@ -66,9 +66,9 @@ function DialogExternalWindowLaunch() {
     const worker = sync.data.workers.find((item) => item.name === workerName)
     if (!worker) return
     const basePath = project.instance.directory() || sync.path.directory
-    const workspace = await DialogPrompt.show(dialog, "Launch Codex", {
+    const workspace = await DialogPrompt.show(dialog, "Launch Worker", {
       placeholder: "Workspace directory",
-      description: () => <text>Launch Codex in this workspace.</text>,
+      description: () => <text>Launch this worker in the workspace.</text>,
       value: basePath,
       directoryCompletion: basePath
         ? {
@@ -101,7 +101,7 @@ function DialogExternalWindowLaunch() {
         await DialogAlert.show(dialog, "Launch Command", rendered)
         return
       }
-      await DialogAlert.show(dialog, "Launch", "Opened a new Codex session.")
+      await DialogAlert.show(dialog, "Launch", "Opened a new worker session.")
     } catch (err) {
       await DialogAlert.show(dialog, "Launch failed", String(err instanceof Error ? err.message : err))
     }
@@ -109,7 +109,7 @@ function DialogExternalWindowLaunch() {
 
   return (
     <DialogSelect
-      title="Launch Codex CLI"
+      title="Launch Worker"
       options={options()}
       placeholder="Search cli workers..."
       onSelect={(option) => {

@@ -65,7 +65,7 @@ export function registerProxyCommands(api: TuiPluginApi) {
       {
         namespace: "palette",
         name: "proxy.launch",
-        title: "Launch Codex CLI",
+        title: "Launch Worker",
         category: "Proxy",
         slashName: "launch",
         run() {

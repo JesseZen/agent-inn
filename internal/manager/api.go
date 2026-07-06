@@ -40,6 +40,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Name           string                         `json:"name"`
 		Port           int                            `json:"port"`
+		Launcher       string                         `json:"launcher"`
 		Upstream       string                         `json:"upstream"`
 		RequestModules map[string]config.ModuleConfig `json:"request_modules"`
 		Hooks          map[string]config.ModuleConfig `json:"hooks"`
@@ -75,6 +76,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	worker := config.WorkerConfig{
+		Launcher:       strings.TrimSpace(payload.Launcher),
 		Port:           payload.Port,
 		Upstream:       payload.Upstream,
 		RequestModules: payload.RequestModules,
@@ -257,6 +259,9 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		}
 		if next.LogLevel == "" {
 			next.LogLevel = "simple"
+		}
+		if next.Launcher == "" {
+			next.Launcher = current.Launcher
 		}
 		if !validWorkerLogLevel(next.LogLevel) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker log_level must be simple or detail"})

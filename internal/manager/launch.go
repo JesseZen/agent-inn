@@ -3,14 +3,25 @@ package manager
 import (
 	"strconv"
 	"strings"
+
+	"github.com/jesse/agent-inn/internal/constants"
 )
 
 type CodexLaunchOptions struct {
-	Profile   string
-	Workspace string
-	AddDirs   []string
+	Profile    string
+	Workspace  string
+	AddDirs    []string
 	WorkerPort int
-	Model     string
+	Model      string
+}
+
+type LaunchOptions struct {
+	Launcher   string
+	Profile    string
+	Workspace  string
+	AddDirs    []string
+	WorkerPort int
+	Model      string
 }
 
 func buildCodexLaunchCommand(opts CodexLaunchOptions) []string {
@@ -32,6 +43,25 @@ func buildCodexLaunchCommand(opts CodexLaunchOptions) []string {
 
 func BuildCodexLaunchCommand(opts CodexLaunchOptions) []string {
 	return buildCodexLaunchCommand(opts)
+}
+
+func BuildLaunchCommand(opts LaunchOptions) []string {
+	if opts.Launcher == "claudecode" {
+		return []string{
+			"env",
+			"ANTHROPIC_BASE_URL=http://" + constants.LocalhostAddr + ":" + strconv.Itoa(opts.WorkerPort),
+			"ANTHROPIC_AUTH_TOKEN=ainn",
+			"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+			"claude",
+		}
+	}
+	return buildCodexLaunchCommand(CodexLaunchOptions{
+		Profile:    opts.Profile,
+		Workspace:  opts.Workspace,
+		AddDirs:    opts.AddDirs,
+		WorkerPort: opts.WorkerPort,
+		Model:      opts.Model,
+	})
 }
 
 func renderCodexLaunchCommand(cmd []string) string {

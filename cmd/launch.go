@@ -105,19 +105,33 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 2
 	}
 
-	opts := manager.CodexLaunchOptions{
+	launcher := "codex"
+	var cfg config.Config
+	configLoaded := false
+	var configLoadErr error
+	if loaded, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName)); err == nil {
+		cfg = loaded
+		configLoaded = true
+		if workerCfg, ok := workerConfigByPort(cfg, port); ok {
+			launcher = workerCfg.Launcher
+		}
+	} else {
+		configLoadErr = err
+	}
+
+	opts := manager.LaunchOptions{
+		Launcher:   launcher,
 		Profile:    *profile,
 		Workspace:  *workspace,
 		AddDirs:    addDirs,
 		WorkerPort: port,
 		Model:      *model,
 	}
-	cmd := manager.BuildCodexLaunchCommand(opts)
+	cmd := manager.BuildLaunchCommand(opts)
 
 	if *mode == modeHostedTerminal {
-		cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
-		if err != nil {
-			fmt.Fprintf(stderr, "failed to load config: %v\n", err)
+		if !configLoaded {
+			fmt.Fprintf(stderr, "failed to load config: %v\n", configLoadErr)
 			return 1
 		}
 		return runHostedTerminalLaunch(cfg.Settings, opts, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
@@ -128,6 +142,15 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func workerConfigByPort(cfg config.Config, port int) (config.WorkerConfig, bool) {
+	for _, worker := range cfg.Workers {
+		if worker.Port == port {
+			return worker, true
+		}
+	}
+	return config.WorkerConfig{}, false
 }
 
 func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) error {
@@ -149,7 +172,7 @@ func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) 
 // name so re-launching the same session switches to the existing window.
 // When noAttach is true, the setup runs but the attach step is skipped so the
 // caller (TUI) can decide whether to open a new terminal.
-func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchOptions, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
+func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOptions, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
 	runner := launchRunnerFactory(stdout, stderr)
 
 	if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
@@ -258,10 +281,10 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 		}
 	}
 	windowName := session.SessionLabel
-	codexCmd := manager.BuildCodexLaunchCommand(opts)
+	launchCmd := manager.BuildLaunchCommand(opts)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
-		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, codexCmd))
+		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, launchCmd))
 		if err != nil {
 			cleanupIncompleteSession()
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
@@ -311,7 +334,7 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.CodexLaunchO
 	}
 	if !reuseFirstWindow {
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
-			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, codexCmd))
+			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, launchCmd))
 			if err != nil {
 				cleanupIncompleteSession()
 				fmt.Fprintf(stderr, "failed to create tmux window: %v\n", err)
