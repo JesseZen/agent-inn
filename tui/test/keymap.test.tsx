@@ -1,4 +1,5 @@
 /** @jsxImportSource @opentui/solid */
+import { TextareaRenderable } from "@opentui/core"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { testRender, useRenderer } from "@opentui/solid"
@@ -23,6 +24,18 @@ function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
     leader_timeout: 2000,
   }
 }
+
+test("default prompt input keys keep return available for multiline text", () => {
+  const config = createResolvedKeymapConfig()
+
+  expect({
+    submit: config.keybinds.get("input.submit").map((binding) => binding.key),
+    newline: config.keybinds.get("input.newline").map((binding) => binding.key),
+  }).toEqual({
+    submit: ["alt+return"],
+    newline: ["return,shift+return,ctrl+return,ctrl+j"],
+  })
+})
 
 test("legacy page key aliases compile as page keys", async () => {
   const sequences: Record<string, string[][]> = {}
@@ -213,6 +226,94 @@ test("prompt submit falls back to remote slash commands when no local slash exis
   const app = await testRender(() => <Harness />)
   try {
     expect(result).toEqual({ type: "remote", commandName: "deploy" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("managed prompt input keeps return as newline by default", async () => {
+  let textarea!: TextareaRenderable
+  let submitted = 0
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createResolvedKeymapConfig()
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
+    onCleanup(offKeymap)
+
+    return (
+      <AinnKeymapProvider keymap={keymap}>
+        <textarea
+          ref={(value: TextareaRenderable) => {
+            textarea = value
+            textarea.focus()
+          }}
+          onSubmit={() => {
+            submitted += 1
+          }}
+        />
+      </AinnKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
+  try {
+    textarea.focus()
+
+    app.mockInput.pressEnter({ shift: true })
+    app.mockInput.pressEnter()
+    app.mockInput.pressEnter({ meta: true })
+
+    expect({ submitted, text: textarea.plainText }).toEqual({
+      submitted: 1,
+      text: "\n\n",
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("managed prompt input lets users bind return to submit", async () => {
+  let textarea!: TextareaRenderable
+  let submitted = 0
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createResolvedKeymapConfig({
+      input_submit: "return",
+      input_newline: "shift+return,ctrl+return,alt+return,ctrl+j",
+    })
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
+    onCleanup(offKeymap)
+
+    return (
+      <AinnKeymapProvider keymap={keymap}>
+        <textarea
+          ref={(value: TextareaRenderable) => {
+            textarea = value
+            textarea.focus()
+          }}
+          onSubmit={() => {
+            submitted += 1
+          }}
+        />
+      </AinnKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
+  try {
+    textarea.focus()
+
+    app.mockInput.pressEnter({ shift: true })
+    app.mockInput.pressEnter()
+
+    expect({ submitted, text: textarea.plainText }).toEqual({
+      submitted: 1,
+      text: "\n",
+    })
   } finally {
     app.renderer.destroy()
   }
