@@ -35,7 +35,8 @@ test("computeLayout places upstream above single worker", () => {
     id: "upstream:openai",
     kind: "upstream",
     label: "openai",
-    width: 10,
+    meta: "1",
+    width: 14,
     height: 3,
     data: upstream,
   })
@@ -44,7 +45,8 @@ test("computeLayout places upstream above single worker", () => {
       id: "worker:app",
       kind: "worker",
       label: "app",
-      width: 7,
+      meta: "running",
+      width: 17,
       height: 3,
       data: worker,
     },
@@ -56,17 +58,18 @@ test("computeLayout places upstream above single worker", () => {
           id: "worker:app",
           kind: "worker",
           label: "app",
-          width: 7,
+          meta: "running",
+          width: 17,
           height: 3,
           data: worker,
         },
       ],
-      width: 7,
+      width: 17,
     },
   ])
-  // group width = max(upstream width 10, worker width 7) = 10
-  expect(group.width).toBe(10)
-  expect(layout.groupRows).toEqual([{ groups: [group], width: 10 }])
+  // group width = max(upstream width 14, worker width 17) = 17
+  expect(group.width).toBe(17)
+  expect(layout.groupRows).toEqual([{ groups: [group], width: 17 }])
   expect(layout.orphans).toEqual([])
   expect(layout.orphanRows).toEqual([])
 })
@@ -78,9 +81,9 @@ test("computeLayout sets group width to fit multiple workers", () => {
   const layout = computeLayout([w1, w2], [upstream])
 
   const group = layout.groups[0]
-  // workers total = 7 + 18 + 2 (COL_GAP) = 27; upstream width = 6
-  expect(group.width).toBe(27)
-  expect(group.workerRows).toEqual([{ workers: group.workers, width: 27 }])
+  // workers total = 17 + 28 + 2 (COL_GAP) = 47; upstream width = 10
+  expect(group.width).toBe(47)
+  expect(group.workerRows).toEqual([{ workers: group.workers, width: 47 }])
 })
 
 test("computeLayout places multiple upstream groups side by side", () => {
@@ -106,7 +109,8 @@ test("computeLayout shows orphan upstreams without workers", () => {
       id: "upstream:orphan",
       kind: "upstream",
       label: "orphan",
-      width: 10,
+      meta: "idle",
+      width: 17,
       height: 3,
       data: orphanUp,
     },
@@ -151,13 +155,24 @@ test("computeLayout keeps groups in one row when width allows", () => {
   expect(layout.groupRows.map((row) => row.groups.map((group) => group.upstream.label))).toEqual([["aaa", "bbb"]])
 })
 
+test("computeLayout wraps groups using final rendered node widths", () => {
+  const up1 = makeUpstream("aaa")
+  const up2 = makeUpstream("bbb")
+  const w1 = makeWorker("w1", up1, "running")
+  const w2 = makeWorker("w2", up2, "running")
+
+  const layout = computeLayout([w1, w2], [up1, up2], 25)
+
+  expect(layout.groupRows.map((row) => row.groups.map((group) => group.upstream.label))).toEqual([["aaa"], ["bbb"]])
+})
+
 test("computeLayout wraps workers inside an oversized group", () => {
   const upstream = makeUpstream("shared")
   const w1 = makeWorker("alpha-worker", upstream)
   const w2 = makeWorker("beta-worker", upstream)
   const w3 = makeWorker("gamma-worker", upstream)
 
-  const layout = computeLayout([w1, w2, w3], [upstream], 24)
+  const layout = computeLayout([w1, w2, w3], [upstream], 26)
   const group = findGroup(layout, "shared")
 
   expect(group.workerRows.map((row) => row.workers.map((worker) => worker.label))).toEqual([
@@ -165,7 +180,7 @@ test("computeLayout wraps workers inside an oversized group", () => {
     ["beta-worker"],
     ["gamma-worker"],
   ])
-  expect(group.width).toBeLessThanOrEqual(24)
+  expect(group.width).toBeLessThanOrEqual(26)
 })
 
 test("computeLayout packs orphan upstreams into rows", () => {
@@ -195,21 +210,21 @@ test("computeGroupEdges connects same-column worker with vertical line", () => {
   const worker = makeWorker("ab", upstream)
   const layout = computeLayout([worker], [upstream])
   const group = findGroup(layout, "ab")
-  // group width = 6, upstream center = 3, worker center = 3 → vertical line
+  // group width = 16, upstream center = 8, worker center = 8 -> vertical line
   const edges = computeGroupEdges(group, group.workerRows[0])
-  expect(sortCells(edges.cells)).toEqual([{ x: 3, y: 0, char: "│" }])
+  expect(sortCells(edges.cells)).toEqual([{ x: 8, y: 0, char: "│" }])
 })
 
 test("computeGroupEdges creates branch when worker is off-center", () => {
-  const upstream = makeUpstream("openai")
+  const upstream = makeUpstream("openrouter")
   const worker = makeWorker("app", upstream)
   const layout = computeLayout([worker], [upstream])
-  const group = findGroup(layout, "openai")
-  // group width = 10, upstream center = 5, worker start = 1, worker center = 4 → branch
+  const group = findGroup(layout, "openrouter")
+  // group width = 18, upstream center = 9, worker center = 8 -> branch
   const edges = computeGroupEdges(group, group.workerRows[0])
   expect(sortCells(edges.cells)).toEqual([
-    { x: 4, y: 0, char: "┌" },
-    { x: 5, y: 0, char: "┘" },
+    { x: 8, y: 0, char: "┌" },
+    { x: 9, y: 0, char: "┘" },
   ])
 })
 
@@ -223,21 +238,21 @@ test("computeGroupEdges merges shared upstream branch with T-junction", () => {
   const edges = computeGroupEdges(group, group.workerRows[0])
   const cellMap = new Map(edges.cells.map((c) => [c.x, c.char]))
 
-  // group width = max(10, 7+17+2) = 26
-  // upstream center = 13
-  // worker centers: w1 (app, width 7) at start 0, center 3; w2 at start 9, center 17
+  // group width = max(14, 17+27+2) = 46
+  // upstream center = 23
+  // worker centers: w1 (app, width 17) at start 0, center 8; w2 at start 19, center 32
   // T-junction at upstream center: up + left + right = ┴
-  expect(cellMap.get(13)).toBe("┴")
-  // w1 corner at x=3: down + right = ┌
-  expect(cellMap.get(3)).toBe("┌")
-  // w2 corner at x=17: down + left = ┐
-  expect(cellMap.get(17)).toBe("┐")
+  expect(cellMap.get(23)).toBe("┴")
+  // w1 corner at x=8: down + right = ┌
+  expect(cellMap.get(8)).toBe("┌")
+  // w2 corner at x=32: down + left = ┐
+  expect(cellMap.get(32)).toBe("┐")
   // between w1 and upstream center: ─
-  for (let x = 4; x < 13; x++) {
+  for (let x = 9; x < 23; x++) {
     expect(cellMap.get(x)).toBe("─")
   }
   // between upstream center and w2: ─
-  for (let x = 14; x < 17; x++) {
+  for (let x = 24; x < 32; x++) {
     expect(cellMap.get(x)).toBe("─")
   }
 })
@@ -247,7 +262,7 @@ test("computeGroupEdges returns empty for group with no workers", () => {
   const layout = computeLayout([], [orphan])
   // orphans don't have groups; we test with a synthetic group instead
   const syntheticGroup = {
-    upstream: { id: "upstream:orphan", kind: "upstream" as const, label: "orphan", width: 10, height: 3, data: orphan },
+    upstream: { id: "upstream:orphan", kind: "upstream" as const, label: "orphan", meta: "idle", width: 17, height: 3, data: orphan },
     workers: [],
     workerRows: [{ workers: [], width: 0 }],
     width: 10,
@@ -269,16 +284,16 @@ test("computeGroupEdges uses centers from the selected worker row", () => {
   const upstream = makeUpstream("shared")
   const w1 = makeWorker("alpha-worker", upstream)
   const w2 = makeWorker("beta-worker", upstream)
-  const layout = computeLayout([w1, w2], [upstream], 20)
+  const layout = computeLayout([w1, w2], [upstream], 26)
   const group = findGroup(layout, "shared")
 
   const first = computeGroupEdges(group, group.workerRows[0])
   const second = computeGroupEdges(group, group.workerRows[1])
 
-  expect(first).toEqual({ cells: [{ x: 8, y: 0, char: "│" }] })
+  expect(first).toEqual({ cells: [{ x: 13, y: 0, char: "│" }] })
   expect(sortCells(second.cells)).toEqual([
-    { x: 7, y: 0, char: "┌" },
-    { x: 8, y: 0, char: "┘" },
+    { x: 12, y: 0, char: "┌" },
+    { x: 13, y: 0, char: "┘" },
   ])
 })
 
