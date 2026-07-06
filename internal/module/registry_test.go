@@ -141,6 +141,7 @@ func TestBuildRequestMiddlewaresReturnsProtocolSupport(t *testing.T) {
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolAnthropic,
 			},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 		},
@@ -179,6 +180,7 @@ func TestRequestMiddlewareSupportForAnthropicExcludesIncompatibleModules(t *test
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolAnthropic,
 			},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 		},
