@@ -363,3 +363,31 @@ test("resolved keybinds remove default newline keys claimed by submit overrides"
     objectNewline: ["return,shift+return,ctrl+j"],
   })
 })
+
+test("resolved keybinds normalize enter aliases when removing submit collisions", () => {
+  const enterConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: "enter",
+    },
+  })
+  const ctrlEnterConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: "ctrl+enter",
+    },
+  })
+  const strokeConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: { name: "enter", shift: true },
+    },
+  })
+
+  expect({
+    enterNewline: enterConfig.keybinds.get("input.newline").map((binding) => binding.key),
+    ctrlEnterNewline: ctrlEnterConfig.keybinds.get("input.newline").map((binding) => binding.key),
+    strokeNewline: strokeConfig.keybinds.get("input.newline").map((binding) => binding.key),
+  }).toEqual({
+    enterNewline: ["shift+return,ctrl+return,ctrl+j"],
+    ctrlEnterNewline: ["return,shift+return,ctrl+j"],
+    strokeNewline: ["return,ctrl+return,ctrl+j"],
+  })
+})

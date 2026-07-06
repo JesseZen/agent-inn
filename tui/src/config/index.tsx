@@ -104,13 +104,19 @@ function keyStrokeName(input: unknown): string | undefined {
     .toLowerCase()
 }
 
+function canonicalKey(input: string) {
+  const parts = input.split("+")
+  if (parts.at(-1) === "enter") parts[parts.length - 1] = "return"
+  return parts.join("+")
+}
+
 function bindingKeys(input: TuiKeybind.BindingValueSchema): string[] {
   const items = Array.isArray(input) ? input : [input]
   return items.flatMap((item) => {
     if (item === false || item === "none") return []
     const name = keyStrokeName(item)
     if (!name) return []
-    return name.split(",").map((key) => key.trim().toLowerCase()).filter(Boolean)
+    return name.split(",").map((key) => canonicalKey(key.trim().toLowerCase())).filter(Boolean)
   })
 }
 
