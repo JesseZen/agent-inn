@@ -236,6 +236,90 @@ test("proxy workers detail exposes worker status and scoped actions", async () =
   }
 })
 
+test("proxy workers detail escape returns to manage workers", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("app (:6767)")
+
+    app.mockInput.pressEscape()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Manage Workers")
+    })
+
+    expect(app.frame()).toContain("Manage Workers")
+    expect(app.frame()).toContain("Create New Worker")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers nested select esc click returns to worker detail", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Log Level: app")
+
+    const lines = app.frame().split("\n")
+    const row = lines.findIndex((line) => line.includes("esc"))
+    const column = row >= 0 ? lines[row].indexOf("esc") : -1
+    if (row < 0 || column < 0) throw new Error("expected visible esc affordance")
+
+    await app.setup.mockMouse.click(column, row)
+    await app.render()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("app (:6767)")
+    })
+
+    expect(app.frame()).toContain("Log Level")
+    expect(app.frame()).toContain("Switch Upstream")
+
+    app.mockInput.pressEscape()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Manage Workers")
+    })
+    expect(app.frame()).toContain("Manage Workers")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers launcher subselect escape returns to worker detail", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    for (let i = 0; i < 4; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Launcher: app")
+
+    app.mockInput.pressEscape()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("app (:6767)")
+    })
+
+    expect(app.frame()).toContain("Log Level")
+    expect(app.frame()).toContain("Launcher")
+    app.mockInput.pressEscape()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Manage Workers")
+    })
+    expect(app.frame()).toContain("Manage Workers")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy workers create claudecode worker payload", async () => {
   const app = await mountProxyApp()
 

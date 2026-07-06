@@ -40,7 +40,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     description: props.worker.log_level || "—",
     onSelect: async () => {
       const next = await new Promise<LogLevel | null>((resolve) => {
-        dialog.replace(
+        dialog.push(
           () => (
             <DialogSelect
               title={`Log Level: ${props.worker.name}`}
@@ -57,8 +57,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
           () => resolve(null),
         )
       })
-      if (!next || next === props.worker.log_level) {
-        dialog.replace(() => <DialogWorkerStatus worker={props.worker} management />)
+      if (!next) return
+      if (next === props.worker.log_level) {
+        dialog.pop()
         return
       }
       try {
@@ -68,7 +69,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       } catch (err) {
         toast.error(err)
       }
-      dialog.clear()
+      dialog.pop()
     },
   }
 
@@ -76,14 +77,14 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     title: "Switch Upstream",
     value: "switch",
     description: props.worker.upstream.name,
-    onSelect: () => dialog.replace(() => <DialogUpstreamPicker worker={props.worker} />),
+    onSelect: () => dialog.push(() => <DialogUpstreamPicker worker={props.worker} />),
   }
 
   const logsAction: DialogSelectOption<string> = {
     title: "View Logs",
     value: "logs",
     description: `:${props.worker.port}`,
-    onSelect: () => dialog.replace(() => <DialogLogs worker={props.worker} />),
+    onSelect: () => dialog.push(() => <DialogLogs worker={props.worker} />),
   }
 
   const modulesAction: DialogSelectOption<string> = {
@@ -92,7 +93,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     description: `${modules().length} req • ${hooks().length} hook`,
     onSelect: async () => {
       const worker = await sdk.client.getWorker(props.worker.port)
-      dialog.replace(() => <DialogModulePicker worker={worker} />)
+      dialog.push(() => <DialogModulePicker worker={worker} />)
     },
   }
 
@@ -160,7 +161,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     onSelect: async () => {
       const current = (props.worker.launcher || "codex") as Launcher
       const next = await new Promise<Launcher | null>((resolve) => {
-        dialog.replace(
+        dialog.push(
           () => (
             <DialogSelect
               title={`Launcher: ${props.worker.name}`}
@@ -177,8 +178,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
           () => resolve(null),
         )
       })
-      if (!next || next === current) {
-        dialog.replace(() => <DialogWorkerStatus worker={props.worker} management />)
+      if (!next) return
+      if (next === current) {
+        dialog.pop()
         return
       }
       try {
@@ -188,7 +190,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       } catch (err) {
         toast.error(err)
       }
-      dialog.clear()
+      dialog.pop()
     },
   }
 
