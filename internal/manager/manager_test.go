@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/hostedhooks"
 	"github.com/jesse/agent-inn/internal/module"
 	"github.com/jesse/agent-inn/internal/modulehook"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
@@ -2014,6 +2015,83 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 	}
 	if loaded.Settings.Terminal.Opener != "default" {
 		t.Fatalf("settings patch should preserve omitted terminal opener: %#v", loaded.Settings.Terminal)
+	}
+}
+
+func TestManagerSettingsAPIReconcilesTurnStatusHooks(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	m := New(Config{
+		ConfigPath:         configPath,
+		ReconcileTurnHooks: true,
+		Config: config.Config{
+			Settings: config.Settings{
+				StateDir: filepath.Join(dir, "state"),
+			},
+		},
+	})
+	defer m.Close()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(
+		res,
+		httptest.NewRequest(
+			http.MethodPatch,
+			"http://manager.local/api/settings",
+			strings.NewReader(`{"terminal":{"tmux":{"turn_status_hooks":true}}}`),
+		),
+	)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(hostedhooks.TurnStatusScriptPath()); err != nil {
+		t.Fatal(err)
+	}
+	codexHooks, err := os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(codexHooks), "hosted-turn-status") {
+		t.Fatalf("codex hooks were not installed:\n%s", codexHooks)
+	}
+	loaded, err := config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Settings.Terminal.Tmux.TurnStatusHooks {
+		t.Fatalf("turn status hook setting was not persisted: %#v", loaded.Settings.Terminal.Tmux)
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(
+		res,
+		httptest.NewRequest(
+			http.MethodPatch,
+			"http://manager.local/api/settings",
+			strings.NewReader(`{"terminal":{"tmux":{"turn_status_hooks":false}}}`),
+		),
+	)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(hostedhooks.TurnStatusScriptPath()); !os.IsNotExist(err) {
+		t.Fatalf("expected turn status hook script to be removed, got %v", err)
+	}
+	codexHooks, err = os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(codexHooks), "hosted-turn-status") {
+		t.Fatalf("codex hooks were not removed:\n%s", codexHooks)
+	}
+	loaded, err = config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Settings.Terminal.Tmux.TurnStatusHooks {
+		t.Fatalf("turn status hook setting should be false: %#v", loaded.Settings.Terminal.Tmux)
 	}
 }
 

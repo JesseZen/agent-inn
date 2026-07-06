@@ -134,6 +134,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
           socket_name: "ainn",
           host_session: "ainn-host",
           host_start_mode: "new-window",
+          turn_status_hooks: false,
         },
       },
     },

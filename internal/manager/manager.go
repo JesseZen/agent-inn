@@ -14,6 +14,7 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/hostedhooks"
 	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/module"
 	"github.com/jesse/agent-inn/internal/modulehook"
@@ -22,40 +23,42 @@ import (
 )
 
 type Config struct {
-	Config        config.Config
-	ConfigPath    string
-	ConfigStatus  config.Status
-	Executable    string
-	Starter       Starter
-	HealthChecker HealthChecker
-	WorkerClient  WorkerClient
+	Config             config.Config
+	ConfigPath         string
+	ConfigStatus       config.Status
+	Executable         string
+	Starter            Starter
+	HealthChecker      HealthChecker
+	WorkerClient       WorkerClient
+	ReconcileTurnHooks bool
 }
 
 type Manager struct {
-	mu               sync.RWMutex
-	config           config.Config
-	configPath       string
-	configStatus     config.Status
-	executable       string
-	starter          Starter
-	healthChecker    HealthChecker
-	workerClient     WorkerClient
-	clock            func() time.Time
-	healthWait       time.Duration
-	healthPoll       time.Duration
-	store            *config.Store
-	stopConfigWriter func()
-	events           *eventBus
-	portIndex        map[int]string
-	supervisors      map[string]*WorkerSupervisor
-	processes        map[string]ManagedProcess
-	statuses         map[string]WorkerState
-	retries          map[string]int
-	healthySince     map[string]time.Time
-	generations      map[string]int
-	logs             map[string]*logging.WorkerLogSink
-	hookStatuses     map[string]map[string]modulehook.Status
-	hostedSessions   *HostedSessionRegistry
+	mu                 sync.RWMutex
+	config             config.Config
+	configPath         string
+	configStatus       config.Status
+	executable         string
+	starter            Starter
+	healthChecker      HealthChecker
+	workerClient       WorkerClient
+	clock              func() time.Time
+	healthWait         time.Duration
+	healthPoll         time.Duration
+	store              *config.Store
+	stopConfigWriter   func()
+	events             *eventBus
+	portIndex          map[int]string
+	supervisors        map[string]*WorkerSupervisor
+	processes          map[string]ManagedProcess
+	statuses           map[string]WorkerState
+	retries            map[string]int
+	healthySince       map[string]time.Time
+	generations        map[string]int
+	logs               map[string]*logging.WorkerLogSink
+	hookStatuses       map[string]map[string]modulehook.Status
+	hostedSessions     *HostedSessionRegistry
+	reconcileTurnHooks bool
 }
 
 type WorkerSummary struct {
@@ -134,28 +137,29 @@ func New(cfg Config) *Manager {
 	cfg.Config.ApplyDefaults()
 	store := config.NewStore(cfg.ConfigPath, cfg.Config)
 	m := &Manager{
-		config:         cfg.Config,
-		configPath:     cfg.ConfigPath,
-		configStatus:   cfg.ConfigStatus,
-		executable:     cfg.Executable,
-		starter:        cfg.Starter,
-		healthChecker:  cfg.HealthChecker,
-		workerClient:   cfg.WorkerClient,
-		clock:          time.Now,
-		healthWait:     10 * time.Second,
-		healthPoll:     100 * time.Millisecond,
-		store:          store,
-		events:         newEventBus(defaultEventBusCapacity),
-		portIndex:      map[int]string{},
-		supervisors:    map[string]*WorkerSupervisor{},
-		processes:      map[string]ManagedProcess{},
-		statuses:       map[string]WorkerState{},
-		retries:        map[string]int{},
-		healthySince:   map[string]time.Time{},
-		generations:    map[string]int{},
-		logs:           map[string]*logging.WorkerLogSink{},
-		hookStatuses:   map[string]map[string]modulehook.Status{},
-		hostedSessions: NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
+		config:             cfg.Config,
+		configPath:         cfg.ConfigPath,
+		configStatus:       cfg.ConfigStatus,
+		executable:         cfg.Executable,
+		starter:            cfg.Starter,
+		healthChecker:      cfg.HealthChecker,
+		workerClient:       cfg.WorkerClient,
+		clock:              time.Now,
+		healthWait:         10 * time.Second,
+		healthPoll:         100 * time.Millisecond,
+		store:              store,
+		events:             newEventBus(defaultEventBusCapacity),
+		portIndex:          map[int]string{},
+		supervisors:        map[string]*WorkerSupervisor{},
+		processes:          map[string]ManagedProcess{},
+		statuses:           map[string]WorkerState{},
+		retries:            map[string]int{},
+		healthySince:       map[string]time.Time{},
+		generations:        map[string]int{},
+		logs:               map[string]*logging.WorkerLogSink{},
+		hookStatuses:       map[string]map[string]modulehook.Status{},
+		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
+		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
 	if cfg.ConfigPath != "" {
 		m.stopConfigWriter = store.StartAsyncWriter()
@@ -163,6 +167,11 @@ func New(cfg Config) *Manager {
 	m.portIndex = buildPortIndex(m.config.Workers)
 	if err := syncCodexProfileFiles(cfg.Config); err != nil {
 		m.configStatus.LastSaveError = err.Error()
+	}
+	if cfg.ReconcileTurnHooks {
+		if err := hostedhooks.Reconcile(cfg.Config.Settings); err != nil {
+			m.configStatus.LastSaveError = err.Error()
+		}
 	}
 	return m
 }

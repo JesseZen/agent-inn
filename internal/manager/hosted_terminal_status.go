@@ -63,6 +63,27 @@ func TmuxKillWindowCommandForSettings(settings config.Settings, windowID string)
 	return append(tmuxPrefixForSettings(settings), "kill-window", "-t", target)
 }
 
+func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID string, state string) []string {
+	target := tmuxHostSessionForSettings(settings) + ":" + windowID
+	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
+	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
+	switch state {
+	case HostedTurnStateRunning:
+		format = "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"
+	case HostedTurnStateDone:
+		format = "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"
+	case HostedTurnStateFailed, HostedTurnStateInterrupted:
+		format = "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]"
+		currentFormat = "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"
+	}
+	return append(tmuxPrefixForSettings(settings),
+		"set-window-option", "-t", target, "window-status-format", format, ";",
+		"set-window-option", "-t", target, "window-status-current-format", currentFormat,
+	)
+}
+
 func hostedSessionStatusForWindow(windows map[string]string, session HostedSessionRecord) string {
 	if session.TmuxWindowID == "" {
 		return hostedSessionStatusStale

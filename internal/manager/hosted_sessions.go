@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
 )
 
 const hostedSessionsFileName = "hosted-terminal-sessions.json"
@@ -20,22 +21,33 @@ const (
 	hostedSessionStatusStale  = "stale"
 )
 
+const (
+	HostedTurnStateIdle        = constants.HostedTurnStateIdle
+	HostedTurnStateRunning     = constants.HostedTurnStateRunning
+	HostedTurnStateDone        = constants.HostedTurnStateDone
+	HostedTurnStateFailed      = constants.HostedTurnStateFailed
+	HostedTurnStateInterrupted = constants.HostedTurnStateInterrupted
+)
+
 type HostedSessionRegistry struct {
 	path string
 	lock string
 }
 
 type HostedSessionRecord struct {
-	SessionID    string    `json:"session_id"`
-	SessionLabel string    `json:"session_label"`
-	WorkerName   string    `json:"worker_name"`
-	WorkerPort   int       `json:"worker_port"`
-	Workspace    string    `json:"workspace,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	AddDirs      []string  `json:"add_dirs,omitempty"`
-	TmuxWindowID string    `json:"tmux_window_id,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastOpenedAt time.Time `json:"last_opened_at"`
+	SessionID       string    `json:"session_id"`
+	SessionLabel    string    `json:"session_label"`
+	WorkerName      string    `json:"worker_name"`
+	WorkerPort      int       `json:"worker_port"`
+	Workspace       string    `json:"workspace,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	AddDirs         []string  `json:"add_dirs,omitempty"`
+	TmuxWindowID    string    `json:"tmux_window_id,omitempty"`
+	TurnState       string    `json:"turn_state,omitempty"`
+	TurnStateReason string    `json:"turn_state_reason,omitempty"`
+	TurnGeneration  int       `json:"turn_generation,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastOpenedAt    time.Time `json:"last_opened_at"`
 }
 
 type HostedSessionSummary struct {
@@ -52,8 +64,8 @@ func (r *HostedSessionRegistry) SummariesForSettings(settings config.Settings) (
 }
 
 type hostedSessionFile struct {
-	NextSessionID  int                           `json:"next_session_id"`
-	WorkerCounters map[string]int                `json:"worker_counters"`
+	NextSessionID  int                            `json:"next_session_id"`
+	WorkerCounters map[string]int                 `json:"worker_counters"`
 	Sessions       map[string]HostedSessionRecord `json:"sessions"`
 }
 
@@ -222,6 +234,31 @@ func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string
 		file.Sessions[sessionID] = session
 		return nil
 	})
+}
+
+func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string) (HostedSessionRecord, error) {
+	var updated HostedSessionRecord
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+		if state == HostedTurnStateRunning {
+			session.TurnGeneration++
+			session.TurnStateReason = ""
+		}
+		if state == HostedTurnStateDone &&
+			(session.TurnState == HostedTurnStateFailed || session.TurnState == HostedTurnStateInterrupted) {
+			updated = session
+			return nil
+		}
+		session.TurnState = state
+		session.TurnStateReason = strings.TrimSpace(reason)
+		file.Sessions[sessionID] = session
+		updated = session
+		return nil
+	})
+	return updated, err
 }
 
 func (r *HostedSessionRegistry) Delete(sessionID string) error {

@@ -41,6 +41,11 @@ const TMUX_HOST_START_MODE_CHOICES: SettingsChoice[] = [
   { title: "Main TUI window", value: "main-tui-window", description: "Run the main TUI in tmux window 0" },
 ]
 
+const TMUX_TURN_STATUS_HOOK_CHOICES: SettingsChoice[] = [
+  { title: "Enabled", value: "enabled", description: "Install AINN-managed Codex and Claude turn hooks" },
+  { title: "Disabled", value: "disabled", description: "Remove AINN-managed turn hooks" },
+]
+
 const FIELDS: SettingsField[] = [
   {
     key: "state_dir",
@@ -93,6 +98,14 @@ const FIELDS: SettingsField[] = [
     value: (settings) => settings.terminal.tmux.host_start_mode,
     patch: (value) => ({ terminal: { tmux: { host_start_mode: value } } } as Partial<ProxySettings>),
     choices: TMUX_HOST_START_MODE_CHOICES,
+  },
+  {
+    key: "terminal.tmux.turn_status_hooks",
+    title: "Tmux Turn Status Hooks",
+    category: "Terminal",
+    value: (settings) => (settings.terminal.tmux.turn_status_hooks ? "enabled" : "disabled"),
+    patch: (value) => ({ terminal: { tmux: { turn_status_hooks: value === "enabled" } } } as Partial<ProxySettings>),
+    choices: TMUX_TURN_STATUS_HOOK_CHOICES,
   },
 ]
 

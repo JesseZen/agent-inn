@@ -46,6 +46,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return runWorker(args[1:], stdout, stderr)
 		case "launch":
 			return runLaunch(args[1:], stdout, stderr)
+		case "hosted-session":
+			return runHostedSession(args[1:], stdout, stderr)
 		}
 	}
 
@@ -65,9 +67,10 @@ type RootOptions struct {
 
 var rootManagerFactory = func(opts RootOptions) rootManager {
 	return manager.New(manager.Config{
-		Config:     opts.Config,
-		ConfigPath: opts.ConfigPath,
-		Starter:    manager.ExecStarter{},
+		Config:             opts.Config,
+		ConfigPath:         opts.ConfigPath,
+		Starter:            manager.ExecStarter{},
+		ReconcileTurnHooks: true,
 	})
 }
 

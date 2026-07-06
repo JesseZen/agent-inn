@@ -98,6 +98,13 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	if *profile == "" {
 		*profile = *worker
 	}
+	expandedConfigDir := expandHome(*configDir)
+	absConfigDir, err := filepath.Abs(expandedConfigDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to resolve config dir: %v\n", err)
+		return 1
+	}
+	resolvedConfigDir := filepath.Clean(absConfigDir)
 	switch *mode {
 	case modeExternalWindow, modeHostedTerminal:
 	default:
@@ -109,7 +116,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	var cfg config.Config
 	configLoaded := false
 	var configLoadErr error
-	if loaded, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName)); err == nil {
+	if loaded, err := config.LoadFile(filepath.Join(resolvedConfigDir, config.ConfigFileName)); err == nil {
 		cfg = loaded
 		configLoaded = true
 		if workerCfg, ok := workerConfigByPort(cfg, port); ok {
@@ -134,7 +141,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "failed to load config: %v\n", configLoadErr)
 			return 1
 		}
-		return runHostedTerminalLaunch(cfg.Settings, opts, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
+		return runHostedTerminalLaunch(cfg.Settings, opts, resolvedConfigDir, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
 	}
 
 	if err := runTerminalLaunchCommand(cmd, stdout, stderr); err != nil {
@@ -172,7 +179,7 @@ func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) 
 // name so re-launching the same session switches to the existing window.
 // When noAttach is true, the setup runs but the attach step is skipped so the
 // caller (TUI) can decide whether to open a new terminal.
-func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOptions, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
+func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOptions, configDir string, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
 	runner := launchRunnerFactory(stdout, stderr)
 
 	if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
@@ -285,7 +292,7 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 		}
 	}
 	windowName := session.SessionLabel
-	launchCmd := manager.BuildLaunchCommand(opts)
+	launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(opts), configDir, session.SessionID)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
 		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, launchCmd))
@@ -365,4 +372,21 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 		return 1
 	}
 	return 0
+}
+
+func hostedSessionLaunchCommand(command []string, configDir string, sessionID string) []string {
+	executable, err := os.Executable()
+	if err != nil {
+		executable = os.Args[0]
+	}
+	env := []string{
+		"env",
+		"AINN_HOSTED_SESSION_ID=" + sessionID,
+		"AINN_CONFIG_DIR=" + configDir,
+		"AINN_EXECUTABLE=" + executable,
+	}
+	if len(command) > 0 && command[0] == "env" {
+		return append(env, command[1:]...)
+	}
+	return append(env, command...)
 }

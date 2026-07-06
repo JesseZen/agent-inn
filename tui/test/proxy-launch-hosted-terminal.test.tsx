@@ -210,6 +210,7 @@ test("hosted terminal create returns to refreshed session list", async () => {
               socket_name: "ainn",
               host_session: "ainn-host",
               host_start_mode: "new-window",
+              turn_status_hooks: false,
             },
           },
         },
