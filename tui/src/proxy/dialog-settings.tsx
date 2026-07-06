@@ -6,7 +6,12 @@ import { useToast } from "../ui/toast"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { createMemo, createSignal, onMount } from "solid-js"
 import type { ProxySettings } from "./backend"
-import { DialogAlert } from "../ui/dialog-alert"
+
+type SettingsChoice = {
+  title: string
+  value: string
+  description?: string
+}
 
 type SettingsField = {
   key: string
@@ -14,8 +19,27 @@ type SettingsField = {
   category: string
   value: (settings: ProxySettings) => string
   patch: (value: string) => Partial<ProxySettings>
-  presets?: string[]
+  choices?: SettingsChoice[]
 }
+
+const LAUNCH_MODE_CHOICES: SettingsChoice[] = [
+  { title: "External window", value: "external-window", description: "Open launchers in a new terminal window" },
+  { title: "Hosted terminal", value: "hosted-terminal", description: "Use AINN-managed tmux sessions" },
+]
+
+const TERMINAL_OPENER_CHOICES: SettingsChoice[] = [
+  { title: "Default", value: "default" },
+  { title: "Terminal.app", value: "terminal_app" },
+  { title: "iTerm2", value: "iterm2" },
+  { title: "WezTerm", value: "wezterm" },
+  { title: "Kitty", value: "kitty" },
+]
+
+const TMUX_HOST_START_MODE_CHOICES: SettingsChoice[] = [
+  { title: "New window", value: "new-window", description: "Create hosted sessions in new tmux windows" },
+  { title: "Reuse first window", value: "reuse-first-window", description: "Use window 0 for the first hosted session on a new host" },
+  { title: "Main TUI window", value: "main-tui-window", description: "Run the main TUI in tmux window 0" },
+]
 
 const FIELDS: SettingsField[] = [
   {
@@ -38,6 +62,7 @@ const FIELDS: SettingsField[] = [
     category: "Launch",
     value: (settings) => settings.launch.default_mode,
     patch: (value) => ({ launch: { default_mode: value } }),
+    choices: LAUNCH_MODE_CHOICES,
   },
   {
     key: "terminal.opener",
@@ -45,7 +70,7 @@ const FIELDS: SettingsField[] = [
     category: "Terminal",
     value: (settings) => settings.terminal.opener,
     patch: (value) => ({ terminal: { opener: value } } as Partial<ProxySettings>),
-    presets: ["default", "terminal_app", "iterm2", "wezterm", "kitty"],
+    choices: TERMINAL_OPENER_CHOICES,
   },
   {
     key: "terminal.tmux.socket_name",
@@ -67,7 +92,7 @@ const FIELDS: SettingsField[] = [
     category: "Terminal",
     value: (settings) => settings.terminal.tmux.host_start_mode,
     patch: (value) => ({ terminal: { tmux: { host_start_mode: value } } } as Partial<ProxySettings>),
-    presets: ["new-window", "reuse-first-window", "main-tui-window"],
+    choices: TMUX_HOST_START_MODE_CHOICES,
   },
 ]
 
@@ -88,6 +113,25 @@ export function DialogSettings() {
     }
   })
 
+  async function saveField(field: SettingsField, value: string) {
+    const response = await sdk.client.patchSettings(field.patch(value))
+    setSettings(response.settings)
+    await sync.bootstrap({ fatal: false })
+    toast.show({ message: `Saved ${field.title}`, variant: "success" })
+    if (field.key === "terminal.tmux.host_start_mode" && value === "reuse-first-window") {
+      const hostedSessions = await sdk.client.listHostedSessions()
+      if (hostedSessions.length > 0) {
+        setTimeout(() => {
+          toast.show({
+            message: "Host start mode applies only to newly created tmux hosts. Remove existing hosted terminal sessions to recreate the host.",
+            variant: "info",
+          })
+        }, 0)
+      }
+    }
+    dialog.replace(() => <DialogSettings />)
+  }
+
   const options = createMemo<DialogSelectOption<string>[]>(() => {
     const c = status()
     const current = settings()
@@ -99,34 +143,35 @@ export function DialogSettings() {
         category: field.category,
         onSelect: async () => {
           if (!current) return
-          if (field.presets) {
-            const result = await DialogPrompt.show(dialog, field.title, {
-              value: field.value(current),
-              selectAll: true,
-              placeholder: field.presets.join(", "),
+          if (field.choices) {
+            const currentValue = field.value(current)
+            const choices = field.choices
+            const result = await new Promise<string | null>((resolve) => {
+              dialog.push(
+                () => (
+                  <DialogSelect
+                    title={field.title}
+                    options={choices.map((choice) => ({
+                      title: choice.title,
+                      value: choice.value,
+                      description: choice.description,
+                      category: choice.value === currentValue ? "Current" : "Options",
+                    }))}
+                    placeholder={`Select ${field.title}...`}
+                    current={currentValue}
+                    onSelect={(opt) => {
+                      resolve(opt.value)
+                      dialog.pop()
+                    }}
+                  />
+                ),
+                () => resolve(null),
+              )
             })
             if (result === null) return
-            if (!field.presets.includes(result)) {
-              await DialogAlert.show(dialog, `Invalid ${field.title.toLowerCase()}`, `Choose one of: ${field.presets.join(", ")}`)
-              return
-            }
+            if (result === currentValue) return
             try {
-              const response = await sdk.client.patchSettings(field.patch(result))
-              setSettings(response.settings)
-              await sync.bootstrap({ fatal: false })
-              toast.show({ message: `Saved ${field.title}`, variant: "success" })
-              if (field.key === "terminal.tmux.host_start_mode" && result === "reuse-first-window") {
-                const hostedSessions = await sdk.client.listHostedSessions()
-                if (hostedSessions.length > 0) {
-                  setTimeout(() => {
-                    toast.show({
-                      message: "Host start mode applies only to newly created tmux hosts. Remove existing hosted terminal sessions to recreate the host.",
-                      variant: "info",
-                    })
-                  }, 0)
-                }
-              }
-              dialog.replace(() => <DialogSettings />)
+              await saveField(field, result)
             } catch (err) {
               toast.error(err)
             }
@@ -139,11 +184,7 @@ export function DialogSettings() {
           })
           if (result === null) return
           try {
-            const response = await sdk.client.patchSettings(field.patch(result))
-            setSettings(response.settings)
-            await sync.bootstrap({ fatal: false })
-            toast.show({ message: `Saved ${field.title}`, variant: "success" })
-            dialog.replace(() => <DialogSettings />)
+            await saveField(field, result)
           } catch (err) {
             toast.error(err)
           }

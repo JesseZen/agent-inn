@@ -100,19 +100,12 @@ export async function mountHostedTerminalApp(override?: FetchHandler) {
     await wait(async () => {
       await setup.renderOnce()
       const frame = setup.captureCharFrame()
-      return frame.includes("External window") && frame.includes("Hosted terminal")
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session")
     })
   }
 
   async function openHostedTerminalPicker() {
     await openLaunchDialog()
-    api.keymap.dispatchCommand("dialog.select.next")
-    api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(async () => {
-      await setup.renderOnce()
-      const frame = setup.captureCharFrame()
-      return frame.includes("Hosted Terminal") && frame.includes("Create new session")
-    })
   }
 
   async function cleanup() {

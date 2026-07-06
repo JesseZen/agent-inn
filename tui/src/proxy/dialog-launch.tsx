@@ -1,4 +1,4 @@
-import { createMemo } from "solid-js"
+import { createMemo, onMount } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useSync } from "../context/sync"
 import { useDialog } from "../ui/dialog"
@@ -13,33 +13,23 @@ import { useSDK } from "../context/sdk"
 
 export function DialogLaunch() {
   const dialog = useDialog()
+  const sdk = useSDK()
 
-  const options: DialogSelectOption<LaunchMode>[] = [
-    {
-      title: "External window",
-      value: "external-window",
-      description: "Open the worker launcher in a new terminal window",
-    },
-    {
-      title: "Hosted terminal",
-      value: "hosted-terminal",
-      description: "Run the worker launcher inside a AINN-managed tmux session",
-    },
-  ]
+  onMount(async () => {
+    const settings = await sdk.client.getSettings()
+    if (settings.settings.launch.default_mode === "hosted-terminal") {
+      dialog.replace(() => <DialogHostedTerminal />)
+      return
+    }
+    dialog.replace(() => <DialogExternalWindowLaunch />)
+  })
 
   return (
     <DialogSelect
       title="Launch Worker"
-      flat
-      options={options}
-      placeholder="Select launch mode..."
-      onSelect={(option) => {
-        if (option.value === "hosted-terminal") {
-          dialog.replace(() => <DialogHostedTerminal />)
-          return
-        }
-        dialog.replace(() => <DialogExternalWindowLaunch />)
-      }}
+      options={[] as DialogSelectOption<LaunchMode>[]}
+      placeholder="Loading launch settings..."
+      renderFilter={false}
     />
   )
 }
