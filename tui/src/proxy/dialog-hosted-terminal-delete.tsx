@@ -21,8 +21,9 @@ export async function deleteHostedTerminalSession(input: {
   dialog: DialogContext
   session: HostedSessionSummary
   refreshSessions: () => Promise<void>
+  onDeleted?: (session: HostedSessionSummary) => Promise<void> | void
 }) {
-  const { sdk, dialog, session, refreshSessions } = input
+  const { sdk, dialog, session, refreshSessions, onDeleted } = input
   const confirmed = await DialogConfirm.show(
     dialog,
     "Delete hosted session",
@@ -31,16 +32,20 @@ export async function deleteHostedTerminalSession(input: {
   if (!confirmed) return
   try {
     await sdk.client.deleteHostedSession(session.session_id)
+    if (onDeleted) {
+      await onDeleted(session)
+      return
+    }
     await refreshSessions()
   } catch (err) {
     await DialogAlert.show(dialog, "Delete hosted session failed", String(err instanceof Error ? err.message : err))
   }
 }
 
-export function DialogHostedTerminalDelete() {
+export function DialogHostedTerminalDelete(props: { initialSessions?: HostedSessionSummary[] } = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
+  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
 
   async function refreshSessions() {
     setSessions(await sdk.client.listHostedSessions())
@@ -87,17 +92,28 @@ export function DialogHostedTerminalDelete() {
             )
             if (!confirmed) return
             try {
+              const staleSessionIDs = new Set(staleSessions().map((session) => session.session_id))
               for (const session of staleSessions()) {
                 await sdk.client.deleteHostedSession(session.session_id)
               }
-              await refreshSessions()
+              const nextSessions = sessions().filter((session) => !staleSessionIDs.has(session.session_id))
+              dialog.replace(() => <DialogHostedTerminalDelete initialSessions={nextSessions} />)
             } catch (err) {
               await DialogAlert.show(dialog, "Delete hosted sessions failed", String(err instanceof Error ? err.message : err))
             }
           })()
           return
         }
-        void deleteHostedTerminalSession({ sdk, dialog, session: option.value.session, refreshSessions })
+        void deleteHostedTerminalSession({
+          sdk,
+          dialog,
+          session: option.value.session,
+          refreshSessions,
+          onDeleted: (session) => {
+            const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
+            dialog.replace(() => <DialogHostedTerminalDelete initialSessions={nextSessions} />)
+          },
+        })
       }}
     />
   )

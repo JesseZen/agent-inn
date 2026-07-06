@@ -98,6 +98,85 @@ test("hosted terminal picker ctrl d deletes the highlighted session", async () =
   }
 })
 
+test("hosted terminal picker keeps remaining sessions visible while delete refresh is pending", async () => {
+  const deleteRequests: string[] = []
+  const pendingRefreshes: ((response: Response) => void)[] = []
+  let hostedSessionCalls = 0
+  let currentHostedSessions = [activeHostedSession, staleHostedSessionA].map((session) => ({ ...session }))
+  const app = await mountHostedTerminalApp((url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      hostedSessionCalls += 1
+      if (hostedSessionCalls > 1) {
+        return new Promise<Response>((resolve) => pendingRefreshes.push(resolve))
+      }
+      return json({
+        sessions: currentHostedSessions,
+      })
+    }
+    if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "DELETE") {
+      const sessionID = url.pathname.split("/").at(-1) ?? ""
+      deleteRequests.push(sessionID)
+      currentHostedSessions = currentHostedSessions.filter((session) => session.session_id !== sessionID)
+      return json({ session_id: sessionID })
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session") && frame.includes("solve problem A")
+    })
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("session.delete")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete hosted session") && frame.includes("Delete solve problem A?")
+    })
+
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return deleteRequests.length === 1
+    })
+
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("stale problem A")
+    })
+    const frame = app.setup.captureCharFrame()
+    expect({
+      deleteRequests,
+      hasDeletedSession: frame.includes("solve problem A"),
+      hasRemainingSession: frame.includes("stale problem A"),
+    }).toEqual({
+      deleteRequests: ["hs_1"],
+      hasDeletedSession: false,
+      hasRemainingSession: true,
+    })
+
+    for (const resolve of pendingRefreshes.splice(0)) {
+      resolve(json({ sessions: currentHostedSessions }))
+    }
+    await app.cleanup()
+  } finally {
+    for (const resolve of pendingRefreshes.splice(0)) {
+      resolve(json({ sessions: currentHostedSessions }))
+    }
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("hosted terminal delete page still deletes selected session on enter", async () => {
   const app = await setupHostedTerminal()
 
