@@ -93,6 +93,29 @@ func TestTmuxKillWindowCommandForSettings(t *testing.T) {
 	}
 }
 
+func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxHostedTurnStatusCommandForSettings(settings, "@12", HostedTurnStateFailed)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-format", "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-format", "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestHostedSessionStatusForWindow(t *testing.T) {
 	if got := hostedSessionStatusForWindow(hostedWindowDetails("@1\tone\n@2\ttwo\n"), HostedSessionRecord{SessionLabel: "two", TmuxWindowID: "@2"}); got != hostedSessionStatusActive {
 		t.Fatalf("got %q, want active", got)

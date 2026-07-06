@@ -102,6 +102,52 @@ func TestHostedSessionRegistrySummariesMatchRealTmuxWindowIDs(t *testing.T) {
 	}
 }
 
+func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRunning := created
+	wantRunning.TurnState = HostedTurnStateRunning
+	wantRunning.TurnGeneration = 1
+	if !reflect.DeepEqual(running, wantRunning) {
+		t.Fatalf("got %#v, want %#v", running, wantRunning)
+	}
+
+	failed, err := registry.MarkTurnState(created.SessionID, HostedTurnStateFailed, "network_error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailed := wantRunning
+	wantFailed.TurnState = HostedTurnStateFailed
+	wantFailed.TurnStateReason = "network_error"
+	if !reflect.DeepEqual(failed, wantFailed) {
+		t.Fatalf("got %#v, want %#v", failed, wantFailed)
+	}
+
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(done, wantFailed) {
+		t.Fatalf("done should not overwrite failed state:\ngot  %#v\nwant %#v", done, wantFailed)
+	}
+}
+
 func TestHostedSessionRegistrySummariesTreatsMissingTmuxSocketAsStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

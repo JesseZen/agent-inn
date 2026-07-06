@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/hostedhooks"
 	"github.com/jesse/agent-inn/internal/modulehook"
 	"github.com/jesse/agent-inn/internal/upstream"
 )
@@ -831,9 +832,10 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		DefaultMode *string `json:"default_mode"`
 	}
 	type tmuxPatch struct {
-		SocketName    *string `json:"socket_name"`
-		HostSession   *string `json:"host_session"`
-		HostStartMode *string `json:"host_start_mode"`
+		SocketName      *string `json:"socket_name"`
+		HostSession     *string `json:"host_session"`
+		HostStartMode   *string `json:"host_start_mode"`
+		TurnStatusHooks *bool   `json:"turn_status_hooks"`
 	}
 	type terminalPatch struct {
 		Host   *string    `json:"host"`
@@ -881,6 +883,9 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 				if patch.Terminal.Tmux.HostStartMode != nil {
 					cfgRoot.Settings.Terminal.Tmux.HostStartMode = *patch.Terminal.Tmux.HostStartMode
 				}
+				if patch.Terminal.Tmux.TurnStatusHooks != nil {
+					cfgRoot.Settings.Terminal.Tmux.TurnStatusHooks = *patch.Terminal.Tmux.TurnStatusHooks
+				}
 			}
 		}
 	})
@@ -890,6 +895,12 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, status := m.syncConfigFromStore()
+	if m.reconcileTurnHooks {
+		if err := hostedhooks.Reconcile(cfg.Settings); err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err), "status": status})
+			return
+		}
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"settings": cfg.Settings,
 		"status": map[string]any{

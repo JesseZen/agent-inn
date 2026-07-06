@@ -17,3 +17,12 @@ const (
 	ProxySwitchPath    = "/_proxy/switch"
 	ProxyModulesPrefix = "/_proxy/modules/"
 )
+
+// HostedTurnState* are persisted by hosted terminal sessions and emitted by CLI hooks.
+const (
+	HostedTurnStateIdle        = "idle"
+	HostedTurnStateRunning     = "running"
+	HostedTurnStateDone        = "done"
+	HostedTurnStateFailed      = "failed"
+	HostedTurnStateInterrupted = "interrupted"
+)

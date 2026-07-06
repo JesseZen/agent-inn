@@ -305,6 +305,41 @@ test("proxy settings host start mode accepts main-tui-window", async () => {
   }
 })
 
+test("proxy settings turn status hooks uses a select list", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir ~/.ainn")
+    })
+
+    for (let i = 0; i < 7; i++) {
+      app.api.keymap.dispatchCommand("dialog.select.next")
+      await app.render()
+    }
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Tmux Turn Status Hooks") && frame.includes("Enabled")
+    })
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchSettings.some((entry) => entry.terminal?.tmux?.turn_status_hooks === true)
+    })
+
+    expect(app.calls.patchSettings).toContainEqual({
+      terminal: { tmux: { turn_status_hooks: true } },
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy settings command is registered and config command is removed", async () => {
   const app = await mountProxyApp()
 

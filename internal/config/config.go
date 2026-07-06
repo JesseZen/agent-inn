@@ -52,9 +52,10 @@ type TerminalSettings struct {
 }
 
 type TmuxSettings struct {
-	SocketName    string `yaml:"socket_name" json:"socket_name"`
-	HostSession   string `yaml:"host_session" json:"host_session"`
-	HostStartMode string `yaml:"host_start_mode" json:"host_start_mode"`
+	SocketName      string `yaml:"socket_name" json:"socket_name"`
+	HostSession     string `yaml:"host_session" json:"host_session"`
+	HostStartMode   string `yaml:"host_start_mode" json:"host_start_mode"`
+	TurnStatusHooks bool   `yaml:"turn_status_hooks" json:"turn_status_hooks"`
 }
 
 type WorkerConfig struct {

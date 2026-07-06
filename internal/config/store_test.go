@@ -24,6 +24,7 @@ settings:
       socket_name: ainn-test
       host_session: ainn-test-host
       host_start_mode: reuse-first-window
+      turn_status_hooks: true
 plugins:
   image_filter:
     kind: request_middleware
@@ -64,6 +65,9 @@ upstreams:
 	}
 	if cfg.Settings.Terminal.Tmux.HostStartMode != "reuse-first-window" {
 		t.Fatalf("expected host start mode to load, got %#v", cfg.Settings.Terminal.Tmux)
+	}
+	if !cfg.Settings.Terminal.Tmux.TurnStatusHooks {
+		t.Fatalf("expected turn status hooks to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
