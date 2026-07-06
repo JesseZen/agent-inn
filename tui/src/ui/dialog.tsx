@@ -5,7 +5,7 @@ import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
 import { Flag } from "@agent-inn/core/flag/flag"
-import { useBindings, useAinnModeStack } from "../keymap"
+import { AINN_MODAL_MODE, useBindings, useAinnModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 
 export function Dialog(
@@ -77,7 +77,7 @@ function init() {
 
   createEffect(() => {
     if (store.stack.length === 0) return
-    const popMode = modeStack.push("modal")
+    const popMode = modeStack.push(AINN_MODAL_MODE)
     onCleanup(popMode)
   })
 

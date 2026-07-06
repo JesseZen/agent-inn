@@ -19,6 +19,7 @@ import { TuiKeybind } from "./config/keybind"
 
 export const LEADER_TOKEN = "leader"
 export const AINN_BASE_MODE = "base"
+export const AINN_MODAL_MODE = "modal"
 export const COMMAND_PALETTE_COMMAND = "command.palette.show"
 
 const AINN_MODE_KEY = "ainn.mode"

@@ -70,6 +70,7 @@ import { CommandPaletteDialog } from "./component/command-palette"
 import {
   COMMAND_PALETTE_COMMAND,
   AINN_BASE_MODE,
+  AINN_MODAL_MODE,
   AinnKeymapProvider,
   registerAinnKeymap,
   useBindings,
@@ -551,7 +552,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "System",
         hidden: true,
         run: () => {
-          dialog.replace(() => <CommandPaletteDialog />)
+          dialog.push(() => <CommandPaletteDialog />)
         },
       },
       {
@@ -976,6 +977,11 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   useBindings(() => ({
     mode: AINN_BASE_MODE,
     bindings: tuiConfig.keybinds.gather("app", appBindingCommands),
+  }))
+
+  useBindings(() => ({
+    mode: AINN_MODAL_MODE,
+    bindings: tuiConfig.keybinds.gather("app.modal", [COMMAND_PALETTE_COMMAND]),
   }))
 
   useBindings(() => ({
