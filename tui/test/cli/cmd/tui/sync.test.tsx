@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
-import { mount, wait } from "./sync-fixture"
+import { json, mount, wait } from "./sync-fixture"
 import type { GlobalEvent } from "@agent-inn/sdk/v2"
 
 function branchEvent(branch: string, workspace?: string): GlobalEvent {
@@ -56,6 +56,79 @@ describe("tui sync", () => {
       await wait(() => sync.data.vcs?.branch === "feature")
 
       expect(sync.data.vcs?.branch).toBe("feature")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("manager events refresh manager data and surface manager errors", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const encoder = new TextEncoder()
+    const oldUpstream = { name: "openai", base_url: "https://old.example/v1", has_api_key: true }
+    const newUpstream = { name: "openai", base_url: "https://new.example/v1", has_api_key: true, api_format: "responses" }
+    const oldWorker = {
+      name: "app",
+      port: 6767,
+      role: "app",
+      upstream: oldUpstream,
+      status: "running",
+      snapshot_generation: 1,
+      log_level: "simple",
+    }
+    const newWorker = {
+      ...oldWorker,
+      upstream: newUpstream,
+      snapshot_generation: 2,
+      log_level: "detail",
+    }
+    let manager = {
+      workers: [oldWorker],
+      upstreams: { openai: oldUpstream },
+      config: { plugins: { model_override: { kind: "request_middleware", source: "external" } } },
+      status: { generation: 1, dirty: false, last_save_error: "" },
+    }
+    let events!: ReadableStreamDefaultController<Uint8Array>
+
+    const { app, sync } = await mount((url) => {
+      if (url.pathname === "/api/workers") return json({ workers: manager.workers })
+      if (url.pathname === "/api/upstreams") return json({ upstreams: manager.upstreams })
+      if (url.pathname === "/api/config")
+        return json({
+          config: manager.config,
+          status: manager.status,
+        })
+      if (url.pathname === "/api/events")
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              events = controller
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      return undefined
+    }, tmp.path)
+
+    try {
+      manager = {
+        workers: [newWorker],
+        upstreams: { openai: newUpstream },
+        config: { plugins: { request_log: { kind: "request_middleware", source: "builtin" } } },
+        status: { generation: 2, dirty: true, last_save_error: "save failed" },
+      }
+      events.enqueue(
+        encoder.encode('id: 1\nevent: worker.health.changed\ndata: {"worker":"app","status":"failed","error":"worker failed"}\n\n'),
+      )
+      await wait(() => sync.data.workers[0]?.snapshot_generation === 2)
+
+      expect(sync.data.workers).toEqual([newWorker])
+      expect(sync.data.upstreams).toEqual([newUpstream])
+      expect(sync.data.manager_config).toEqual({
+        plugins: { request_log: { kind: "request_middleware", source: "builtin" } },
+      })
+      expect(sync.data.config_status).toEqual({ generation: 2, dirty: true, last_save_error: "save failed" })
+      expect(sync.data.error).toBe("worker failed")
     } finally {
       app.renderer.destroy()
     }
