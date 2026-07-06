@@ -85,8 +85,32 @@ export const ResolveOptions = Schema.Struct({
 })
 export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
 
+const ReturnKeyNames = new Set(["return", "enter"])
+
 export function resolve(input: Info, options: ResolveOptions): Resolved {
   const keybinds: TuiKeybind.KeybindOverrides = { ...input.keybinds }
+  if (keybinds.input_submit !== undefined && keybinds.input_newline === undefined) {
+    const submitItems = Array.isArray(keybinds.input_submit) ? keybinds.input_submit : [keybinds.input_submit]
+    const submitClaimsReturn = submitItems.some((item) => {
+      if (typeof item === "string") {
+        return item.split(",").some((key) => ReturnKeyNames.has(key.trim().toLowerCase()))
+      }
+      if (typeof item === "object" && item !== null && "key" in item && typeof item.key === "string") {
+        return ReturnKeyNames.has(item.key.trim().toLowerCase())
+      }
+      if (typeof item === "object" && item !== null && "name" in item && typeof item.name === "string") {
+        return ReturnKeyNames.has(item.name.trim().toLowerCase())
+      }
+      return false
+    })
+    const inputNewline = TuiKeybind.defaultValue("input_newline")
+    if (submitClaimsReturn && typeof inputNewline === "string") {
+      keybinds.input_newline = inputNewline
+        .split(",")
+        .filter((key) => !ReturnKeyNames.has(key.trim().toLowerCase()))
+        .join(",")
+    }
+  }
   if (!options.terminalSuspend) {
     keybinds.terminal_suspend = "none"
     if (keybinds.input_undo === undefined) {

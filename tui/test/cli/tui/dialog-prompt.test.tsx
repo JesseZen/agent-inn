@@ -148,11 +148,11 @@ test("dialog prompt submit can be rebound separately from input keys", async () 
 
     prompt.app.mockInput.pressEnter()
     expect(confirmed).toEqual([])
-    expect(textarea.plainText).toBe("draft\n")
+    expect(textarea.plainText).toBe("draft")
 
     prompt.app.mockInput.pressKey("y", { ctrl: true })
 
-    expect(confirmed).toEqual(["draft\n"])
+    expect(confirmed).toEqual(["draft"])
   } finally {
     await prompt.cleanup()
   }

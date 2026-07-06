@@ -5,6 +5,7 @@ import { createBindingLookup } from "@opentui/keymap/extras"
 import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
 import { onCleanup } from "solid-js"
+import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { TuiKeybind } from "../src/config/keybind"
 import {
   getAinnModeStack,
@@ -317,4 +318,20 @@ test("managed prompt input lets users bind return to submit", async () => {
   } finally {
     app.renderer.destroy()
   }
+})
+
+test("resolved keybinds remove default return newline when return is rebound to submit", () => {
+  const config = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: "return",
+    },
+  })
+
+  expect({
+    submit: config.keybinds.get("input.submit").map((binding) => binding.key),
+    newline: config.keybinds.get("input.newline").map((binding) => binding.key),
+  }).toEqual({
+    submit: ["return"],
+    newline: ["shift+return,ctrl+return,ctrl+j"],
+  })
 })
