@@ -116,6 +116,8 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
+    let workerHealthError: { worker: string; status: string; error: string } | undefined
+
     async function refreshManagerData() {
       const [workers, upstreams, config] = await Promise.all([
         sdk.client.listWorkers(),
@@ -273,14 +275,21 @@ export const {
             return
           }
           const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
+          if (event.type === "worker.health.changed") {
+            const workerName = event.payload.worker
+            const workerStatus = event.payload.status
+            workerHealthError = typeof workerName === "string" && typeof workerStatus === "string" && managerError
+              ? { worker: workerName, status: workerStatus, error: managerError }
+              : undefined
+          }
           void refreshManagerData()
             .then((manager) => {
-              if (managerError && event.type === "worker.health.changed") {
-                const workerName = event.payload.worker
-                const workerStatus = event.payload.status
-                if (typeof workerName === "string" && typeof workerStatus === "string" && manager.workers.some((worker) => worker.name === workerName && worker.status === workerStatus)) {
-                  setStore("error", managerError)
-                }
+              const current = workerHealthError
+              if (!current) return
+              if (manager.workers.some((worker) => worker.name === current.worker && worker.status === current.status)) {
+                setStore("error", current.error)
+              } else {
+                workerHealthError = undefined
               }
             })
             .catch((error) => {
