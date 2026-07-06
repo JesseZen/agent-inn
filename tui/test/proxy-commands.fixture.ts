@@ -34,7 +34,7 @@ function frameLines(frame: string) {
     .filter(Boolean)
 }
 
-function createProxyHarness(input: { workers?: WorkerSummary[] } = {}) {
+function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelayMs?: number } = {}) {
   const providers = new Map<string, RedactedUpstream>([
     [
       "openai",
@@ -232,6 +232,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[] } = {}) {
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
+      if (input.patchWorkerDelayMs) await Bun.sleep(input.patchWorkerDelayMs)
       const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; log_level?: string; launcher?: string }
       calls.patchWorker.push({
         port: 6767,
@@ -419,7 +420,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[] } = {}) {
   return { calls, fetch: override, hostedSessions }
 }
 
-export async function mountProxyApp(input: { workers?: WorkerSummary[] } = {}) {
+export async function mountProxyApp(input: { workers?: WorkerSummary[]; patchWorkerDelayMs?: number } = {}) {
   const tmp = await tmpdir()
   const home = tmp.path
   const app = "ainn"

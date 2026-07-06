@@ -51,17 +51,17 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
               }))}
               placeholder="Select log level..."
               current={props.worker.log_level}
-              onSelect={(opt) => resolve(opt.value as LogLevel)}
+              onSelect={(opt) => {
+                resolve(opt.value as LogLevel)
+                dialog.pop()
+              }}
             />
           ),
           () => resolve(null),
         )
       })
       if (!next) return
-      if (next === props.worker.log_level) {
-        dialog.pop()
-        return
-      }
+      if (next === props.worker.log_level) return
       try {
         await sdk.client.patchWorker(props.worker.port, { log_level: next })
         await sync.bootstrap({ fatal: false })
@@ -69,7 +69,6 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       } catch (err) {
         toast.error(err)
       }
-      dialog.pop()
     },
   }
 
@@ -172,17 +171,17 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
               }))}
               placeholder="Select launcher..."
               current={current}
-              onSelect={(opt) => resolve(opt.value as Launcher)}
+              onSelect={(opt) => {
+                resolve(opt.value as Launcher)
+                dialog.pop()
+              }}
             />
           ),
           () => resolve(null),
         )
       })
       if (!next) return
-      if (next === current) {
-        dialog.pop()
-        return
-      }
+      if (next === current) return
       try {
         await sdk.client.patchWorker(props.worker.port, { launcher: next })
         await sync.bootstrap({ fatal: false })
@@ -190,7 +189,6 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       } catch (err) {
         toast.error(err)
       }
-      dialog.pop()
     },
   }
 

@@ -25,6 +25,55 @@ test("proxy workers switch upstream action updates worker provider and reflects 
   }
 })
 
+test("proxy workers switch upstream selection returns to worker detail", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Switch Upstream: app")
+
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.patchWorker.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("app (:6767)")
+    })
+
+    expect(app.frame()).toContain("app (:6767)")
+    expect(app.frame()).toContain("Switch Upstream")
+    expect(app.frame()).not.toContain("Switch Upstream: app")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers current upstream selection returns to worker detail", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Switch Upstream: app")
+
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("app (:6767)")
+    })
+
+    expect(app.calls.patchWorker).toEqual([])
+    expect(app.frame()).toContain("app (:6767)")
+    expect(app.frame()).toContain("Switch Upstream")
+    expect(app.frame()).not.toContain("Switch Upstream: app")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy upstream registers an upstream command", async () => {
   const app = await mountProxyApp()
 
