@@ -897,6 +897,21 @@ test("proxy topology command is registered and opens topology dialog", async () 
   }
 })
 
+test("topology dialog frame is vertically centered", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.topology")
+    await app.render()
+    await app.render()
+
+    const titleRow = app.frame().split("\n").findIndex((line) => line.includes("Topology"))
+    expect(titleRow).toBeLessThan(7)
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("topology dialog click on worker navigates to worker status", async () => {
   const app = await mountProxyApp()
 
@@ -905,7 +920,7 @@ test("topology dialog click on worker navigates to worker status", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.click(5, 16)
+    await app.setup.mockMouse.click(5, 13)
     await app.render()
     await app.render()
 
@@ -925,7 +940,7 @@ test("topology dialog click on upstream navigates to upstream editor", async () 
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.click(22, 12)
+    await app.setup.mockMouse.click(22, 9)
     await app.render()
     await app.render()
 
@@ -945,7 +960,7 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.drag(5, 16, 5, 22)
+    await app.setup.mockMouse.drag(5, 13, 5, 19)
     await app.render()
     await app.render()
 
@@ -963,11 +978,12 @@ test("topology dialog does not start a text selection", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.pressDown(1, 7)
-    await app.setup.mockMouse.moveTo(8, 7)
+    const titleRow = app.frame().split("\n").findIndex((line) => line.includes("Topology"))
+    await app.setup.mockMouse.pressDown(1, titleRow)
+    await app.setup.mockMouse.moveTo(8, titleRow)
     await app.render()
     const selection = app.setup.renderer.getSelection()
-    await app.setup.mockMouse.release(8, 7)
+    await app.setup.mockMouse.release(8, titleRow)
     expect(selection === null).toBe(true)
   } finally {
     await app.cleanup()
@@ -982,7 +998,7 @@ test("topology dialog drag upstream to worker calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    await app.setup.mockMouse.drag(5, 22, 5, 16)
+    await app.setup.mockMouse.drag(5, 19, 5, 13)
     await app.render()
     await app.render()
 
