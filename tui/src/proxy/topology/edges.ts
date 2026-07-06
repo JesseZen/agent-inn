@@ -1,4 +1,4 @@
-import type { TopologyGroup } from "./layout"
+import type { TopologyGroup, TopologyWorkerRow } from "./layout"
 
 export type EdgeCell = { x: number; y: number; char: string }
 
@@ -14,9 +14,9 @@ export type GroupEdges = {
  * Upstream is centered horizontally within the group; each worker is centered within
  * its slot. We draw a branch from upstream center down to each worker center.
  */
-export function computeGroupEdges(group: TopologyGroup): GroupEdges {
+export function computeGroupEdges(group: TopologyGroup, row: TopologyWorkerRow): GroupEdges {
   const upstreamCenter = Math.floor(group.width / 2)
-  const workerCenters = computeWorkerCenters(group)
+  const workerCenters = computeWorkerCenters(group, row)
 
   const cells = new Map<string, { x: number; y: number; up: boolean; down: boolean; left: boolean; right: boolean }>()
 
@@ -49,14 +49,13 @@ export function computeGroupEdges(group: TopologyGroup): GroupEdges {
   return { cells: [...cells.values()].map((c) => ({ x: c.x, y: c.y, char: dirToChar(c) })) }
 }
 
-function computeWorkerCenters(group: TopologyGroup): number[] {
-  const workersTotal = group.workers.reduce((sum, w) => sum + w.width, 0) + (group.workers.length - 1) * 2
-  const startX = Math.floor((group.width - workersTotal) / 2)
+function computeWorkerCenters(group: TopologyGroup, row: TopologyWorkerRow): number[] {
+  const startX = Math.floor((group.width - row.width) / 2)
   const centers: number[] = []
   let cursor = startX
-  for (const w of group.workers) {
-    centers.push(cursor + Math.floor(w.width / 2))
-    cursor += w.width + 2
+  for (const worker of row.workers) {
+    centers.push(cursor + Math.floor(worker.width / 2))
+    cursor += worker.width + 2
   }
   return centers
 }
