@@ -24,12 +24,12 @@ type HostedTerminalOption =
       session: HostedSessionSummary
     }
 
-export function DialogHostedTerminal() {
+export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[] } = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
   const project = useProject()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
+  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
 
   async function refreshSessions() {
     setSessions(await sdk.client.listHostedSessions())
@@ -134,7 +134,16 @@ export function DialogHostedTerminal() {
           disabled: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
-            void deleteHostedTerminalSession({ sdk, dialog, session: option.value.session, refreshSessions })
+            void deleteHostedTerminalSession({
+              sdk,
+              dialog,
+              session: option.value.session,
+              refreshSessions,
+              onDeleted: (session) => {
+                const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
+                dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} />)
+              },
+            })
           },
         },
       ]}
