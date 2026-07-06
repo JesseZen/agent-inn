@@ -85,30 +85,42 @@ export const ResolveOptions = Schema.Struct({
 })
 export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
 
-const ReturnKeyNames = new Set(["return", "enter"])
+function keyStrokeName(input: unknown): string | undefined {
+  if (typeof input === "string") return input.trim().toLowerCase()
+  if (!input || typeof input !== "object") return
+  if ("key" in input) return keyStrokeName(input.key)
+  if (!("name" in input) || typeof input.name !== "string") return
+  return [
+    input.ctrl ? "ctrl" : undefined,
+    input.alt ? "alt" : undefined,
+    input.shift ? "shift" : undefined,
+    input.meta ? "meta" : undefined,
+    input.super ? "super" : undefined,
+    input.hyper ? "hyper" : undefined,
+    input.name,
+  ]
+    .filter(Boolean)
+    .join("+")
+    .toLowerCase()
+}
+
+function bindingKeys(input: TuiKeybind.BindingValueSchema): string[] {
+  const items = Array.isArray(input) ? input : [input]
+  return items.flatMap((item) => {
+    if (item === false || item === "none") return []
+    const name = keyStrokeName(item)
+    if (!name) return []
+    return name.split(",").map((key) => key.trim().toLowerCase()).filter(Boolean)
+  })
+}
 
 export function resolve(input: Info, options: ResolveOptions): Resolved {
   const keybinds: TuiKeybind.KeybindOverrides = { ...input.keybinds }
   if (keybinds.input_submit !== undefined && keybinds.input_newline === undefined) {
-    const submitItems = Array.isArray(keybinds.input_submit) ? keybinds.input_submit : [keybinds.input_submit]
-    const submitClaimsReturn = submitItems.some((item) => {
-      if (typeof item === "string") {
-        return item.split(",").some((key) => ReturnKeyNames.has(key.trim().toLowerCase()))
-      }
-      if (typeof item === "object" && item !== null && "key" in item && typeof item.key === "string") {
-        return ReturnKeyNames.has(item.key.trim().toLowerCase())
-      }
-      if (typeof item === "object" && item !== null && "name" in item && typeof item.name === "string") {
-        return ReturnKeyNames.has(item.name.trim().toLowerCase())
-      }
-      return false
-    })
+    const submitKeys = new Set(bindingKeys(keybinds.input_submit))
     const inputNewline = TuiKeybind.defaultValue("input_newline")
-    if (submitClaimsReturn && typeof inputNewline === "string") {
-      keybinds.input_newline = inputNewline
-        .split(",")
-        .filter((key) => !ReturnKeyNames.has(key.trim().toLowerCase()))
-        .join(",")
+    if (submitKeys.size > 0) {
+      keybinds.input_newline = bindingKeys(inputNewline).filter((key) => !submitKeys.has(key)).join(",")
     }
   }
   if (!options.terminalSuspend) {

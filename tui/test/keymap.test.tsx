@@ -335,3 +335,31 @@ test("resolved keybinds remove default return newline when return is rebound to 
     newline: ["shift+return,ctrl+return,ctrl+j"],
   })
 })
+
+test("resolved keybinds remove default newline keys claimed by submit overrides", () => {
+  const stringConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: "ctrl+return",
+    },
+  })
+  const strokeConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: { name: "return", shift: true },
+    },
+  })
+  const objectConfig = createTuiResolvedConfig({
+    keybinds: {
+      input_submit: { key: { name: "return", ctrl: true } },
+    },
+  })
+
+  expect({
+    stringNewline: stringConfig.keybinds.get("input.newline").map((binding) => binding.key),
+    strokeNewline: strokeConfig.keybinds.get("input.newline").map((binding) => binding.key),
+    objectNewline: objectConfig.keybinds.get("input.newline").map((binding) => binding.key),
+  }).toEqual({
+    stringNewline: ["return,shift+return,ctrl+j"],
+    strokeNewline: ["return,ctrl+return,ctrl+j"],
+    objectNewline: ["return,shift+return,ctrl+j"],
+  })
+})
