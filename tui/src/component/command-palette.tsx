@@ -54,8 +54,8 @@ export function CommandPaletteDialog() {
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
       onSelect: (dialog: DialogContext) => {
-        dialog.clear()
-        keymap.dispatchCommand(entry.command.name)
+        dialog.pop()
+        keymap.runCommand(entry.command.name)
       },
     })),
   )

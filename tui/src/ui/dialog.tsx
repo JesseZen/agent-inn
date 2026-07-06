@@ -152,16 +152,19 @@ function init() {
     pop() {
       const current = store.stack.at(-1)
       current?.onClose?.()
-      setStore("stack", store.stack.slice(0, -1))
-      if (store.stack.length <= 1) {
+      const next = store.stack.slice(0, -1)
+      setStore("stack", next)
+      if (next.length <= 1) {
         setStore("size", "medium")
       }
-      refocus()
+      if (next.length === 0) refocus()
     },
     replace(input: any, onClose?: () => void) {
       if (store.stack.length === 0) {
         focus = renderer.currentFocusedRenderable
         focus?.blur()
+      } else {
+        renderer.currentFocusedRenderable?.blur()
       }
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
@@ -178,6 +181,8 @@ function init() {
       if (store.stack.length === 0) {
         focus = renderer.currentFocusedRenderable
         focus?.blur()
+      } else {
+        renderer.currentFocusedRenderable?.blur()
       }
       setStore("size", "medium")
       setStore("stack", [
