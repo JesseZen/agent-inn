@@ -21,7 +21,7 @@ function findGroup(layout: ReturnType<typeof computeLayout>, upstreamName: strin
 }
 
 test("computeLayout returns empty for no workers and no upstreams", () => {
-  expect(computeLayout([], [])).toEqual({ groups: [], orphans: [], rows: 0 })
+  expect(computeLayout([], [])).toEqual({ groups: [], groupRows: [], orphans: [], orphanRows: [], rows: 0 })
 })
 
 test("computeLayout places upstream above single worker", () => {
@@ -49,9 +49,26 @@ test("computeLayout places upstream above single worker", () => {
       data: worker,
     },
   ])
+  expect(group.workerRows).toEqual([
+    {
+      workers: [
+        {
+          id: "worker:app",
+          kind: "worker",
+          label: "app",
+          width: 7,
+          height: 3,
+          data: worker,
+        },
+      ],
+      width: 7,
+    },
+  ])
   // group width = max(upstream width 10, worker width 7) = 10
   expect(group.width).toBe(10)
+  expect(layout.groupRows).toEqual([{ groups: [group], width: 10 }])
   expect(layout.orphans).toEqual([])
+  expect(layout.orphanRows).toEqual([])
 })
 
 test("computeLayout sets group width to fit multiple workers", () => {
@@ -63,6 +80,7 @@ test("computeLayout sets group width to fit multiple workers", () => {
   const group = layout.groups[0]
   // workers total = 7 + 18 + 2 (COL_GAP) = 27; upstream width = 6
   expect(group.width).toBe(27)
+  expect(group.workerRows).toEqual([{ workers: group.workers, width: 27 }])
 })
 
 test("computeLayout places multiple upstream groups side by side", () => {
@@ -93,6 +111,7 @@ test("computeLayout shows orphan upstreams without workers", () => {
       data: orphanUp,
     },
   ])
+  expect(layout.orphanRows).toEqual([layout.orphans])
 })
 
 test("computeLayout handles worker whose upstream is not in upstreams list", () => {
@@ -102,6 +121,65 @@ test("computeLayout handles worker whose upstream is not in upstreams list", () 
 
   expect(layout.groups).toHaveLength(1)
   expect(layout.groups[0].upstream.label).toBe("embedded")
+})
+
+test("computeLayout wraps groups into rows when width is constrained", () => {
+  const up1 = makeUpstream("aaa")
+  const up2 = makeUpstream("bbb")
+  const up3 = makeUpstream("ccc")
+  const w1 = makeWorker("worker-one", up1)
+  const w2 = makeWorker("worker-two", up2)
+  const w3 = makeWorker("worker-three", up3)
+
+  const layout = computeLayout([w1, w2, w3], [up1, up2, up3], 28)
+
+  expect(layout.groupRows.map((row) => row.groups.map((group) => group.upstream.label))).toEqual([
+    ["aaa"],
+    ["bbb"],
+    ["ccc"],
+  ])
+})
+
+test("computeLayout keeps groups in one row when width allows", () => {
+  const up1 = makeUpstream("aaa")
+  const up2 = makeUpstream("bbb")
+  const w1 = makeWorker("w1", up1)
+  const w2 = makeWorker("w2", up2)
+
+  const layout = computeLayout([w1, w2], [up1, up2], 80)
+
+  expect(layout.groupRows.map((row) => row.groups.map((group) => group.upstream.label))).toEqual([["aaa", "bbb"]])
+})
+
+test("computeLayout wraps workers inside an oversized group", () => {
+  const upstream = makeUpstream("shared")
+  const w1 = makeWorker("alpha-worker", upstream)
+  const w2 = makeWorker("beta-worker", upstream)
+  const w3 = makeWorker("gamma-worker", upstream)
+
+  const layout = computeLayout([w1, w2, w3], [upstream], 24)
+  const group = findGroup(layout, "shared")
+
+  expect(group.workerRows.map((row) => row.workers.map((worker) => worker.label))).toEqual([
+    ["alpha-worker"],
+    ["beta-worker"],
+    ["gamma-worker"],
+  ])
+  expect(group.width).toBeLessThanOrEqual(24)
+})
+
+test("computeLayout packs orphan upstreams into rows", () => {
+  const orphanA = makeUpstream("orphan-a")
+  const orphanB = makeUpstream("orphan-b")
+  const orphanC = makeUpstream("orphan-c")
+
+  const layout = computeLayout([], [orphanA, orphanB, orphanC], 24)
+
+  expect(layout.orphanRows.map((row) => row.map((node) => node.label))).toEqual([
+    ["orphan-a"],
+    ["orphan-b"],
+    ["orphan-c"],
+  ])
 })
 
 test("computeLayout is deterministic for same input", () => {
