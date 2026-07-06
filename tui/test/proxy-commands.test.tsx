@@ -24,6 +24,43 @@ test("proxy logs opens worker logs dialog with initial log lines", async () => {
   }
 })
 
+test("command palette opened from help returns to help", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Ask anything")
+    })
+    await wait(() =>
+      app.api.keymap
+        .getCommands({ visibility: "registered" })
+        .some((command) => command.name === "command.palette.show"),
+    )
+    app.api.keymap.runCommand("help.show")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Help") && frame.includes("Press")
+    })
+
+    app.mockInput.pressKey("p", { ctrl: true })
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Commands")
+    })
+
+    app.mockInput.pressEscape()
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Help") && frame.includes("Press")
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy config save clears dirty state on reopen", async () => {
   const app = await mountProxyApp()
 
