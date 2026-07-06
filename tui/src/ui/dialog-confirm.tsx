@@ -59,7 +59,7 @@ export function DialogConfirm(props: DialogConfirmProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <box onMouseUp={() => dialog.clear()}>
+        <box onMouseUp={() => dialog.pop()}>
           <text fg={theme.textMuted}>esc</text>
         </box>
       </box>
