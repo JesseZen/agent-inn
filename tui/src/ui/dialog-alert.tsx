@@ -21,7 +21,7 @@ export function DialogAlert(props: DialogAlertProps) {
         group: "Dialog",
         cmd: () => {
           props.onConfirm?.()
-          dialog.clear()
+          dialog.pop()
         },
       },
     ],
@@ -32,7 +32,7 @@ export function DialogAlert(props: DialogAlertProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <box onMouseUp={() => dialog.clear()}>
+        <box onMouseUp={() => dialog.pop()}>
           <text fg={theme.textMuted}>esc</text>
         </box>
       </box>
@@ -46,7 +46,7 @@ export function DialogAlert(props: DialogAlertProps) {
           backgroundColor={theme.primary}
           onMouseUp={() => {
             props.onConfirm?.()
-            dialog.clear()
+            dialog.pop()
           }}
         >
           <text fg={theme.selectedListItemText}>ok</text>

@@ -1,10 +1,11 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { Global } from "@agent-inn/core/global"
+import { TextareaRenderable } from "@opentui/core"
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 import { chmod, mkdtemp } from "node:fs/promises"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
-import { defaultWorker, directory, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
+import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
 
 afterEach(() => {
   mock.restore()
@@ -267,6 +268,63 @@ test("hosted terminal create returns to refreshed session list", async () => {
     } else {
       process.env.AINN_EXECUTABLE = originalExecutable
     }
+    await app.cleanup()
+  }
+})
+
+test("hosted terminal duplicate label alert returns to worker picker", async () => {
+  const app = await mountHostedTerminalApp((url) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions")
+      return json({
+        sessions: [
+          {
+            ...activeHostedSession,
+            session_label: "test-cli 1",
+          },
+        ],
+      })
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Choose worker")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Launch Worker")
+    })
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Create Hosted Session")
+    })
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused hosted session label prompt")
+    editor.selectAll()
+    await app.setup.mockInput.typeText("test-cli 1")
+    app.api().keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Create hosted session failed")
+    })
+
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Choose worker") && frame.includes("test-cli")
+    })
+  } finally {
     await app.cleanup()
   }
 })
