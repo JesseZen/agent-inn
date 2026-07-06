@@ -119,7 +119,7 @@ test("launchHostedTerminal reuses existing macOS terminal window when tmux alrea
   ])
 })
 
-test("launch dialog prompts for mode before worker selection", async () => {
+test("launch dialog uses hosted terminal default mode", async () => {
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -131,9 +131,9 @@ test("launch dialog prompts for mode before worker selection", async () => {
   try {
     await app.openLaunchDialog()
     const frame = app.setup.captureCharFrame()
-    expect(frame.includes("Launch Worker")).toBe(true)
-    expect(frame.includes("External window")).toBe(true)
-    expect(frame.includes("Hosted terminal")).toBe(true)
+    expect(frame.includes("Hosted Terminal")).toBe(true)
+    expect(frame.includes("Create new session")).toBe(true)
+    expect(frame.includes("External window")).toBe(false)
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     await app.cleanup()

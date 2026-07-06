@@ -93,6 +93,24 @@ export function createFetch(override?: FetchHandler) {
         config: {},
         status: { generation: 0, dirty: false, last_save_error: "" },
       })
+    if (url.pathname === "/api/settings")
+      return json({
+        settings: {
+          state_dir: "~/.ainn",
+          log_dir: "~/.ainn/logs",
+          launch: { default_mode: "hosted-terminal" },
+          terminal: {
+            host: "tmux",
+            opener: "default",
+            tmux: {
+              socket_name: "ainn",
+              host_session: "ainn-host",
+              host_start_mode: "new-window",
+            },
+          },
+        },
+        status: { generation: 0, dirty: false, last_save_error: "" },
+      })
     if (url.pathname === "/api/events")
       return new Response("", {
         headers: { "content-type": "text/event-stream" },

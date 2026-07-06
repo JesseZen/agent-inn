@@ -110,6 +110,74 @@ test("proxy settings field save keeps settings dialog open with updated value", 
   }
 })
 
+test("proxy settings default launch mode uses a select list", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("Default Launch Mode hosted-terminal")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Default Launch Mode") && app.frame().includes("External window")
+    })
+
+    await runCommand(app, "dialog.select.prev")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Default Launch Mode external-window")
+    })
+
+    expect(app.calls.patchSettings).toContainEqual({
+      launch: { default_mode: "external-window" },
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy settings terminal opener uses a select list", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir")
+    })
+
+    for (let i = 0; i < 3; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Terminal Opener") && app.frame().includes("iTerm2")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchSettings.some((entry) => entry.terminal?.opener === "iterm2") && app.frame().includes("Settings")
+    })
+
+    expect(app.calls.patchSettings).toContainEqual({
+      terminal: { opener: "iterm2" },
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy settings host start mode save shows note when hosted sessions already exist", async () => {
   const app = await mountProxyApp()
 
@@ -135,14 +203,12 @@ test("proxy settings host start mode save shows note when hosted sessions alread
       await app.render()
     }
     await runCommand(app, "dialog.select.submit")
-    await app.render()
-    await app.render()
-    const editor = app.setup.renderer.currentFocusedEditor
-    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
-    editor.selectAll()
-    await app.mockInput.typeText("reuse-first-window")
-    await app.render()
-    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Tmux Host Start Mode") && app.frame().includes("Reuse first window")
+    })
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
       return app.calls.listHostedSessions === 1
@@ -182,14 +248,13 @@ test("proxy settings host start mode accepts main-tui-window", async () => {
       await app.render()
     }
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await app.render()
-    await app.render()
-    const editor = app.setup.renderer.currentFocusedEditor
-    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
-    editor.selectAll()
-    await app.mockInput.typeText("main-tui-window")
-    await app.render()
-    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Tmux Host Start Mode") && app.frame().includes("Main TUI window")
+    })
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
       return app.calls.patchSettings.some((entry) => entry.terminal?.tmux?.host_start_mode === "main-tui-window")
@@ -725,8 +790,12 @@ test("proxy launch registers a launch command", async () => {
 
   try {
     app.api.keymap.dispatchCommand("proxy.launch")
-    await app.render()
-    expect(app.frame()).toContain("Launch Worker")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Hosted Terminal")
+    })
+    expect(app.frame()).toContain("Hosted Terminal")
+    expect(app.frame()).not.toContain("External window")
   } finally {
     await app.cleanup()
   }
