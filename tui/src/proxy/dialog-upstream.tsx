@@ -75,7 +75,6 @@ export function DialogUpstream() {
           const upstreamName = name.trim()
           if (!upstreamName || upstreamName.includes("/")) {
             toast.show({ message: "Invalid upstream name", variant: "error" })
-            dialog.clear()
             return
           }
           dialog.push(() => <DialogUpstreamEditor name={upstreamName} draft={{ base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false }} mode="created" />)
@@ -144,10 +143,7 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
     description: props.name,
     onSelect: async () => {
       const confirmed = await DialogConfirm.show(dialog, "Delete upstream", `Delete ${props.name}? This will remove the provider config.`)
-      if (!confirmed) {
-        dialog.clear()
-        return
-      }
+      if (!confirmed) return
       try {
         await sdk.client.deleteUpstream(props.name)
         await sync.bootstrap({ fatal: false })

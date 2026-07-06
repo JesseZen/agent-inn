@@ -32,7 +32,7 @@ export function DialogConfirm(props: DialogConfirmProps) {
         cmd: () => {
           if (store.active === "confirm") props.onConfirm?.()
           if (store.active === "cancel") props.onCancel?.()
-          dialog.clear()
+          dialog.pop()
         },
       },
       {
@@ -76,7 +76,7 @@ export function DialogConfirm(props: DialogConfirmProps) {
               onMouseUp={() => {
                 if (key === "confirm") props.onConfirm?.()
                 if (key === "cancel") props.onCancel?.()
-                dialog.clear()
+                dialog.pop()
               }}
             >
               <text fg={key === store.active ? theme.selectedListItemText : theme.textMuted}>

@@ -112,6 +112,34 @@ test("proxy upstream creates a new upstream", async () => {
   }
 })
 
+test("proxy upstream invalid create name stays in manager", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamManager(app)
+    expect(app.frame()).toContain("Create New Upstream")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("New Upstream Name")
+    })
+
+    await app.mockInput.typeText("bad/name")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Manage Upstreams") && frame.includes("Invalid upstream name")
+    })
+
+    expect(app.frame()).toContain("Manage Upstreams")
+    expect(app.frame()).toContain("Create New Upstream")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy upstream editor shows empty api_format as dash and persists edits", async () => {
   const app = await mountProxyApp()
 
@@ -162,6 +190,32 @@ test("proxy upstream editor deletes upstream after confirmation", async () => {
     expect(app.calls.deleteUpstream).toEqual(["openai"])
     await openUpstreamManager(app)
     expect(app.frame()).not.toContain("openai")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream delete cancel stays on editor", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamEditor(app, "openai")
+    await runCommand(app, "dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete upstream")
+    })
+
+    app.mockInput.pressArrow("left")
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Upstream: openai") && !app.frame().includes("Delete upstream")
+    })
+
+    expect(app.calls.deleteUpstream).toEqual([])
+    expect(app.frame()).toContain("Edit Upstream: openai")
   } finally {
     await app.cleanup()
   }

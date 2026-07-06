@@ -126,10 +126,10 @@ export function DialogSettings() {
                   }, 0)
                 }
               }
+              dialog.replace(() => <DialogSettings />)
             } catch (err) {
               toast.error(err)
             }
-            dialog.clear()
             return
           }
           const result = await DialogPrompt.show(dialog, field.title, {
@@ -143,10 +143,10 @@ export function DialogSettings() {
             setSettings(response.settings)
             await sync.bootstrap({ fatal: false })
             toast.show({ message: `Saved ${field.title}`, variant: "success" })
+            dialog.replace(() => <DialogSettings />)
           } catch (err) {
             toast.error(err)
           }
-          dialog.clear()
         },
       })),
       { title: "Generation", value: "generation", description: String(c?.generation ?? "—"), category: "Config Status" },
