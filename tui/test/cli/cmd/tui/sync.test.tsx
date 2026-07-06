@@ -240,4 +240,59 @@ describe("tui sync", () => {
       app.renderer.destroy()
     }
   })
+
+  test("non-health manager refresh preserves current worker health error", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const encoder = new TextEncoder()
+    const upstream = { name: "openai", base_url: "https://api.example/v1", has_api_key: true }
+    const worker = {
+      name: "app",
+      port: 6767,
+      role: "app",
+      upstream,
+      status: "running",
+      snapshot_generation: 1,
+      log_level: "simple",
+    }
+    let managerWorker = worker
+    let events!: ReadableStreamDefaultController<Uint8Array>
+
+    const { app, sync } = await mount((url) => {
+      if (url.pathname === "/api/workers") return json({ workers: [managerWorker] })
+      if (url.pathname === "/api/upstreams") return json({ upstreams: { openai: upstream } })
+      if (url.pathname === "/api/config")
+        return json({
+          config: {},
+          status: { generation: 1, dirty: false, last_save_error: "" },
+        })
+      if (url.pathname === "/api/events")
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              events = controller
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      return undefined
+    }, tmp.path)
+
+    try {
+      managerWorker = { ...worker, status: "out_of_sync", snapshot_generation: 2 }
+      events.enqueue(
+        encoder.encode('id: 1\nevent: worker.health.changed\ndata: {"worker":"app","status":"out_of_sync","error":"runtime apply failed"}\n\n'),
+      )
+      await wait(() => sync.data.error === "runtime apply failed")
+
+      managerWorker = { ...managerWorker, snapshot_generation: 3 }
+      events.enqueue(encoder.encode('id: 2\nevent: upstream.updated\ndata: {"upstream":"openai"}\n\n'))
+      await wait(() => sync.data.workers[0]?.snapshot_generation === 3)
+
+      expect(sync.data.workers).toEqual([managerWorker])
+      expect(sync.data.error).toBe("runtime apply failed")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
 })
