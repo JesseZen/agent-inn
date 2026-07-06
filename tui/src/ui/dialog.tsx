@@ -9,6 +9,7 @@ import { AINN_MODAL_MODE, useBindings, useAinnModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 
 export const DIALOG_XLARGE_WIDTH = 116
+const DIALOG_MEDIUM_TOP_OFFSET_RATIO = 4
 
 export function Dialog(
   props: ParentProps<{
@@ -26,6 +27,7 @@ export function Dialog(
     if (props.size === "large") return 88
     return 60
   }
+  const centersVertically = () => props.size === "large" || props.size === "xlarge"
 
   return (
     <box
@@ -42,9 +44,10 @@ export function Dialog(
       width={dimensions().width}
       height={dimensions().height}
       alignItems="center"
+      justifyContent={centersVertically() ? "center" : "flex-start"}
       position="absolute"
       zIndex={3000}
-      paddingTop={dimensions().height / 4}
+      paddingTop={centersVertically() ? 0 : dimensions().height / DIALOG_MEDIUM_TOP_OFFSET_RATIO}
       left={0}
       top={0}
       backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
