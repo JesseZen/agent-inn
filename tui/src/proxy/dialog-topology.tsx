@@ -209,7 +209,7 @@ function DragHint(props: {
 }
 
 function EdgeRow(props: { group: TopologyGroup; hoveredId: string | null; theme: Theme }) {
-  const edges = createMemo(() => computeGroupEdges(props.group))
+  const edges = createMemo(() => computeGroupEdges(props.group, props.group.workerRows[0]))
   const isHighlighted = () => props.hoveredId === props.group.upstream.id || props.group.workers.some((w) => w.id === props.hoveredId)
   const line = createMemo(() => {
     const cells = edges().cells
