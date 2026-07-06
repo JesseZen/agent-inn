@@ -23,6 +23,12 @@ import (
 
 const tmuxMissingSocketErrorText = "error connecting to /private/tmp/ainn-tmux-repro/tmux-501/ainn-test (No such file or directory)"
 
+func TestMain(m *testing.M) {
+	os.Unsetenv("TMUX")
+	os.Unsetenv("TMUX_PANE")
+	os.Exit(m.Run())
+}
+
 func TestRunVersionPrintsVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	code := Run([]string{"version"}, &stdout, &bytes.Buffer{})
