@@ -75,9 +75,10 @@ func TmuxHostedTurnStatusCommandForRecord(settings config.Settings, session Host
 }
 
 func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configDir string, executable string) []string {
-	command := "run-shell -b " + tmuxShellQuote(executable) +
+	shellCommand := tmuxShellQuote(executable) +
 		" hosted-session acknowledge --config-dir " + tmuxShellQuote(configDir) +
 		" --window-id #{window_id}"
+	command := "run-shell -b " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
 		"set-hook", "-t", tmuxHostSessionForSettings(settings),
 		tmuxAcknowledgeTurnHook, command,
@@ -115,6 +116,12 @@ func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, stat
 
 func tmuxShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func tmuxCommandQuote(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return "\"" + value + "\""
 }
 
 func hostedSessionStatusForWindow(windows map[string]string, session HostedSessionRecord) string {
