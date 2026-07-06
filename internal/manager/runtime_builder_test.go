@@ -221,6 +221,32 @@ capabilities:
 	}
 }
 
+func TestRuntimeBuilderReadsModelOverrideAnthropicProtocolSupport(t *testing.T) {
+	cfg := runtimeBuilderConfig()
+	worker := cfg.Workers["cli-openai"]
+	worker.RequestModules["model_override"] = config.ModuleConfig{
+		Enabled: true,
+		Params:  map[string]any{"model": "claude-opus-4-20250514"},
+	}
+	cfg.Workers["cli-openai"] = worker
+
+	got, err := (RuntimeBuilder{}).Build(cfg, "cli-openai", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := appruntime.ModuleProtocolSupport{
+		Protocols: []appruntime.ProtocolKind{
+			appruntime.ProtocolResponses,
+			appruntime.ProtocolChatCompletions,
+			appruntime.ProtocolAnthropic,
+		},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
+	}
+	if !reflect.DeepEqual(got.Plugins["model_override"].ProtocolSupport, want) {
+		t.Fatalf("bad model_override support:\ngot  %#v\nwant %#v", got.Plugins["model_override"].ProtocolSupport, want)
+	}
+}
+
 func TestRuntimeBuilderRejectsExternalPluginMissingManifest(t *testing.T) {
 	cfg := runtimeBuilderConfig()
 	cfg.Plugins["external_filter"] = config.PluginDefinition{

@@ -74,6 +74,7 @@ var requestMiddlewareDefinitions = []requestMiddlewareDefinition{
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
+				appruntime.ProtocolAnthropic,
 			},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 		},

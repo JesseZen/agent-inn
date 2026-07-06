@@ -36,7 +36,11 @@ func (c Compiled) Join(requestPath string, rawQuery string) (string, error) {
 	if requestPath == "" {
 		requestPath = "/"
 	}
-	next.Path = basePath + requestPath
+	if requestPath == basePath || strings.HasPrefix(requestPath, basePath+"/") {
+		next.Path = requestPath
+	} else {
+		next.Path = basePath + requestPath
+	}
 	next.RawQuery = rawQuery
 	return next.String(), nil
 }

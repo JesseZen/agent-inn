@@ -90,3 +90,51 @@ func TestCompilePrecomputesAuthorizationHeader(t *testing.T) {
 		t.Fatalf("bad joined URL: %s", got)
 	}
 }
+
+func TestCompiledJoinKeepsRequestPathWhenItAlreadyIncludesBasePath(t *testing.T) {
+	runtime, err := ResolveRuntime("anthropic", config.UpstreamProfile{
+		BaseURL:   "https://api.anthropic.com/v1",
+		APIKey:    "sk-file",
+		APIFormat: "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	compiled, err := Compile(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := compiled.Join("/v1/messages", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://api.anthropic.com/v1/messages"
+	if got != want {
+		t.Fatalf("bad joined URL: got %s want %s", got, want)
+	}
+}
+
+func TestCompiledJoinKeepsRequestPathWhenItEqualsBasePath(t *testing.T) {
+	runtime, err := ResolveRuntime("sensenova", config.UpstreamProfile{
+		BaseURL:   "https://token.sensenova.cn/v1/messages",
+		APIKey:    "sk-file",
+		APIFormat: "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	compiled, err := Compile(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := compiled.Join("/v1/messages", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://token.sensenova.cn/v1/messages"
+	if got != want {
+		t.Fatalf("bad joined URL: got %s want %s", got, want)
+	}
+}
