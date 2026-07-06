@@ -76,6 +76,40 @@ test("proxy settings editor patches settings through manager API", async () => {
   }
 })
 
+test("proxy settings field save keeps settings dialog open with updated value", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir") && app.frame().includes("~/.ainn")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused settings prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("/tmp/ainn-state")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Settings") && frame.includes("State Dir") && frame.includes("/tmp/ainn-state")
+    })
+
+    expect(app.calls.patchSettings).toEqual([{ state_dir: "/tmp/ainn-state" }])
+    expect(app.frame()).toContain("Settings")
+    expect(app.frame()).toContain("/tmp/ainn-state")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy settings host start mode save shows note when hosted sessions already exist", async () => {
   const app = await mountProxyApp()
 

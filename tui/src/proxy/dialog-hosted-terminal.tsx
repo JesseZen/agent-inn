@@ -61,7 +61,7 @@ export function DialogHostedTerminal() {
   ])
 
   async function createSession() {
-    dialog.replace(() => (
+    dialog.push(() => (
       <DialogWorkerPicker
         title="Choose worker"
         placeholder="Search workers..."
@@ -99,21 +99,21 @@ export function DialogHostedTerminal() {
             return
           }
           try {
-          const settings = await sdk.client.getSettings()
-          await launchProxySession({
-            executable: import.meta.env?.AINN_EXECUTABLE || undefined,
-            workerPort: worker.port,
-            profile: worker.name,
-            configDir: Global.Path.config,
-            workspace: workspace || undefined,
-            mode: "hosted-terminal",
-            sessionLabel,
-            opener: settings.settings.terminal.opener,
-            tmuxSocketName: settings.settings.terminal.tmux.socket_name,
-            tmuxHostSession: settings.settings.terminal.tmux.host_session,
+            const settings = await sdk.client.getSettings()
+            await launchProxySession({
+              executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+              workerPort: worker.port,
+              profile: worker.name,
+              configDir: Global.Path.config,
+              workspace: workspace || undefined,
+              mode: "hosted-terminal",
+              sessionLabel,
+              opener: settings.settings.terminal.opener,
+              tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+              tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             await refreshSessions()
-            dialog.clear()
+            dialog.pop()
           } catch (err) {
             await DialogAlert.show(dialog, "Create hosted session failed", String(err instanceof Error ? err.message : err))
           }

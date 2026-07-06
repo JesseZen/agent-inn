@@ -1,7 +1,8 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { Global } from "@agent-inn/core/global"
-import { homedir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import path from "node:path"
+import { chmod, mkdtemp } from "node:fs/promises"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
 import { defaultWorker, directory, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
 
@@ -170,6 +171,102 @@ test("launch dialog opens hosted terminal session menu", async () => {
     })
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("hosted terminal create returns to refreshed session list", async () => {
+  const originalPath = process.env.PATH
+  const originalExecutable = process.env.AINN_EXECUTABLE
+  const bin = await mkdtemp(path.join(tmpdir(), "ainn-hosted-terminal."))
+  const fakeAinn = path.join(bin, "ainn")
+  const fakeTmux = path.join(bin, "tmux")
+  const fakeOsa = path.join(bin, "osascript")
+  await Bun.write(fakeAinn, "#!/bin/sh\nexit 0\n")
+  await Bun.write(fakeTmux, "#!/bin/sh\nif [ \"$3\" = \"list-clients\" ]; then echo '/dev/ttys001: ainn-host'; fi\nexit 0\n")
+  await Bun.write(fakeOsa, "#!/bin/sh\nexit 0\n")
+  await chmod(fakeAinn, 0o755)
+  await chmod(fakeTmux, 0o755)
+  await chmod(fakeOsa, 0o755)
+  process.env.PATH = `${bin}:${originalPath ?? ""}`
+  process.env.AINN_EXECUTABLE = fakeAinn
+  let hostedSessionCalls = 0
+  const app = await mountHostedTerminalApp((url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/settings")
+      return json({
+        settings: {
+          state_dir: "~/.ainn",
+          log_dir: "~/.ainn/logs",
+          launch: { default_mode: "hosted-terminal" },
+          terminal: {
+            host: "tmux",
+            opener: "default",
+            tmux: {
+              socket_name: "ainn",
+              host_session: "ainn-host",
+              host_start_mode: "new-window",
+            },
+          },
+        },
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      hostedSessionCalls += 1
+      return json({
+        sessions: hostedSessionCalls > 1
+          ? [
+              {
+                session_id: "hs_created",
+                session_label: "test-cli 1",
+                worker_name: "test-cli",
+                worker_port: 1234,
+                status: "active",
+                created_at: "2026-06-23T00:00:00Z",
+                last_opened_at: "2026-06-23T00:00:00Z",
+              },
+            ]
+          : [],
+      })
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Choose worker")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Launch Worker")
+    })
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Create Hosted Session")
+    })
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session") && frame.includes("test-cli 1")
+    }, 5000)
+
+    expect(hostedSessionCalls >= 2).toBe(true)
+    expect(app.setup.captureCharFrame()).toContain("test-cli 1")
+  } finally {
+    process.env.PATH = originalPath
+    if (originalExecutable === undefined) {
+      delete process.env.AINN_EXECUTABLE
+    } else {
+      process.env.AINN_EXECUTABLE = originalExecutable
+    }
     await app.cleanup()
   }
 })
