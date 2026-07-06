@@ -37,9 +37,10 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
       current={props.worker.upstream.name}
       onSelect={async (opt) => {
         if (opt.value === props.worker.upstream.name) {
-          dialog.clear()
+          dialog.pop()
           return
         }
+        dialog.pop()
         try {
           await sdk.client.patchWorker(props.worker.port, { upstream: opt.value })
           await sync.bootstrap({ fatal: false })
@@ -47,7 +48,6 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
         } catch (err) {
           toast.error(err)
         }
-        dialog.clear()
       }}
     />
   )
