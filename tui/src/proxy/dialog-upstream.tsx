@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js"
+import { createMemo } from "solid-js"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
@@ -119,7 +119,16 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
-  const [draft, setDraft] = createSignal(props.draft)
+  const draft = createMemo<Draft>(() => {
+    const upstream = sync.data.upstreams.find((item) => item.name === props.name)
+    if (!upstream) return props.draft
+    return {
+      base_url: upstream.base_url,
+      api_key: "",
+      api_format: upstream.api_format ?? "",
+      has_api_key: upstream.has_api_key,
+    }
+  })
 
   const options = createMemo<DialogSelectOption<FieldKey>[]>(() =>
     FIELDS.map((field) => ({
@@ -130,8 +139,6 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
       onSelect: async () => {
         const patch = await editField(dialog, field, draft())
         if (!patch) return
-        const updated = { ...draft(), ...patch, has_api_key: patch.api_key === undefined ? draft().has_api_key : patch.api_key !== "" }
-        setDraft(updated)
         await sdk.client.patchUpstream(props.name, patch)
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${props.name}`, variant: "success" })

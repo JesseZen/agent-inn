@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { TextareaRenderable } from "@opentui/core"
 import { resolveSlashCommand } from "../src/keymap"
 import { mountProxyApp, openUpstreamEditor, openUpstreamManager, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 
@@ -44,6 +45,7 @@ test("proxy workers switch upstream selection returns to worker detail", async (
 
     expect(app.frame()).toContain("app (:6767)")
     expect(app.frame()).toContain("Switch Upstream")
+    expect(app.frame()).toContain("upstream: anthropic")
     expect(app.frame()).not.toContain("Switch Upstream: app")
   } finally {
     await app.cleanup()
@@ -102,13 +104,20 @@ test("proxy upstream selection opens field list and saves provider", async () =>
       await app.render()
       return app.frame().includes("Base URL: https://api.openai.com/v1")
     })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused upstream prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("https://api.openai.com/v2")
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
-    await wait(() => app.calls.patchUpstream.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Base URL") && app.frame().includes("https://api.openai.com/v2")
+    })
 
     expect(app.calls.patchUpstream).toEqual([
       {
         name: "openai",
-        body: { base_url: "https://api.openai.com/v1" },
+        body: { base_url: "https://api.openai.com/v2" },
       },
     ])
   } finally {
@@ -207,7 +216,10 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(() => app.calls.patchUpstream.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("API Format responses")
+    })
 
     expect(app.calls.patchUpstream).toEqual([
       { name: "openai", body: { api_format: "responses" } },

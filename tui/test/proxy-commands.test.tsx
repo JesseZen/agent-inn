@@ -370,11 +370,14 @@ test("proxy workers log level selection returns to worker detail before patch fi
     expect(app.frame()).toContain("Log Level")
     expect(app.frame()).not.toContain("Log Level: app")
 
-    await wait(() => app.calls.patchWorker.some((c) => c.log_level === "detail"))
-    await app.render()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("log level: detail")
+    })
 
     expect(app.frame()).toContain("app (:6767)")
     expect(app.frame()).toContain("Log Level")
+    expect(app.frame()).toContain("log level: detail")
   } finally {
     await app.cleanup()
   }
@@ -399,11 +402,14 @@ test("proxy workers launcher selection returns to worker detail before patch fin
     expect(app.frame()).toContain("Launcher")
     expect(app.frame()).not.toContain("Launcher: app")
 
-    await wait(() => app.calls.patchWorker.some((c) => c.launcher === "claudecode"))
-    await app.render()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("launcher: claudecode")
+    })
 
     expect(app.frame()).toContain("app (:6767)")
     expect(app.frame()).toContain("Launcher")
+    expect(app.frame()).toContain("launcher: claudecode")
   } finally {
     await app.cleanup()
   }
