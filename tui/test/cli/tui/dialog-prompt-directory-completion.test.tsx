@@ -80,8 +80,9 @@ test("tab expands the selected directory and enter still submits raw text", asyn
     expect(frame).toContain("assets/")
 
     app.mockInput.pressTab()
-    await wait(() => app.renderer.currentFocusedEditor.plainText === "apps/")
-    expect(app.renderer.currentFocusedEditor.plainText).toBe("apps/")
+    const editor = app.renderer.currentFocusedEditor!
+    await wait(() => editor.plainText === "apps/")
+    expect(editor.plainText).toBe("apps/")
 
     app.mockInput.pressEnter()
     expect(confirmed).toEqual(["apps/"])
