@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
-import { computeLayout } from "../src/proxy/topology/layout"
+import { computeLayout, TOPOLOGY_COL_GAP } from "../src/proxy/topology/layout"
 import { computeGroupEdges } from "../src/proxy/topology/edges"
 import { isValidDrop, toDropPair, dropLabel } from "../src/proxy/topology/drag"
+import { promptOffsetWidth } from "../src/prompt/display"
 import type { WorkerSummary, RedactedUpstream } from "../src/proxy/backend"
 
 function makeUpstream(name: string, hasKey = true): RedactedUpstream {
@@ -36,6 +37,8 @@ test("computeLayout places upstream above single worker", () => {
     kind: "upstream",
     label: "openai",
     meta: "1",
+    displayLabel: "openai",
+    displayMeta: "1",
     width: 14,
     height: 3,
     data: upstream,
@@ -46,6 +49,8 @@ test("computeLayout places upstream above single worker", () => {
       kind: "worker",
       label: "app",
       meta: "running",
+      displayLabel: "app",
+      displayMeta: "running",
       width: 17,
       height: 3,
       data: worker,
@@ -59,6 +64,8 @@ test("computeLayout places upstream above single worker", () => {
           kind: "worker",
           label: "app",
           meta: "running",
+          displayLabel: "app",
+          displayMeta: "running",
           width: 17,
           height: 3,
           data: worker,
@@ -110,6 +117,8 @@ test("computeLayout shows orphan upstreams without workers", () => {
       kind: "upstream",
       label: "orphan",
       meta: "idle",
+      displayLabel: "orphan",
+      displayMeta: "idle",
       width: 17,
       height: 3,
       data: orphanUp,
@@ -181,6 +190,43 @@ test("computeLayout wraps workers inside an oversized group", () => {
     ["gamma-worker"],
   ])
   expect(group.width).toBeLessThanOrEqual(26)
+})
+
+test("computeLayout bounds oversized node display fields to available width", () => {
+  const upstream = makeUpstream("openai")
+  const worker = makeWorker("worker-with-a-name-that-is-too-wide-for-the-dialog", upstream)
+
+  const layout = computeLayout([worker], [upstream], 24)
+  const group = findGroup(layout, "openai")
+  const node = group.workers[0]
+
+  expect(node.label).toBe("worker-with-a-name-that-is-too-wide-for-the-dialog")
+  expect(node.data).toBe(worker)
+  expect(node.width).toBeLessThanOrEqual(24)
+  expect(node.displayMeta).toBe("")
+  expect(node.displayLabel.endsWith("…")).toBe(true)
+  expect(promptOffsetWidth(node.displayLabel)).toBeLessThan(promptOffsetWidth(node.label))
+  expect(group.width).toBeLessThanOrEqual(24)
+  expect(group.workerRows[0].width).toBeLessThanOrEqual(24)
+})
+
+test("computeLayout uses terminal display width for full-width names", () => {
+  const upstream = makeUpstream("wide")
+  const w1 = makeWorker("界界界界界界", upstream)
+  const w2 = makeWorker("ASCII", upstream)
+
+  const layout = computeLayout([w1, w2], [upstream], 36)
+  const group = findGroup(layout, "wide")
+
+  expect(group.workers.map((node) => ({
+    label: node.label,
+    displayLabel: node.displayLabel,
+    width: node.width,
+  }))).toEqual([
+    { label: "界界界界界界", displayLabel: "界界界界界界", width: 26 },
+    { label: "ASCII", displayLabel: "ASCII", width: 19 },
+  ])
+  expect(group.workerRows.map((row) => row.workers.map((worker) => worker.label))).toEqual([["界界界界界界"], ["ASCII"]])
 })
 
 test("computeLayout packs orphan upstreams into rows", () => {
@@ -262,7 +308,17 @@ test("computeGroupEdges returns empty for group with no workers", () => {
   const layout = computeLayout([], [orphan])
   // orphans don't have groups; we test with a synthetic group instead
   const syntheticGroup = {
-    upstream: { id: "upstream:orphan", kind: "upstream" as const, label: "orphan", meta: "idle", width: 17, height: 3, data: orphan },
+    upstream: {
+      id: "upstream:orphan",
+      kind: "upstream" as const,
+      label: "orphan",
+      meta: "idle",
+      displayLabel: "orphan",
+      displayMeta: "idle",
+      width: 17,
+      height: 3,
+      data: orphan,
+    },
     workers: [],
     workerRows: [{ workers: [], width: 0 }],
     width: 10,
@@ -295,6 +351,22 @@ test("computeGroupEdges uses centers from the selected worker row", () => {
     { x: 12, y: 0, char: "┌" },
     { x: 13, y: 0, char: "┘" },
   ])
+})
+
+test("computeGroupEdges centers workers using topology column gap", () => {
+  const upstream = makeUpstream("shared")
+  const w1 = makeWorker("alpha", upstream)
+  const w2 = makeWorker("beta", upstream)
+  const layout = computeLayout([w1, w2], [upstream])
+  const group = findGroup(layout, "shared")
+
+  const edges = computeGroupEdges(group, group.workerRows[0])
+  const cellMap = new Map(edges.cells.map((c) => [c.x, c.char]))
+  const firstCenter = Math.floor(group.workers[0].width / 2)
+  const secondCenter = group.workers[0].width + TOPOLOGY_COL_GAP + Math.floor(group.workers[1].width / 2)
+
+  expect(cellMap.get(firstCenter)).toBe("┌")
+  expect(cellMap.get(secondCenter)).toBe("┐")
 })
 
 test("isValidDrop accepts worker↔upstream, rejects same kind or same node", () => {

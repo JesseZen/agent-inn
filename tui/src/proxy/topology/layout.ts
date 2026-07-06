@@ -1,10 +1,13 @@
 import type { WorkerSummary, RedactedUpstream } from "../backend"
+import { displaySlice, promptOffsetWidth } from "../../prompt/display"
 
 export type TopologyNode = {
   id: string
   kind: "upstream" | "worker"
   label: string
   meta: string
+  displayLabel: string
+  displayMeta: string
   width: number
   height: number
   data: WorkerSummary | RedactedUpstream
@@ -42,6 +45,7 @@ const NODE_CONTENT_PADDING = 2
 const NODE_BORDER_WIDTH = 2
 const COL_GAP = 2
 const GROUP_GAP = 4
+const TRUNCATION_MARKER = "…"
 
 export const TOPOLOGY_GROUP_GAP = GROUP_GAP
 export const TOPOLOGY_COL_GAP = COL_GAP
@@ -49,16 +53,42 @@ export const TOPOLOGY_NODE_HEIGHT = NODE_HEIGHT
 export const TOPOLOGY_EDGE_ROWS = 1
 
 function nodeWidth(label: string, meta: string): number {
-  return label.length + meta.length + NODE_MARKER_WIDTH + NODE_MIN_GAP + NODE_CONTENT_PADDING + NODE_BORDER_WIDTH
+  const metaGap = meta === "" ? 0 : NODE_MIN_GAP
+  return promptOffsetWidth(label) + promptOffsetWidth(meta) + NODE_MARKER_WIDTH + metaGap + NODE_CONTENT_PADDING + NODE_BORDER_WIDTH
 }
 
-function makeNode(kind: "upstream" | "worker", label: string, meta: string, data: WorkerSummary | RedactedUpstream): TopologyNode {
+function truncateDisplay(value: string, width: number): string {
+  if (promptOffsetWidth(value) <= width) return value
+  if (width <= 0) return ""
+  if (width === 1) return TRUNCATION_MARKER
+  return `${displaySlice(value, 0, width - promptOffsetWidth(TRUNCATION_MARKER))}${TRUNCATION_MARKER}`
+}
+
+function fitNodeDisplay(label: string, meta: string, availableWidth: number) {
+  if (!Number.isFinite(availableWidth)) return { displayLabel: label, displayMeta: meta }
+  if (nodeWidth(label, meta) <= availableWidth) return { displayLabel: label, displayMeta: meta }
+  if (nodeWidth(label, "") <= availableWidth) return { displayLabel: label, displayMeta: "" }
+
+  const labelWidth = availableWidth - NODE_MARKER_WIDTH - NODE_CONTENT_PADDING - NODE_BORDER_WIDTH
+  return { displayLabel: truncateDisplay(label, labelWidth), displayMeta: "" }
+}
+
+function makeNode(
+  kind: "upstream" | "worker",
+  label: string,
+  meta: string,
+  data: WorkerSummary | RedactedUpstream,
+  availableWidth: number,
+): TopologyNode {
+  const { displayLabel, displayMeta } = fitNodeDisplay(label, meta, availableWidth)
   return {
     id: `${kind}:${label}`,
     kind,
     label,
     meta,
-    width: nodeWidth(label, meta),
+    displayLabel,
+    displayMeta,
+    width: Math.min(nodeWidth(displayLabel, displayMeta), availableWidth),
     height: NODE_HEIGHT,
     data,
   }
@@ -142,10 +172,9 @@ export function computeLayout(
   const rawGroups = groupWorkers(workers)
   const orphans = orphanUpstreams(upstreams, rawGroups)
   const groups: TopologyGroup[] = rawGroups.map((group) => {
-    const upstreamNode = makeNode("upstream", group.upstream.name, `${group.workers.length}`, group.upstream)
-    const workerNodes = group.workers.map((w) => makeNode("worker", w.name, w.status, w))
-    const groupAvailableWidth = Math.max(upstreamNode.width, availableWidth)
-    const workerRows = packNodes(workerNodes, groupAvailableWidth).map((row) => ({
+    const upstreamNode = makeNode("upstream", group.upstream.name, `${group.workers.length}`, group.upstream, availableWidth)
+    const workerNodes = group.workers.map((w) => makeNode("worker", w.name, w.status, w, availableWidth))
+    const workerRows = packNodes(workerNodes, availableWidth).map((row) => ({
       workers: row,
       width: nodeRowWidth(row),
     }))
@@ -158,7 +187,7 @@ export function computeLayout(
     }
   })
 
-  const orphanNodes = orphans.map((u) => makeNode("upstream", u.name, "idle", u))
+  const orphanNodes = orphans.map((u) => makeNode("upstream", u.name, "idle", u, availableWidth))
   const groupRows = packGroups(groups, availableWidth)
   const orphanRows = packNodes(orphanNodes, availableWidth)
   const connectedRows = groupRows.reduce((sum, row) => {

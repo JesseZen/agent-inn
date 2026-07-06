@@ -2,7 +2,7 @@ import { TextAttributes, type RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { useTheme, type Theme } from "../context/theme"
-import { EscHint, useDialog } from "../ui/dialog"
+import { DIALOG_XLARGE_WIDTH, EscHint, useDialog } from "../ui/dialog"
 import { useSync } from "../context/sync"
 import { useSDK } from "../context/sdk"
 import { useToast } from "../ui/toast"
@@ -13,7 +13,6 @@ import { computeGroupEdges } from "./topology/edges"
 import { isValidDrop, toDropPair, dropLabel } from "./topology/drag"
 import type { WorkerSummary, RedactedUpstream } from "./backend"
 
-const TOPOLOGY_DIALOG_WIDTH = 116
 const TOPOLOGY_DIALOG_MARGIN = 2
 const TOPOLOGY_CONTENT_PADDING = 2
 
@@ -28,7 +27,7 @@ export function DialogTopology() {
   const [dragSource, setDragSource] = createSignal<TopologyNode | null>(null)
   const [dragEnded, setDragEnded] = createSignal(false)
 
-  const graphWidth = createMemo(() => Math.max(0, Math.min(TOPOLOGY_DIALOG_WIDTH, dimensions().width - TOPOLOGY_DIALOG_MARGIN) - TOPOLOGY_CONTENT_PADDING))
+  const graphWidth = createMemo(() => Math.max(0, Math.min(DIALOG_XLARGE_WIDTH, dimensions().width - TOPOLOGY_DIALOG_MARGIN) - TOPOLOGY_CONTENT_PADDING))
   const layout = createMemo(() => computeLayout(sync.data.workers, sync.data.upstreams, graphWidth()))
   const hasData = createMemo(() => layout().groupRows.length > 0 || layout().orphanRows.length > 0)
   const related = createMemo(() => {
@@ -276,9 +275,9 @@ function NodeBox(props: {
     >
       <box flexDirection="row" width="100%" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
         <text fg={props.theme.text} selectable={false} wrapMode="none">
-          <span style={{ fg: nodeMarkerColor(props.node, props.theme) }}>▌</span> {props.node.label}
+          <span style={{ fg: nodeMarkerColor(props.node, props.theme) }}>▌</span> {props.node.displayLabel}
         </text>
-        <text fg={props.theme.textMuted} selectable={false} wrapMode="none">{props.node.meta}</text>
+        <text fg={props.theme.textMuted} selectable={false} wrapMode="none">{props.node.displayMeta}</text>
       </box>
     </box>
   )

@@ -8,6 +8,8 @@ import { Flag } from "@agent-inn/core/flag/flag"
 import { AINN_MODAL_MODE, useBindings, useAinnModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 
+export const DIALOG_XLARGE_WIDTH = 116
+
 export function Dialog(
   props: ParentProps<{
     size?: "medium" | "large" | "xlarge"
@@ -20,7 +22,7 @@ export function Dialog(
 
   let dismiss = false
   const width = () => {
-    if (props.size === "xlarge") return 116
+    if (props.size === "xlarge") return DIALOG_XLARGE_WIDTH
     if (props.size === "large") return 88
     return 60
   }

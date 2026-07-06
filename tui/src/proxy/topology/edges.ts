@@ -1,4 +1,4 @@
-import type { TopologyGroup, TopologyWorkerRow } from "./layout"
+import { TOPOLOGY_COL_GAP, type TopologyGroup, type TopologyWorkerRow } from "./layout"
 
 export type EdgeCell = { x: number; y: number; char: string }
 
@@ -55,7 +55,7 @@ function computeWorkerCenters(group: TopologyGroup, row: TopologyWorkerRow): num
   let cursor = startX
   for (const worker of row.workers) {
     centers.push(cursor + Math.floor(worker.width / 2))
-    cursor += worker.width + 2
+    cursor += worker.width + TOPOLOGY_COL_GAP
   }
   return centers
 }
