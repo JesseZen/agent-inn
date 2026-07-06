@@ -1126,6 +1126,70 @@ func TestManagerAPIPatchesConfiguredWorkerModule(t *testing.T) {
 	}
 }
 
+func TestManagerAPIPatchesUnconfiguredWorkerModuleWithRuntimeApply(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {
+					Port:           6767,
+					Upstream:       "openai",
+					RequestModules: map[string]config.ModuleConfig{},
+					Hooks:          map[string]config.ModuleConfig{},
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: client,
+	})
+	m.statuses["app"] = "running"
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"enabled":true,"params":{"model":"gpt-live"}}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/6767/modules/model_override", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected patch status %d: %s", res.Code, res.Body.String())
+	}
+
+	wantWorker := config.WorkerConfig{
+		Role:     "cli",
+		Launcher: "codex",
+		Port:     6767,
+		Upstream: "openai",
+		LogLevel: "simple",
+		RequestModules: map[string]config.ModuleConfig{
+			"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-live"}},
+		},
+		Hooks: map[string]config.ModuleConfig{},
+	}
+	if got := m.store.Config().Workers["app"]; !reflect.DeepEqual(got, wantWorker) {
+		t.Fatalf("worker config mismatch:\ngot  %#v\nwant %#v", got, wantWorker)
+	}
+
+	wantRuntime, err := (RuntimeBuilder{}).Build(m.store.Config(), "app", appruntime.Generation(m.workerGeneration("app")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.appliedRuntimes; !reflect.DeepEqual(got, map[int]appruntime.WorkerRuntime{6767: wantRuntime}) {
+		t.Fatalf("runtime apply mismatch:\ngot  %#v\nwant %#v", got, map[int]appruntime.WorkerRuntime{6767: wantRuntime})
+	}
+	gotPatch := struct {
+		Port   int
+		Module string
+		Config config.ModuleConfig
+	}{Port: client.patchedPort, Module: client.patchedModule, Config: client.patchedConfig}
+	if !reflect.DeepEqual(gotPatch, struct {
+		Port   int
+		Module string
+		Config config.ModuleConfig
+	}{}) {
+		t.Fatalf("unexpected live patch call: %#v", gotPatch)
+	}
+}
+
 func TestManagerAPIToggleRejectsSecondRunningConfigPatch(t *testing.T) {
 	client := &recordingWorkerClient{}
 	m := New(Config{

@@ -407,9 +407,19 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := m.patchLiveWorkerModule(workerName, port, moduleName, cfg); err != nil {
-			writeJSON(rw, http.StatusBadGateway, map[string]any{"error": redactedErrorMessage(err)})
-			return
+		_, configured := worker.RequestModules[moduleName]
+		if configured {
+			if err := m.patchLiveWorkerModule(workerName, port, moduleName, cfg); err != nil {
+				writeJSON(rw, http.StatusBadGateway, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+		} else {
+			nextWorker := worker
+			nextWorker.RequestModules[moduleName] = cfg
+			if err := m.validateWorkerRuntime(workerName, nextWorker); err != nil {
+				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
 		}
 		m.updateConfig(func(cfgRoot *config.Config) {
 			worker.RequestModules[moduleName] = cfg
@@ -417,6 +427,24 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		})
 		if m.workerStatus(workerName) == WorkerStateRunning {
 			m.bumpWorkerGeneration(workerName)
+			if !configured {
+				client := m.workerClient
+				if client == nil {
+					client = HTTPWorkerClient{Client: http.DefaultClient}
+				}
+				runtime, err := m.runtimeForWorker(workerName)
+				if err == nil {
+					_, err = client.ApplyRuntime(port, runtime)
+				}
+				if err != nil {
+					m.mu.Lock()
+					m.statuses[workerName] = WorkerStateOutOfSync
+					m.mu.Unlock()
+					m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": workerName, "status": string(WorkerStateOutOfSync), "error": redactedErrorMessage(err)})
+					writeJSON(rw, http.StatusBadGateway, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+			}
 		}
 		m.publishEvent(EventModuleUpdated, map[string]any{"worker": workerName, "port": port, "module": moduleName, "enabled": cfg.Enabled, "params": cfg.Params})
 		writeJSON(rw, http.StatusOK, map[string]any{
