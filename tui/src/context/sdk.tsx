@@ -67,7 +67,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async getWorker(port: number) {
           return request<WorkerDetail>(`/api/workers/${port}`)
         },
-        async createWorker(input: { name: string; port: number; upstream: string }) {
+        async createWorker(input: { name: string; port: number; upstream: string; launcher?: string }) {
           return request<WorkerSummary>("/api/workers", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -82,6 +82,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             request_modules: WorkerDetail["modules"]
             hooks: WorkerDetail["hooks"]
             log_level: string
+            launcher: string
           }>,
         ) {
           const current = await this.getWorker(port)
@@ -100,6 +101,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
                 ...(patch.hooks ?? {}),
               },
               log_level: patch.log_level ?? current.log_level,
+              launcher: patch.launcher ?? current.launcher,
             }),
           })
         },

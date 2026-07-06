@@ -18,7 +18,7 @@ export function DialogWorkers() {
     ...sync.data.workers.map((w) => ({
       title: w.name,
       value: `edit:${w.port}`,
-      description: `:${w.port} • ${w.upstream.name} • ${w.status}`,
+      description: `:${w.port} • ${w.launcher ?? "codex"} • ${w.upstream.name} • ${w.status}`,
       category: "Workers",
     })),
   ])

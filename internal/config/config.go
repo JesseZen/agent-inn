@@ -59,6 +59,7 @@ type TmuxSettings struct {
 
 type WorkerConfig struct {
 	Role           string                  `yaml:"role,omitempty" json:"role,omitempty"`
+	Launcher       string                  `yaml:"launcher,omitempty" json:"launcher,omitempty"`
 	Port           int                     `yaml:"port"`
 	Upstream       string                  `yaml:"upstream"`
 	LogLevel       string                  `yaml:"log_level,omitempty" json:"log_level,omitempty"`
@@ -114,6 +115,9 @@ func (c *Config) ApplyDefaults() {
 	for name, worker := range c.Workers {
 		if worker.Role == "" {
 			worker.Role = "cli"
+		}
+		if worker.Launcher == "" {
+			worker.Launcher = "codex"
 		}
 		if worker.LogLevel == "" {
 			worker.LogLevel = "simple"

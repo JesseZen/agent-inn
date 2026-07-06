@@ -70,3 +70,10 @@ func TestUpstreamRuntimePublicRedactsSecret(t *testing.T) {
 		t.Fatalf("bad public upstream: %#v json=%s", public, data)
 	}
 }
+
+func TestProtocolKindFromAPIFormatAnthropic(t *testing.T) {
+	got := ProtocolKindFromAPIFormat(APIFormatAnthropic)
+	if got != ProtocolAnthropic {
+		t.Fatalf("unexpected protocol for anthropic api format: got %q want %q", got, ProtocolAnthropic)
+	}
+}

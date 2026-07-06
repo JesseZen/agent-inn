@@ -22,7 +22,7 @@ export type ModuleConfig = {
   params?: Record<string, unknown>
 }
 
-export type ProtocolKind = "responses" | "chat_completions" | "claude_code"
+export type ProtocolKind = "responses" | "chat_completions" | "anthropic"
 export type ProtocolCapability = "input_text" | "tool_calls" | "stream_events"
 
 export type ModuleProtocolSupport = {
@@ -43,6 +43,7 @@ export type PluginDefinition = {
 
 export type WorkerConfig = {
   role?: string
+  launcher?: string
   port: number
   upstream: string
   log_level?: string
@@ -67,6 +68,7 @@ export type WorkerSummary = {
   name: string
   port: number
   role?: string
+  launcher?: string
   protocol?: ProtocolKind
   upstream: RedactedUpstream
   status: string

@@ -129,9 +129,7 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
-    await app.mockInput.typeText("responses")
-    await app.render()
-    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.patchUpstream.length === 1)
 
     expect(app.calls.patchUpstream).toEqual([

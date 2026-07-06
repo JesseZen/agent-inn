@@ -603,7 +603,7 @@ version: 0.1.0
 protocol_version: "1"
 command: /bin/cat
 protocols:
-  - claude_code
+  - anthropic
 capabilities:
   - stream_events
 `), 0600); err != nil {
@@ -650,7 +650,7 @@ capabilities:
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 		},
 		"external_hook": {
-			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolClaudeCode},
+			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolAnthropic},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents},
 		},
 	}
@@ -690,7 +690,7 @@ version: 0.1.0
 protocol_version: "2"
 command: /bin/cat
 protocols:
-  - claude_code
+  - anthropic
 capabilities:
   - input_text
 `), 0600); err != nil {
@@ -723,7 +723,7 @@ capabilities:
 	m.statuses["plain"] = "running"
 
 	wantExternal := appruntime.ModuleProtocolSupport{
-		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolClaudeCode},
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolAnthropic},
 		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 	}
 	wantLive := appruntime.ModuleProtocolSupport{
@@ -1022,6 +1022,7 @@ func TestManagerAPIPatchesRunningWorkerLogLevelWithoutRecheckingCurrentPort(t *t
 	}
 	want := config.WorkerConfig{
 		Role:     "cli",
+		Launcher: "codex",
 		Port:     port,
 		Upstream: "openai",
 		LogLevel: "detail",
@@ -1069,6 +1070,7 @@ func TestManagerAPIPatchWorkerRejectsUndefinedPluginBeforePersisting(t *testing.
 	}
 	want := config.WorkerConfig{
 		Role:     "cli",
+		Launcher: "codex",
 		Port:     11199,
 		Upstream: "openai",
 		LogLevel: "simple",
@@ -1324,6 +1326,46 @@ func TestManagerAPICreatesAndStartsWorker(t *testing.T) {
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/11199", nil))
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"api_translate":{"enabled":true`) {
 		t.Fatalf("created worker not visible in manager API: status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestManagerAPICreatesClaudeCodeWorker(t *testing.T) {
+	starter := &recordingStarter{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{},
+			Upstreams: map[string]config.UpstreamProfile{
+				"anthropic": {BaseURL: "https://api.anthropic.com/v1", APIFormat: "anthropic"},
+			},
+		},
+		Starter: starter,
+	})
+
+	body := strings.NewReader(`{"name":"claude-main","port":11201,"upstream":"anthropic","launcher":"claudecode"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers", body))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("unexpected create status %d: %s", res.Code, res.Body.String())
+	}
+	got, ok := m.workerConfig("claude-main")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	want := config.WorkerConfig{
+		Role:           "cli",
+		Launcher:       "claudecode",
+		Port:           11201,
+		Upstream:       "anthropic",
+		LogLevel:       "simple",
+		RequestModules: map[string]config.ModuleConfig{},
+		Hooks:          map[string]config.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected worker config:\ngot  %#v\nwant %#v", got, want)
+	}
+	if !strings.Contains(res.Body.String(), `"launcher":"claudecode"`) || !strings.Contains(res.Body.String(), `"protocol":"anthropic"`) {
+		t.Fatalf("create response missing claudecode fields: %s", res.Body.String())
 	}
 }
 

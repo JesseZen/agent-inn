@@ -13,6 +13,8 @@ import { DialogConfirm } from "../ui/dialog-confirm"
 
 const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
+const LAUNCHERS = ["codex", "claudecode"] as const
+type Launcher = (typeof LAUNCHERS)[number]
 
 export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: boolean }) {
   const { theme } = useTheme()
@@ -71,10 +73,10 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   }
 
   const switchAction: DialogSelectOption<string> = {
-      title: "Switch Upstream",
-      value: "switch",
-      description: props.worker.upstream.name,
-      onSelect: () => dialog.replace(() => <DialogUpstreamPicker worker={props.worker} />),
+    title: "Switch Upstream",
+    value: "switch",
+    description: props.worker.upstream.name,
+    onSelect: () => dialog.replace(() => <DialogUpstreamPicker worker={props.worker} />),
   }
 
   const logsAction: DialogSelectOption<string> = {
@@ -85,13 +87,13 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   }
 
   const modulesAction: DialogSelectOption<string> = {
-      title: "Manage Modules",
-      value: "modules",
-      description: `${modules().length} req • ${hooks().length} hook`,
-      onSelect: async () => {
-        const worker = await sdk.client.getWorker(props.worker.port)
-        dialog.replace(() => <DialogModulePicker worker={worker} />)
-      },
+    title: "Manage Modules",
+    value: "modules",
+    description: `${modules().length} req • ${hooks().length} hook`,
+    onSelect: async () => {
+      const worker = await sdk.client.getWorker(props.worker.port)
+      dialog.replace(() => <DialogModulePicker worker={worker} />)
+    },
   }
 
   const restartAction: DialogSelectOption<string> = {
@@ -151,9 +153,48 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     },
   }
 
+  const launcherAction: DialogSelectOption<string> = {
+    title: "Launcher",
+    value: "launcher",
+    description: props.worker.launcher || "codex",
+    onSelect: async () => {
+      const current = (props.worker.launcher || "codex") as Launcher
+      const next = await new Promise<Launcher | null>((resolve) => {
+        dialog.replace(
+          () => (
+            <DialogSelect
+              title={`Launcher: ${props.worker.name}`}
+              options={LAUNCHERS.map((launcher) => ({
+                title: launcher === "claudecode" ? "Claude Code" : "Codex CLI",
+                value: launcher,
+                category: launcher === current ? "Current" : "Options",
+              }))}
+              placeholder="Select launcher..."
+              current={current}
+              onSelect={(opt) => resolve(opt.value as Launcher)}
+            />
+          ),
+          () => resolve(null),
+        )
+      })
+      if (!next || next === current) {
+        dialog.replace(() => <DialogWorkerStatus worker={props.worker} management />)
+        return
+      }
+      try {
+        await sdk.client.patchWorker(props.worker.port, { launcher: next })
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Saved ${props.worker.name} launcher: ${next}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      dialog.clear()
+    },
+  }
+
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [logLevelAction, switchAction, modulesAction, logsAction, restartAction, stopAction, deleteAction]
+      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 
@@ -164,10 +205,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       placeholder="Worker actions..."
       footer={
         <box flexDirection="column" gap={1}>
-          <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
+          <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""} • launcher: {props.worker.launcher ?? "codex"}</text>
           <text fg={theme.textMuted}>upstream: {props.worker.upstream.name} • protocol: {props.worker.protocol ?? "responses"}</text>
           <text fg={theme.textMuted}>log level: {props.worker.log_level} • modules: {modules().length} req • {hooks().length} hook</text>
-          <text fg={theme.textMuted}>snapshot: {props.worker.snapshot_generation}</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>
             <box flexDirection="column">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>

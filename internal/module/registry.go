@@ -87,7 +87,7 @@ var requestMiddlewareDefinitions = []requestMiddlewareDefinition{
 			Protocols: []appruntime.ProtocolKind{
 				appruntime.ProtocolResponses,
 				appruntime.ProtocolChatCompletions,
-				appruntime.ProtocolClaudeCode,
+				appruntime.ProtocolAnthropic,
 			},
 		},
 		build: func(cfg ModuleConfig, deps BuildDependencies) Middleware {

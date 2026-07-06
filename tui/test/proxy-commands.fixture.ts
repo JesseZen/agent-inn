@@ -34,7 +34,7 @@ function frameLines(frame: string) {
     .filter(Boolean)
 }
 
-function createProxyHarness() {
+function createProxyHarness(input: { workers?: WorkerSummary[] } = {}) {
   const providers = new Map<string, RedactedUpstream>([
     [
       "openai",
@@ -50,6 +50,7 @@ function createProxyHarness() {
         name: "anthropic",
         base_url: "https://api.anthropic.com/v1",
         has_api_key: true,
+        api_format: "anthropic",
       },
     ],
   ])
@@ -81,8 +82,8 @@ function createProxyHarness() {
           model_override: { protocols: ["responses", "chat_completions"], capabilities: ["input_text"] },
           api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
           image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
-          request_log: { protocols: ["responses"] },
-          config_patch: { protocols: ["responses", "chat_completions", "claude_code"] },
+          request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
+          config_patch: { protocols: ["responses", "chat_completions"] },
         },
       },
     ],
@@ -99,6 +100,9 @@ function createProxyHarness() {
       },
     ],
   ])
+  for (const worker of input.workers ?? []) {
+    workers.set(worker.port, worker)
+  }
 
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions: HostedSessionSummary[] = []
@@ -135,7 +139,8 @@ function createProxyHarness() {
     },
   }
   const calls = {
-    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string }>,
+    createWorker: [] as Array<{ name: string; port: number; upstream: string; launcher?: string }>,
+    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     patchSettings: [] as Array<Partial<ProxySettings>>,
@@ -227,8 +232,13 @@ function createProxyHarness() {
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; log_level?: string }
-      calls.patchWorker.push({ port: 6767, upstream: body.upstream, log_level: body.log_level })
+      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; log_level?: string; launcher?: string }
+      calls.patchWorker.push({
+        port: 6767,
+        upstream: body.upstream,
+        log_level: body.log_level,
+        ...(body.launcher ? { launcher: body.launcher } : {}),
+      })
       const nextUpstream = providers.get(body.upstream)
       if (nextUpstream) {
         workers.set(6767, {
@@ -239,7 +249,34 @@ function createProxyHarness() {
       if (body.log_level) {
         workers.set(6767, { ...workers.get(6767)!, log_level: body.log_level })
       }
+      if (body.launcher) {
+        workers.set(6767, { ...workers.get(6767)!, launcher: body.launcher })
+      }
       return json(workers.get(6767)!)
+    }
+
+    if (url.pathname === "/api/workers" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "null")) as { name: string; port: number; upstream: string; launcher?: string }
+      calls.createWorker.push(body)
+      workers.set(body.port, {
+        name: body.name,
+        port: body.port,
+        role: "cli",
+        launcher: body.launcher ?? "codex",
+        protocol: providers.get(body.upstream)?.api_format === "anthropic" ? "anthropic" : "responses",
+        upstream: providers.get(body.upstream)!,
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+        modules: {},
+        hooks: {},
+        module_support: {
+          api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
+          image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+          request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
+        },
+      })
+      return json(workers.get(body.port)!)
     }
 
     if (url.pathname === "/api/workers/6767/modules/model_override" && method === "PATCH") {
@@ -382,7 +419,7 @@ function createProxyHarness() {
   return { calls, fetch: override, hostedSessions }
 }
 
-export async function mountProxyApp() {
+export async function mountProxyApp(input: { workers?: WorkerSummary[] } = {}) {
   const tmp = await tmpdir()
   const home = tmp.path
   const app = "ainn"
@@ -395,7 +432,7 @@ export async function mountProxyApp() {
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
   const events = createEventSource()
-  const proxy = createProxyHarness()
+  const proxy = createProxyHarness(input)
   let api!: TuiPluginApi
   let started!: () => void
   const ready = new Promise<void>((resolve) => {
