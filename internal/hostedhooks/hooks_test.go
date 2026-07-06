@@ -65,7 +65,7 @@ func TestReconcileInstallsTurnStatusHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(script), "AINN_HOSTED_SESSION_ID") || !strings.Contains(string(script), "hosted-session mark") {
+	if !strings.Contains(string(script), "AINN_HOSTED_SESSION_ID") || !strings.Contains(string(script), "hosted-session mark") || !strings.Contains(string(script), "\"$@\"") {
 		t.Fatalf("unexpected shim script:\n%s", script)
 	}
 	info, err := os.Stat(scriptPath)
@@ -78,9 +78,9 @@ func TestReconcileInstallsTurnStatusHooks(t *testing.T) {
 
 	codex := readTestHookRoot(t, filepath.Join(homeDir, ".codex", "hooks.json"))
 	claude := readTestHookRoot(t, claudePath)
-	runningCommand := testShellQuote(scriptPath) + " running"
-	doneCommand := testShellQuote(scriptPath) + " done"
-	failedCommand := testShellQuote(scriptPath) + " failed stop_failure"
+	runningCommand := testShellQuote(scriptPath) + " running --capture-launcher-session-id"
+	doneCommand := testShellQuote(scriptPath) + " done --capture-launcher-session-id"
+	failedCommand := testShellQuote(scriptPath) + " failed stop_failure --capture-launcher-session-id"
 	wantCodexHooks := map[string][]testHookMatcher{
 		"UserPromptSubmit": {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: runningCommand}}}},
 		"Stop":             {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: doneCommand}}}},

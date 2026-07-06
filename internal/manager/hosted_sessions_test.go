@@ -117,7 +117,7 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 		t.Fatal(err)
 	}
 
-	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "")
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 		t.Fatalf("got %#v, want %#v", running, wantRunning)
 	}
 
-	failed, err := registry.MarkTurnState(created.SessionID, HostedTurnStateFailed, "network_error")
+	failed, err := registry.MarkTurnState(created.SessionID, HostedTurnStateFailed, "network_error", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 		t.Fatalf("got %#v, want %#v", failed, wantFailed)
 	}
 
-	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "")
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +162,11 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowIDMarksCompletedTurnRead(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "")
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "")
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +179,34 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowIDMarksCompletedTurnRead(t 
 	want.TurnAcknowledgedGeneration = running.TurnGeneration
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryMarkTurnStatePreservesLauncherSessionIDWhenEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:      "solve problem A",
+		WorkerName:        "worker",
+		WorkerPort:        11199,
+		TmuxWindowID:      "@12",
+		LauncherSessionID: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := created
+	want.TurnState = HostedTurnStateDone
+	if !reflect.DeepEqual(updated, want) {
+		t.Fatalf("got %#v, want %#v", updated, want)
 	}
 }
 

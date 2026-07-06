@@ -259,6 +259,7 @@ func hookCommand(scriptPath string, item managedHook) string {
 	if item.reason != "" {
 		command += " " + item.reason
 	}
+	command += " --capture-launcher-session-id"
 	return command
 }
 
@@ -289,5 +290,12 @@ if [ -z "${AINN_HOSTED_SESSION_ID:-}" ]; then
 fi
 : "${AINN_CONFIG_DIR:?}"
 : "${AINN_EXECUTABLE:?}"
-exec "$AINN_EXECUTABLE" hosted-session mark --config-dir "$AINN_CONFIG_DIR" --session-id "$AINN_HOSTED_SESSION_ID" --state "$1" --reason "${2:-}"
+state="$1"
+reason=""
+shift
+if [ "$#" -gt 0 ] && [ "$1" != "--capture-launcher-session-id" ]; then
+  reason="$1"
+  shift
+fi
+exec "$AINN_EXECUTABLE" hosted-session mark --config-dir "$AINN_CONFIG_DIR" --session-id "$AINN_HOSTED_SESSION_ID" --state "$state" --reason "$reason" "$@"
 `

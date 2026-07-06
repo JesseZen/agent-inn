@@ -236,36 +236,62 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			fmt.Fprintf(stderr, "hosted session %q not found\n", sessionID)
 			return 1
 		}
-		if session.TmuxWindowID == "" {
-			fmt.Fprintf(stderr, "hosted session %q is stale\n", sessionID)
-			return 1
-		}
-		windowDetails, err := runner.Run(manager.TmuxListWindowDetailsCommandForSettings(settings))
-		if err != nil {
-			fmt.Fprintf(stderr, "failed to inspect tmux windows: %v\n", err)
-			return 1
-		}
 		activeWindow := false
-		for _, line := range strings.Split(windowDetails, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
+		if session.TmuxWindowID != "" {
+			windowDetails, err := runner.Run(manager.TmuxListWindowDetailsCommandForSettings(settings))
+			if err != nil {
+				fmt.Fprintf(stderr, "failed to inspect tmux windows: %v\n", err)
+				return 1
 			}
-			parts := strings.SplitN(line, "\t", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			if parts[0] == session.TmuxWindowID && parts[1] == session.SessionLabel {
-				activeWindow = true
-				break
+			for _, line := range strings.Split(windowDetails, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				parts := strings.SplitN(line, "\t", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				if parts[0] == session.TmuxWindowID && parts[1] == session.SessionLabel {
+					activeWindow = true
+					break
+				}
 			}
 		}
-		if !activeWindow {
-			fmt.Fprintf(stderr, "hosted session %q is stale\n", sessionID)
+		if activeWindow {
+			if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
+				fmt.Fprintf(stderr, "failed to select tmux window: %v\n", err)
+				return 1
+			}
+			if noAttach {
+				return 0
+			}
+			if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
+				fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		if session.LauncherSessionID == "" {
+			fmt.Fprintf(stderr, "hosted session %q is stale and has no launcher session id\n", sessionID)
 			return 1
 		}
-		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
-			fmt.Fprintf(stderr, "failed to select tmux window: %v\n", err)
+		reopenOpts := opts
+		reopenOpts.Profile = session.WorkerName
+		reopenOpts.WorkerPort = session.WorkerPort
+		reopenOpts.Workspace = session.Workspace
+		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
+		reopenOpts.Model = session.Model
+		reopenOpts.LauncherSessionID = session.LauncherSessionID
+		reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
+		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID)
+		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, launchCmd))
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to reopen tmux window: %v\n", err)
+			return 1
+		}
+		if err := registry.UpdateWindowID(session.SessionID, strings.TrimSpace(windowID)); err != nil {
+			fmt.Fprintf(stderr, "failed to persist hosted session: %v\n", err)
 			return 1
 		}
 		if noAttach {

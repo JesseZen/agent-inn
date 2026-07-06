@@ -125,11 +125,11 @@ func TestRunHostedSessionAcknowledgeUpdatesRegistryAndTmux(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateRunning, "")
+	running, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateRunning, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateDone, "")
+	done, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateDone, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +164,158 @@ func TestRunHostedSessionAcknowledgeUpdatesRegistryAndTmux(t *testing.T) {
 	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
+	}
+}
+
+func TestRunHostedSessionMarkPersistsLauncherSessionID(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	path := filepath.Join(configDir, config.ConfigFileName)
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "mark", "--config-dir", configDir, "--session-id", session.SessionID, "--state", manager.HostedTurnStateRunning, "--launcher-session-id", "019e7c18-0ee7-7ff2-bc82-9c410511ede3"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := session
+	wantSession.TurnState = manager.HostedTurnStateRunning
+	wantSession.TurnGeneration = 1
+	wantSession.LauncherSessionID = "019e7c18-0ee7-7ff2-bc82-9c410511ede3"
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+}
+
+func TestRunHostedSessionMarkCapturesLauncherSessionIDFromHookInput(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	path := filepath.Join(configDir, config.ConfigFileName)
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restoreRunner := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restoreRunner()
+	previousInput := hostedSessionMarkInput
+	hostedSessionMarkInput = strings.NewReader(`{"session_id":"019e7c18-0ee7-7ff2-bc82-9c410511ede3"}`)
+	defer func() { hostedSessionMarkInput = previousInput }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "mark", "--config-dir", configDir, "--session-id", session.SessionID, "--state", manager.HostedTurnStateRunning, "--capture-launcher-session-id"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := session
+	wantSession.TurnState = manager.HostedTurnStateRunning
+	wantSession.TurnGeneration = 1
+	wantSession.LauncherSessionID = "019e7c18-0ee7-7ff2-bc82-9c410511ede3"
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+}
+
+func TestRunHostedSessionMarkCaptureKeepsTurnStateWhenHookInputIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	path := filepath.Join(configDir, config.ConfigFileName)
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel:      "solve problem A",
+		WorkerName:        "worker",
+		WorkerPort:        11199,
+		TmuxWindowID:      "@12",
+		LauncherSessionID: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restoreRunner := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restoreRunner()
+	previousInput := hostedSessionMarkInput
+	hostedSessionMarkInput = strings.NewReader("")
+	defer func() { hostedSessionMarkInput = previousInput }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "mark", "--config-dir", configDir, "--session-id", session.SessionID, "--state", manager.HostedTurnStateDone, "--capture-launcher-session-id"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := session
+	wantSession.TurnState = manager.HostedTurnStateDone
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
 }
 
