@@ -16,9 +16,6 @@ import type { WorkerSummary, RedactedUpstream } from "./backend"
 const TOPOLOGY_DIALOG_WIDTH = 116
 const TOPOLOGY_DIALOG_MARGIN = 2
 const TOPOLOGY_CONTENT_PADDING = 2
-const TOPOLOGY_NODE_MARKER_WIDTH = 2
-const TOPOLOGY_NODE_MIN_GAP = 1
-const TOPOLOGY_NODE_BORDER_WIDTH = 2
 
 export function DialogTopology() {
   const sync = useSync()
@@ -150,7 +147,6 @@ export function DialogTopology() {
                       {(node) => (
                         <NodeBox
                           node={node}
-                          meta="idle"
                           related={related().has(node.id)}
                           hovered={hovered()}
                           dragSource={dragSource()}
@@ -189,35 +185,11 @@ function TopologyGroupView(props: {
   onDrop: (source: TopologyNode, target: TopologyNode) => void
   theme: Theme
 }) {
-  const group = createMemo(() => {
-    const upstreamMeta = `${props.group.workers.length}`
-    const upstream = { ...props.group.upstream, width: nodeRenderWidth(props.group.upstream, upstreamMeta) }
-    const workerRows = props.group.workerRows.map((row) => {
-      const workers = row.workers.map((node) => {
-        const meta = (node.data as WorkerSummary).status
-        return { ...node, width: nodeRenderWidth(node, meta) }
-      })
-      return {
-        workers,
-        width: workers.reduce((sum, node) => sum + node.width, 0) + TOPOLOGY_COL_GAP * (workers.length - 1),
-      }
-    })
-    const widestWorkerRow = workerRows.reduce((max, row) => Math.max(max, row.width), 0)
-    return {
-      ...props.group,
-      upstream,
-      workers: workerRows.flatMap((row) => row.workers),
-      workerRows,
-      width: Math.max(upstream.width, widestWorkerRow),
-    }
-  })
-
   return (
-    <box flexDirection="column" width={group().width} alignItems="center">
+    <box flexDirection="column" width={props.group.width} alignItems="center">
       <NodeBox
-        node={group().upstream}
-        meta={`${group().workers.length}`}
-        related={props.related.has(group().upstream.id)}
+        node={props.group.upstream}
+        related={props.related.has(props.group.upstream.id)}
         hovered={props.hovered}
         dragSource={props.dragSource}
         dragEnded={props.dragEnded}
@@ -228,16 +200,15 @@ function TopologyGroupView(props: {
         onDrop={props.onDrop}
         theme={props.theme}
       />
-      <For each={group().workerRows}>
+      <For each={props.group.workerRows}>
         {(row) => (
           <>
-            <EdgeRow group={group()} row={row} hoveredId={props.hovered} theme={props.theme} />
+            <EdgeRow group={props.group} row={row} hoveredId={props.hovered} theme={props.theme} />
             <box flexDirection="row" gap={TOPOLOGY_COL_GAP}>
               <For each={row.workers}>
                 {(node) => (
                   <NodeBox
                     node={node}
-                    meta={(node.data as WorkerSummary).status}
                     related={props.related.has(node.id)}
                     hovered={props.hovered}
                     dragSource={props.dragSource}
@@ -261,7 +232,6 @@ function TopologyGroupView(props: {
 
 function NodeBox(props: {
   node: TopologyNode
-  meta: string
   related: boolean
   hovered: string | null
   dragSource: TopologyNode | null
@@ -276,7 +246,7 @@ function NodeBox(props: {
   const isHovered = () => props.hovered === props.node.id
   return (
     <box
-      width={nodeRenderWidth(props.node, props.meta)}
+      width={props.node.width}
       height={props.node.height}
       border={true}
       borderColor={nodeColor(props.node, isHovered(), props.related, props.dragSource, props.theme)}
@@ -308,14 +278,10 @@ function NodeBox(props: {
         <text fg={props.theme.text} selectable={false} wrapMode="none">
           <span style={{ fg: nodeMarkerColor(props.node, props.theme) }}>▌</span> {props.node.label}
         </text>
-        <text fg={props.theme.textMuted} selectable={false} wrapMode="none">{props.meta}</text>
+        <text fg={props.theme.textMuted} selectable={false} wrapMode="none">{props.node.meta}</text>
       </box>
     </box>
   )
-}
-
-function nodeRenderWidth(node: TopologyNode, meta: string): number {
-  return node.label.length + meta.length + TOPOLOGY_NODE_MARKER_WIDTH + TOPOLOGY_NODE_MIN_GAP + TOPOLOGY_CONTENT_PADDING + TOPOLOGY_NODE_BORDER_WIDTH
 }
 
 function DragHint(props: {

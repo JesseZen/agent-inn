@@ -4,6 +4,7 @@ export type TopologyNode = {
   id: string
   kind: "upstream" | "worker"
   label: string
+  meta: string
   width: number
   height: number
   data: WorkerSummary | RedactedUpstream
@@ -35,7 +36,10 @@ export type TopologyLayout = {
 }
 
 const NODE_HEIGHT = 3
-const NODE_PAD = 2
+const NODE_MARKER_WIDTH = 2
+const NODE_MIN_GAP = 1
+const NODE_CONTENT_PADDING = 2
+const NODE_BORDER_WIDTH = 2
 const COL_GAP = 2
 const GROUP_GAP = 4
 
@@ -44,16 +48,17 @@ export const TOPOLOGY_COL_GAP = COL_GAP
 export const TOPOLOGY_NODE_HEIGHT = NODE_HEIGHT
 export const TOPOLOGY_EDGE_ROWS = 1
 
-function nodeWidth(label: string): number {
-  return label.length + NODE_PAD + 2
+function nodeWidth(label: string, meta: string): number {
+  return label.length + meta.length + NODE_MARKER_WIDTH + NODE_MIN_GAP + NODE_CONTENT_PADDING + NODE_BORDER_WIDTH
 }
 
-function makeNode(kind: "upstream" | "worker", label: string, data: WorkerSummary | RedactedUpstream): TopologyNode {
+function makeNode(kind: "upstream" | "worker", label: string, meta: string, data: WorkerSummary | RedactedUpstream): TopologyNode {
   return {
     id: `${kind}:${label}`,
     kind,
     label,
-    width: nodeWidth(label),
+    meta,
+    width: nodeWidth(label, meta),
     height: NODE_HEIGHT,
     data,
   }
@@ -137,8 +142,8 @@ export function computeLayout(
   const rawGroups = groupWorkers(workers)
   const orphans = orphanUpstreams(upstreams, rawGroups)
   const groups: TopologyGroup[] = rawGroups.map((group) => {
-    const upstreamNode = makeNode("upstream", group.upstream.name, group.upstream)
-    const workerNodes = group.workers.map((w) => makeNode("worker", w.name, w))
+    const upstreamNode = makeNode("upstream", group.upstream.name, `${group.workers.length}`, group.upstream)
+    const workerNodes = group.workers.map((w) => makeNode("worker", w.name, w.status, w))
     const groupAvailableWidth = Math.max(upstreamNode.width, availableWidth)
     const workerRows = packNodes(workerNodes, groupAvailableWidth).map((row) => ({
       workers: row,
@@ -153,7 +158,7 @@ export function computeLayout(
     }
   })
 
-  const orphanNodes = orphans.map((u) => makeNode("upstream", u.name, u))
+  const orphanNodes = orphans.map((u) => makeNode("upstream", u.name, "idle", u))
   const groupRows = packGroups(groups, availableWidth)
   const orphanRows = packNodes(orphanNodes, availableWidth)
   const connectedRows = groupRows.reduce((sum, row) => {
