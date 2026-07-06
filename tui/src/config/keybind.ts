@@ -157,8 +157,8 @@ export const Definitions = {
 
   input_clear: keybind("ctrl+c", "Clear input field"),
   input_paste: keybind({ key: "ctrl+v", preventDefault: false }, "Paste from clipboard"),
-  input_submit: keybind("alt+return", "Submit input"),
-  input_newline: keybind("return,shift+return,ctrl+return,ctrl+j", "Insert newline in input"),
+  input_submit: keybind("return", "Submit input"),
+  input_newline: keybind("shift+return,ctrl+return,alt+return,ctrl+j", "Insert newline in input"),
   input_move_left: keybind("left,ctrl+b", "Move cursor left in input"),
   input_move_right: keybind("right,ctrl+f", "Move cursor right in input"),
   input_move_up: keybind("up", "Move cursor up in input"),

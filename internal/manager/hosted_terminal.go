@@ -13,6 +13,8 @@ const (
 	tmuxHostSession  = "ainn-host"
 	tmuxMainWindowID = "0"
 	tmuxWindowPrefix = "ainn"
+	tmuxExtkeysSlot  = "terminal-features[3]"
+	tmuxExtkeys      = "xterm*:extkeys"
 )
 
 func defaultTmuxSettings() config.Settings {
@@ -161,6 +163,13 @@ func TmuxEnableMouseCommand() []string {
 
 func TmuxEnableMouseCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings), "set-option", "-g", "mouse", "on")
+}
+
+func TmuxEnableExtendedKeysCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"set-option", "-s", "extended-keys", "on", ";",
+		"set-option", "-s", tmuxExtkeysSlot, tmuxExtkeys,
+	)
 }
 
 // TmuxThemeCommandForSettings returns the argv that injects a browser-tab-like
