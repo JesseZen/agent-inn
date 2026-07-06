@@ -14,6 +14,8 @@ const (
 	tmuxCantFindSessionError = "can't find session"
 	tmuxErrorConnectingError = "error connecting to "
 	tmuxNoSuchFileError      = "No such file or directory"
+	// tmux hooks are array options; this slot lets AINN replace its own hook without clearing user hooks.
+	tmuxAcknowledgeTurnHook = "after-select-window[90]"
 )
 
 type hostedTMuxRunner interface {
@@ -64,6 +66,25 @@ func TmuxKillWindowCommandForSettings(settings config.Settings, windowID string)
 }
 
 func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID string, state string) []string {
+	return tmuxHostedTurnStatusCommand(settings, windowID, state, true)
+}
+
+func TmuxHostedTurnStatusCommandForRecord(settings config.Settings, session HostedSessionRecord) []string {
+	unread := !isHostedTurnTerminalState(session.TurnState) || session.TurnGeneration > session.TurnAcknowledgedGeneration
+	return tmuxHostedTurnStatusCommand(settings, session.TmuxWindowID, session.TurnState, unread)
+}
+
+func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configDir string, executable string) []string {
+	command := "run-shell -b " + tmuxShellQuote(executable) +
+		" hosted-session acknowledge --config-dir " + tmuxShellQuote(configDir) +
+		" --window-id #{window_id}"
+	return append(tmuxPrefixForSettings(settings),
+		"set-hook", "-t", tmuxHostSessionForSettings(settings),
+		tmuxAcknowledgeTurnHook, command,
+	)
+}
+
+func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool) []string {
 	target := tmuxHostSessionForSettings(settings) + ":" + windowID
 	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
 	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
@@ -74,14 +95,26 @@ func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID s
 	case HostedTurnStateDone:
 		format = "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]"
 		currentFormat = "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"
+		if !unread {
+			format = "#[fg=colour244,bg=colour235] #I:+ #W #[default]"
+			currentFormat = "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"
+		}
 	case HostedTurnStateFailed, HostedTurnStateInterrupted:
 		format = "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]"
 		currentFormat = "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"
+		if !unread {
+			format = "#[fg=colour244,bg=colour235] #I:! #W #[default]"
+			currentFormat = "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"
+		}
 	}
 	return append(tmuxPrefixForSettings(settings),
 		"set-window-option", "-t", target, "window-status-format", format, ";",
 		"set-window-option", "-t", target, "window-status-current-format", currentFormat,
 	)
+}
+
+func tmuxShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func hostedSessionStatusForWindow(windows map[string]string, session HostedSessionRecord) string {

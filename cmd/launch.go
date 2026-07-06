@@ -223,6 +223,10 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 			return 1
 		}
+		if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
+			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
+			return 1
+		}
 		session, ok, err := registry.Get(sessionID)
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
@@ -348,6 +352,11 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 		return 1
 	}
+	if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
+		cleanupIncompleteSession()
+		fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
+		return 1
+	}
 	if !reuseFirstWindow {
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
 			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, launchCmd))
@@ -375,10 +384,7 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 }
 
 func hostedSessionLaunchCommand(command []string, configDir string, sessionID string) []string {
-	executable, err := os.Executable()
-	if err != nil {
-		executable = os.Args[0]
-	}
+	executable := hostedSessionExecutable()
 	env := []string{
 		"env",
 		"AINN_HOSTED_SESSION_ID=" + sessionID,
@@ -389,4 +395,12 @@ func hostedSessionLaunchCommand(command []string, configDir string, sessionID st
 		return append(env, command[1:]...)
 	}
 	return append(env, command...)
+}
+
+func hostedSessionExecutable() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return os.Args[0]
+	}
+	return executable
 }

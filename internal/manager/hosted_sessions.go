@@ -35,19 +35,20 @@ type HostedSessionRegistry struct {
 }
 
 type HostedSessionRecord struct {
-	SessionID       string    `json:"session_id"`
-	SessionLabel    string    `json:"session_label"`
-	WorkerName      string    `json:"worker_name"`
-	WorkerPort      int       `json:"worker_port"`
-	Workspace       string    `json:"workspace,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	AddDirs         []string  `json:"add_dirs,omitempty"`
-	TmuxWindowID    string    `json:"tmux_window_id,omitempty"`
-	TurnState       string    `json:"turn_state,omitempty"`
-	TurnStateReason string    `json:"turn_state_reason,omitempty"`
-	TurnGeneration  int       `json:"turn_generation,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastOpenedAt    time.Time `json:"last_opened_at"`
+	SessionID                  string    `json:"session_id"`
+	SessionLabel               string    `json:"session_label"`
+	WorkerName                 string    `json:"worker_name"`
+	WorkerPort                 int       `json:"worker_port"`
+	Workspace                  string    `json:"workspace,omitempty"`
+	Model                      string    `json:"model,omitempty"`
+	AddDirs                    []string  `json:"add_dirs,omitempty"`
+	TmuxWindowID               string    `json:"tmux_window_id,omitempty"`
+	TurnState                  string    `json:"turn_state,omitempty"`
+	TurnStateReason            string    `json:"turn_state_reason,omitempty"`
+	TurnGeneration             int       `json:"turn_generation,omitempty"`
+	TurnAcknowledgedGeneration int       `json:"turn_acknowledged_generation,omitempty"`
+	CreatedAt                  time.Time `json:"created_at"`
+	LastOpenedAt               time.Time `json:"last_opened_at"`
 }
 
 type HostedSessionSummary struct {
@@ -259,6 +260,31 @@ func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, re
 		return nil
 	})
 	return updated, err
+}
+
+func (r *HostedSessionRegistry) AcknowledgeTurnByWindowID(windowID string) (HostedSessionRecord, bool, error) {
+	var updated HostedSessionRecord
+	found := false
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		for sessionID, session := range file.Sessions {
+			if session.TmuxWindowID != windowID {
+				continue
+			}
+			found = true
+			if isHostedTurnTerminalState(session.TurnState) && session.TurnGeneration > session.TurnAcknowledgedGeneration {
+				session.TurnAcknowledgedGeneration = session.TurnGeneration
+				file.Sessions[sessionID] = session
+			}
+			updated = session
+			return nil
+		}
+		return nil
+	})
+	return updated, found, err
+}
+
+func isHostedTurnTerminalState(state string) bool {
+	return state == HostedTurnStateDone || state == HostedTurnStateFailed || state == HostedTurnStateInterrupted
 }
 
 func (r *HostedSessionRegistry) Delete(sessionID string) error {

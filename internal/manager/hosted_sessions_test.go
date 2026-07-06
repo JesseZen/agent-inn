@@ -148,6 +148,40 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 	}
 }
 
+func TestHostedSessionRegistryAcknowledgeTurnByWindowIDMarksCompletedTurnRead(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.AcknowledgeTurnByWindowID("@12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := done
+	want.TurnAcknowledgedGeneration = running.TurnGeneration
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
 func TestHostedSessionRegistrySummariesTreatsMissingTmuxSocketAsStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

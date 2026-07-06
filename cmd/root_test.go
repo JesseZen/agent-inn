@@ -107,6 +107,66 @@ func TestRunHostedSessionMarkUpdatesRegistryAndTmux(t *testing.T) {
 	}
 }
 
+func TestRunHostedSessionAcknowledgeUpdatesRegistryAndTmux(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateRunning, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := registry.MarkTurnState(session.SessionID, manager.HostedTurnStateDone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "acknowledge", "--config-dir", configDir, "--window-id", "@12"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := done
+	wantSession.TurnAcknowledgedGeneration = running.TurnGeneration
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
+	if !reflect.DeepEqual(got, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
+	}
+}
+
 func TestRunDefaultStartsRootRunnerWithConfig(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
@@ -2171,7 +2231,7 @@ fi
 cmd=""
 for arg in "$@"; do
   case "$arg" in
-    has-session|new-session|list-panes|list-clients|select-window|new-window|respawn-pane|move-window|switch-client|attach-session|show|set-option)
+    has-session|new-session|list-panes|list-clients|select-window|new-window|respawn-pane|move-window|switch-client|attach-session|show|set-option|set-hook)
       cmd="$arg"
       break
       ;;
@@ -2264,6 +2324,12 @@ case "$cmd" in
     printf '%s' "${FAKE_TMUX_SET_OPTION_STDOUT:-}"
     printf '%s' "${FAKE_TMUX_SET_OPTION_STDERR:-}" >&2
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "set-option" ]] && exit 1
+    exit 0
+    ;;
+  set-hook)
+    printf '%s' "${FAKE_TMUX_SET_HOOK_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_SET_HOOK_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "set-hook" ]] && exit 1
     exit 0
     ;;
   *)
