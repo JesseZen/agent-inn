@@ -174,7 +174,7 @@ func TestTmuxAcknowledgeTurnHookCommandForSettings(t *testing.T) {
 		"tmux", "-L", "ainn-test",
 		"set-hook", "-t", "ainn-test-host",
 		"after-select-window[90]",
-		"run-shell -b '/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id}",
+		"run-shell -b \"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id}\"",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)
