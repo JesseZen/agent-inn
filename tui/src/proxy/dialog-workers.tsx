@@ -36,7 +36,7 @@ export function DialogWorkers() {
         const port = Number(opt.value.slice("edit:".length))
         const worker = sync.data.workers.find((w) => w.port === port)
         if (!worker) return
-        dialog.replace(() => <DialogWorkerStatus worker={worker} management />)
+        dialog.push(() => <DialogWorkerStatus worker={worker} management />)
       }}
     />
   )

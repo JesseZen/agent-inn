@@ -492,7 +492,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               {props.title}
             </text>
           )}
-          <box onMouseUp={() => dialog.clear()}>
+          <box onMouseUp={() => dialog.pop()}>
             <text fg={theme.textMuted}>esc</text>
           </box>
         </box>
