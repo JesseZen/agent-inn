@@ -167,7 +167,8 @@ func TmuxEnableMouseCommandForSettings(settings config.Settings) []string {
 
 func TmuxEnableExtendedKeysCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings),
-		"set-option", "-s", "extended-keys", "on", ";",
+		"set-option", "-s", "extended-keys", "always", ";",
+		"set-option", "-s", "extended-keys-format", "csi-u", ";",
 		"set-option", "-s", tmuxExtkeysSlot, tmuxExtkeys,
 	)
 }

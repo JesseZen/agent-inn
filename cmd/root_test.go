@@ -310,6 +310,7 @@ func TestRunRootMainTUIWindowCreatesHostAndAttaches(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -365,6 +366,7 @@ func TestRunRootMainTUIWindowChildCommandUsesNormalizedConfigDir(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -418,6 +420,7 @@ func TestRunRootMainTUIWindowCreatesHostWhenTmuxSocketMissing(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -472,6 +475,7 @@ func TestRunRootMainTUIWindowMovesFreshHostWindowToZeroWhenBaseIndexDiffers(t *t
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
 		{"tmux", "-L", "ainn-test", "move-window", "-s", "ainn-test-host:1", "-t", "ainn-test-host:0"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -522,6 +526,7 @@ func TestRunRootMainTUIWindowOutsideTmuxSelectsWindowZeroThenAttaches(t *testing
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -577,6 +582,7 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		tmuxExtendedKeysSocketCommand("/tmp/tmux-1000/ainn-test"),
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
 	}
@@ -632,6 +638,7 @@ func TestRunRootMainTUIWindowUsesCurrentSocketPathInsideTmux(t *testing.T) {
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/custom/ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-S", "/tmp/custom/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		tmuxExtendedKeysSocketCommand("/tmp/custom/ainn-test"),
 		{"tmux", "-S", "/tmp/custom/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
 		{"tmux", "-S", "/tmp/custom/ainn-test", "switch-client", "-c", "client-2", "-t", "ainn-test-host:0"},
 	}
@@ -690,6 +697,7 @@ func TestRunRootMainTUIWindowFailsWhenInsideTmuxClientPaneIsMissing(t *testing.T
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		tmuxExtendedKeysSocketCommand("/tmp/tmux-1000/ainn-test"),
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -852,6 +860,7 @@ func TestRunRootMainTUIWindowRecreatesMissingMainWindowOnExistingHost(t *testing
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
 		{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host:0", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -903,6 +912,7 @@ func TestRunRootMainTUIWindowRespawnsWindowZeroWhenPaneCommandDiffers(t *testing
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
 		{"tmux", "-L", "ainn-test", "respawn-pane", "-k", "-t", "ainn-test-host:0", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
+		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
 		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
@@ -1065,6 +1075,7 @@ func TestRunRootMainTUIWindowWritesJSONLTracePerTmuxCommand(t *testing.T) {
 		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "can't find session\n", Err: "exit status 1", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "ainn", "-P", "-F", "#{window_index}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"}, Stdout: "0\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: tmuxExtendedKeysCommand("ainn-test"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 	}
@@ -1103,6 +1114,7 @@ func TestRunRootMainTUIWindowLogsFailedCommandBeforeReturningError(t *testing.T)
 		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"}, Stdout: "env AINN_TMUX_ROOT_CHILD=1 " + fakeTmuxCurrentExecutable(t) + "\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: tmuxExtendedKeysCommand("ainn-test"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "exit status 1", HasDuration: true},
 	}
@@ -1322,7 +1334,7 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}\n-L ainn-test select-window -t ainn-test-host:0\n"
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}\n-L ainn-test set-option -s extended-keys always ; set-option -s extended-keys-format csi-u ; set-option -s terminal-features[3] xterm*:extkeys\n-L ainn-test select-window -t ainn-test-host:0\n"
 	if string(got) != want {
 		t.Fatalf("expected bootstrap to stop after select-window, got %q want %q", string(got), want)
 	}

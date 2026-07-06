@@ -199,6 +199,13 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 			return 1
 		}
 	}
+	if _, err := runner.Run(tmuxHostCommand(manager.TmuxEnableExtendedKeysCommandForSettings(cfg.Settings))); err != nil {
+		if printTmuxTraceWriteError(stderr, err) {
+			return 1
+		}
+		fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
+		return 1
+	}
 	if insideTmux {
 		clientRows, err := runner.Run(manager.TmuxListClientPanesCommand(currentSocketPath))
 		if err != nil {

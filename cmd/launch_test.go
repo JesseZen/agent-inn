@@ -15,7 +15,11 @@ import (
 )
 
 func tmuxExtendedKeysCommand(socketName string) []string {
-	return []string{"tmux", "-L", socketName, "set-option", "-s", "extended-keys", "on", ";", "set-option", "-s", "terminal-features[3]", "xterm*:extkeys"}
+	return []string{"tmux", "-L", socketName, "set-option", "-s", "extended-keys", "always", ";", "set-option", "-s", "extended-keys-format", "csi-u", ";", "set-option", "-s", "terminal-features[3]", "xterm*:extkeys"}
+}
+
+func tmuxExtendedKeysSocketCommand(socketPath string) []string {
+	return []string{"tmux", "-S", socketPath, "set-option", "-s", "extended-keys", "always", ";", "set-option", "-s", "extended-keys-format", "csi-u", ";", "set-option", "-s", "terminal-features[3]", "xterm*:extkeys"}
 }
 
 func TestRunLaunchRequiresWorker(t *testing.T) {
