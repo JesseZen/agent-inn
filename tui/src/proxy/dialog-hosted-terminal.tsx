@@ -189,8 +189,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       actions={[
         {
           command: "session.change_worker",
-          title: "change worker",
-          disabled: (option) => option?.value.type !== "session" || option.value.session.status !== "stale",
+          title: "worker",
+          hidden: (option) => option?.value.type !== "session" || option.value.session.status !== "stale",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             changeSessionWorker(option.value.session)
@@ -199,7 +199,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         {
           command: "session.rename",
           title: "rename",
-          disabled: (option) => option?.value.type !== "session",
+          hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             void renameSession(option.value.session)
@@ -208,8 +208,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         {
           command: "session.duplicate",
           title: "duplicate",
-          side: "right",
-          disabled: (option) => option?.value.type !== "session",
+          hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             void duplicateSession(option.value.session)
@@ -218,8 +217,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         {
           command: "session.delete",
           title: "delete",
-          side: "right",
-          disabled: (option) => option?.value.type !== "session",
+          hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             void deleteHostedTerminalSession({

@@ -33,7 +33,7 @@ export function createEventSource() {
   }
 }
 
-export type FetchHandler = (url: URL, request: Request) => Response | Promise<Response> | undefined
+export type FetchHandler = (url: URL, request: Request) => Response | Promise<Response | undefined> | undefined
 
 export function createFetch(override?: FetchHandler) {
   const session = [] as URL[]

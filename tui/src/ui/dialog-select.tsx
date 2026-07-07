@@ -39,7 +39,7 @@ export interface DialogSelectProps<T> {
     command: string
     title: string
     side?: "left" | "right"
-    hidden?: boolean
+    hidden?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
     disabled?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
     onTrigger: (option: DialogSelectOption<T>) => void
   }[]
@@ -110,42 +110,6 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   let input: InputRenderable
 
-  const actions = createMemo(() => props.actions ?? [])
-  const shownActions = createMemo(() => actions().filter((item) => !item.hidden))
-  const actionBindings = useKeymapSelector((keymap) =>
-    keymap.getCommandBindings({
-      visibility: "registered",
-      commands: shownActions().map((item) => item.command),
-    }),
-  )
-
-  const actionLabels = createMemo(() => {
-    const labels = new Map<string, string>()
-
-    for (const action of shownActions()) {
-      const label = formatKeyBindings(actionBindings().get(action.command), tuiConfig)
-      if (label) labels.set(action.command, label)
-    }
-
-    return labels
-  })
-  const visibleActions = createMemo(() => [
-    ...shownActions()
-      .map((item) => ({ ...item, label: actionLabels().get(item.command) ?? "" }))
-      .filter((item) => item.label),
-    ...(props.footerHints ?? []),
-  ])
-  const actionItems = createMemo(() =>
-    visibleActions()
-      .filter(isActionItem)
-      .filter((item) => !isActionDisabled(item)),
-  )
-
-  createEffect(() => {
-    const index = focusedAction()
-    if (index !== undefined && index >= actionItems().length) setFocusedAction(undefined)
-  })
-
   const filtered = createMemo(() => {
     if (props.skipFilter || props.renderFilter === false) return props.options.filter((x) => x.disabled !== true)
     const needle = store.filter.toLowerCase()
@@ -208,6 +172,42 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const height = createMemo(() => Math.min(rows(), Math.floor(dimensions().height / 2) - 6))
 
   const selected = createMemo(() => flat()[store.selected])
+
+  const actions = createMemo(() => props.actions ?? [])
+  const shownActions = createMemo(() => actions().filter((item) => !isActionHidden(item)))
+  const actionBindings = useKeymapSelector((keymap) =>
+    keymap.getCommandBindings({
+      visibility: "registered",
+      commands: shownActions().map((item) => item.command),
+    }),
+  )
+
+  const actionLabels = createMemo(() => {
+    const labels = new Map<string, string>()
+
+    for (const action of shownActions()) {
+      const label = formatKeyBindings(actionBindings().get(action.command), tuiConfig)
+      if (label) labels.set(action.command, label)
+    }
+
+    return labels
+  })
+  const visibleActions = createMemo(() => [
+    ...shownActions()
+      .map((item) => ({ ...item, label: actionLabels().get(item.command) ?? "" }))
+      .filter((item) => item.label),
+    ...(props.footerHints ?? []),
+  ])
+  const actionItems = createMemo(() =>
+    visibleActions()
+      .filter(isActionItem)
+      .filter((item) => !isActionDisabled(item)),
+  )
+
+  createEffect(() => {
+    const index = focusedAction()
+    if (index !== undefined && index >= actionItems().length) setFocusedAction(undefined)
+  })
 
   createEffect(
     on([() => store.filter, () => props.current], ([filter, current]) => {
@@ -444,6 +444,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   function isActionDisabled(item: Action) {
     return typeof item.disabled === "function" ? item.disabled(selected()) : item.disabled
+  }
+
+  function isActionHidden(item: Action) {
+    return typeof item.hidden === "function" ? item.hidden(selected()) : item.hidden
   }
 
   function isActionFocused(item: VisibleAction) {

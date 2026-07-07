@@ -6,6 +6,7 @@ import path from "node:path"
 import { chmod, mkdtemp } from "node:fs/promises"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
 import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalApp, staleHostedSessionA, wait } from "./proxy-hosted-terminal.fixture"
+import type { HostedSessionSummary } from "../src/proxy/backend"
 
 afterEach(() => {
   mock.restore()
@@ -337,7 +338,7 @@ test("stale hosted session changes worker from session list", async () => {
     port: 5678,
   }
   const patches: Array<{ session_id: string; worker_name: string }> = []
-  let sessions = [{ ...staleHostedSessionA }]
+  let sessions: HostedSessionSummary[] = [{ ...staleHostedSessionA }]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -399,7 +400,7 @@ test("stale hosted session changes worker from session list", async () => {
 
 test("hosted session rename patches label from session list", async () => {
   const patches: Array<{ session_id: string; session_label: string }> = []
-  let sessions = [{ ...activeHostedSession }]
+  let sessions: HostedSessionSummary[] = [{ ...activeHostedSession }]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -492,7 +493,7 @@ test("hosted session duplicate creates and launches a fresh session id", async (
   }))
 
   let duplicateCalls = 0
-  let sessions = [
+  let sessions: HostedSessionSummary[] = [
     {
       ...activeHostedSession,
       workspace: "/tmp/work",
@@ -501,7 +502,7 @@ test("hosted session duplicate creates and launches a fresh session id", async (
       launcher_session_id: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
     },
   ]
-  const duplicated = {
+  const duplicated: HostedSessionSummary = {
     session_id: "hs_dup",
     session_label: "test-cli 2",
     worker_name: "test-cli",
