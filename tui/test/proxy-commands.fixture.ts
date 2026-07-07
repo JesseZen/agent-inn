@@ -289,7 +289,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; upstreams?: Reda
           request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
         },
       })
-      return json(workers.get(body.port)!)
+      return json(workers.get(port)!)
     }
 
     if (url.pathname === "/api/workers/6767/modules/model_override" && method === "PATCH") {

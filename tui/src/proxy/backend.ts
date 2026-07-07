@@ -124,6 +124,7 @@ export type HostedSessionRecord = {
   workspace?: string
   model?: string
   add_dirs?: string[]
+  launcher_session_id?: string
   created_at: string
   last_opened_at: string
 }

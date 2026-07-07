@@ -54,6 +54,10 @@ test("hosted terminal picker shows ctrl d delete hint", async () => {
   try {
     await app.openHostedTerminal()
 
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    await app.setup.renderOnce()
+
     const frame = app.setup.captureCharFrame()
     expect(frame.includes("Hosted Terminal")).toBe(true)
     expect(frame.includes("Delete Hosted Session")).toBe(false)
@@ -67,7 +71,7 @@ test("hosted terminal picker shows ctrl d delete hint", async () => {
   }
 })
 
-test("hosted terminal picker shows ctrl w change worker hint", async () => {
+test("hosted terminal picker shows ctrl w worker hint", async () => {
   const app = await setupHostedTerminal([activeHostedSession, staleHostedSessionA])
 
   try {
@@ -81,7 +85,56 @@ test("hosted terminal picker shows ctrl w change worker hint", async () => {
     const frame = app.setup.captureCharFrame()
     expect(frame.includes("Hosted Terminal")).toBe(true)
     expect(frame.includes("ctrl+w")).toBe(true)
-    expect(frame.includes("change worker")).toBe(true)
+    expect(frame.includes("worker ctrl+w")).toBe(true)
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("hosted terminal picker hides session action hints on action rows", async () => {
+  const app = await setupHostedTerminal([activeHostedSession, staleHostedSessionA])
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame.includes("Hosted Terminal")).toBe(true)
+    expect(frame.includes("Delete Delete a hosted terminal session")).toBe(true)
+    expect(frame.includes("ctrl+w")).toBe(false)
+    expect(frame.includes("ctrl+r")).toBe(false)
+    expect(frame.includes("ctrl+y")).toBe(false)
+    expect(frame.includes("ctrl+d")).toBe(false)
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("hosted terminal picker keeps stale session action hints readable", async () => {
+  const app = await setupHostedTerminal([activeHostedSession, staleHostedSessionA])
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame.includes("Hosted Terminal")).toBe(true)
+    expect(frame.includes("worker ctrl+w")).toBe(true)
+    expect(frame.includes("rename ctrl+r")).toBe(true)
+    expect(frame.includes("duplicate ctrl+y")).toBe(true)
+    expect(frame.includes("delete ctrl+d")).toBe(true)
 
     await app.close()
   } finally {

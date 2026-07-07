@@ -340,7 +340,7 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	}
 	want := HostedSessionRecord{
 		SessionID:    got.SessionID,
-		SessionLabel: "cli-openai 1",
+		SessionLabel: "solve problem A 2",
 		WorkerName:   "cli-openai",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
@@ -361,6 +361,162 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	}
 	if !reflect.DeepEqual(persisted, want) {
 		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	}
+}
+
+func TestManagerAPIRenamesStaleHostedSession(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{StateDir: stateDir}
+	m := New(Config{
+		Config: config.Config{
+			Settings: settings,
+		},
+	})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"session_label":"solve problem B"}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.SessionLabel = "solve problem B"
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+	persisted, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected hosted session %q", created.SessionID)
+	}
+	if !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	}
+}
+
+func TestManagerAPIRenamesActiveHostedSessionWindow(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: settings,
+		},
+	})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			gotCalls = append(gotCalls, append([]string{}, args...))
+			switch {
+			case strings.Join(args, " ") == strings.Join(TmuxHasSessionCommandForSettings(settings), " "):
+				return "", nil
+			case strings.Join(args, " ") == strings.Join(TmuxListWindowDetailsCommandForSettings(settings), " "):
+				return "@12\tsolve problem A\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"session_label":"solve problem B"}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	wantSession := created
+	wantSession.SessionLabel = "solve problem B"
+	if !reflect.DeepEqual(got, wantSession) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, wantSession)
+	}
+	wantCalls := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+		{"tmux", "-L", "ainn-test", "rename-window", "-t", "ainn-test-host:@12", "solve problem B"},
+	}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
+	}
+}
+
+func TestManagerAPIHostedSessionRenameRejectsDuplicateLabel(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{StateDir: stateDir}
+	m := New(Config{
+		Config: config.Config{
+			Settings: settings,
+		},
+	})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem B",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"session_label":"solve problem B"}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"error": `hosted session label "solve problem B" already exists`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 

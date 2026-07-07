@@ -201,7 +201,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async getHostedSession(sessionID: string) {
           return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`)
         },
-        async patchHostedSession(sessionID: string, patch: Partial<Pick<HostedSessionRecord, "worker_name">>) {
+        async patchHostedSession(sessionID: string, patch: Partial<Pick<HostedSessionRecord, "worker_name" | "session_label">>) {
           return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
