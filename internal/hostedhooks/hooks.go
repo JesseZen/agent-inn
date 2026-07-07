@@ -27,17 +27,20 @@ const (
 )
 
 type managedHook struct {
-	event  string
-	state  string
-	reason string
+	event          string
+	state          string
+	reason         string
+	watchCodexTurn bool
 }
 
 var (
 	codexManagedHooks = []managedHook{
-		{event: "UserPromptSubmit", state: constants.HostedTurnStateRunning},
+		{event: "SessionStart", state: constants.HostedTurnStateIdle},
+		{event: "UserPromptSubmit", state: constants.HostedTurnStateRunning, watchCodexTurn: true},
 		{event: "Stop", state: constants.HostedTurnStateDone},
 	}
 	claudeManagedHooks = []managedHook{
+		{event: "SessionStart", state: constants.HostedTurnStateIdle},
 		{event: "UserPromptSubmit", state: constants.HostedTurnStateRunning},
 		{event: "Stop", state: constants.HostedTurnStateDone},
 		{event: "StopFailure", state: constants.HostedTurnStateFailed, reason: hostedTurnFailureReason},
@@ -45,10 +48,12 @@ var (
 )
 
 func Reconcile(settings config.Settings) error {
-	if settings.Terminal.Tmux.TurnStatusHooks {
-		return Install()
-	}
-	return Uninstall()
+	return withHookConfigLock(func() error {
+		if settings.Terminal.Tmux.TurnStatusHooks {
+			return install()
+		}
+		return uninstall()
+	})
 }
 
 func TurnStatusScriptPath() string {
@@ -56,6 +61,10 @@ func TurnStatusScriptPath() string {
 }
 
 func Install() error {
+	return withHookConfigLock(install)
+}
+
+func install() error {
 	scriptPath := TurnStatusScriptPath()
 	if err := os.MkdirAll(filepath.Dir(scriptPath), hookConfigDirMode); err != nil {
 		return fmt.Errorf("create hook directory: %w", err)
@@ -76,6 +85,10 @@ func Install() error {
 }
 
 func Uninstall() error {
+	return withHookConfigLock(uninstall)
+}
+
+func uninstall() error {
 	scriptPath := TurnStatusScriptPath()
 	if err := uninstallManagedHooks(codexHooksPath(), scriptPath); err != nil {
 		return err
@@ -260,6 +273,9 @@ func hookCommand(scriptPath string, item managedHook) string {
 		command += " " + item.reason
 	}
 	command += " --capture-launcher-session-id"
+	if item.watchCodexTurn {
+		command += " --watch-codex-turn"
+	}
 	return command
 }
 

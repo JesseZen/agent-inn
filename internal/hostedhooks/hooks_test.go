@@ -78,17 +78,21 @@ func TestReconcileInstallsTurnStatusHooks(t *testing.T) {
 
 	codex := readTestHookRoot(t, filepath.Join(homeDir, ".codex", "hooks.json"))
 	claude := readTestHookRoot(t, claudePath)
-	runningCommand := testShellQuote(scriptPath) + " running --capture-launcher-session-id"
+	startCommand := testShellQuote(scriptPath) + " idle --capture-launcher-session-id"
+	codexRunningCommand := testShellQuote(scriptPath) + " running --capture-launcher-session-id --watch-codex-turn"
+	claudeRunningCommand := testShellQuote(scriptPath) + " running --capture-launcher-session-id"
 	doneCommand := testShellQuote(scriptPath) + " done --capture-launcher-session-id"
 	failedCommand := testShellQuote(scriptPath) + " failed stop_failure --capture-launcher-session-id"
 	wantCodexHooks := map[string][]testHookMatcher{
-		"UserPromptSubmit": {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: runningCommand}}}},
+		"SessionStart":     {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: startCommand}}}},
+		"UserPromptSubmit": {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: codexRunningCommand}}}},
 		"Stop":             {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: doneCommand}}}},
 	}
 	wantClaude := testHookRoot{
 		Theme: "dark",
 		Hooks: map[string][]testHookMatcher{
-			"UserPromptSubmit": {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: runningCommand}}}},
+			"SessionStart":     {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: startCommand}}}},
+			"UserPromptSubmit": {{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: claudeRunningCommand}}}},
 			"Stop": {
 				{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: "echo user-stop"}}},
 				{Matcher: "", Hooks: []testCommandHook{{Type: "command", Command: doneCommand}}},

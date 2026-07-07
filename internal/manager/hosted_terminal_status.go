@@ -15,7 +15,9 @@ const (
 	tmuxErrorConnectingError = "error connecting to "
 	tmuxNoSuchFileError      = "No such file or directory"
 	// tmux hooks are array options; this slot lets AINN replace its own hook without clearing user hooks.
-	tmuxAcknowledgeTurnHook = "after-select-window[90]"
+	tmuxAcknowledgeTurnHook          = "after-select-window[90]"
+	tmuxAcknowledgeMouseKey          = "MouseDown1Status"
+	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 )
 
 type hostedTMuxRunner interface {
@@ -56,6 +58,10 @@ func TmuxListWindowDetailsCommandForSettings(settings config.Settings) []string 
 	return append(tmuxPrefixForSettings(settings), "list-windows", "-t", tmuxHostSessionForSettings(settings), "-F", "#{window_id}\t#{window_name}")
 }
 
+func TmuxActiveWindowDetailsCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "display-message", "-p", "-t", tmuxHostSessionForSettings(settings), "#{window_id}\t#{window_name}")
+}
+
 func TmuxKillWindowCommand(windowID string) []string {
 	return TmuxKillWindowCommandForSettings(defaultTmuxSettings(), windowID)
 }
@@ -77,11 +83,24 @@ func TmuxHostedTurnStatusCommandForRecord(settings config.Settings, session Host
 func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configDir string, executable string) []string {
 	shellCommand := tmuxShellQuote(executable) +
 		" hosted-session acknowledge --config-dir " + tmuxShellQuote(configDir) +
-		" --window-id #{window_id}"
+		" --window-id #{window_id}" +
+		" --window-name " + tmuxShellEscapedWindowNameFormat
 	command := "run-shell -b " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
 		"set-hook", "-t", tmuxHostSessionForSettings(settings),
 		tmuxAcknowledgeTurnHook, command,
+	)
+}
+
+func TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings, configDir string, executable string) []string {
+	shellCommand := tmuxShellQuote(executable) +
+		" hosted-session acknowledge --config-dir " + tmuxShellQuote(configDir) +
+		" --window-id #{window_id}" +
+		" --window-name " + tmuxShellEscapedWindowNameFormat
+	command := "switch-client -t = ; run-shell -b -t = " + tmuxCommandQuote(shellCommand)
+	return append(tmuxPrefixForSettings(settings),
+		"bind-key", "-T", "root", tmuxAcknowledgeMouseKey,
+		command,
 	)
 }
 
@@ -125,17 +144,26 @@ func tmuxCommandQuote(value string) string {
 }
 
 func hostedSessionStatusForWindow(windows map[string]string, session HostedSessionRecord) string {
-	if session.TmuxWindowID == "" {
-		return hostedSessionStatusStale
-	}
-	windowName, ok := windows[session.TmuxWindowID]
-	if !ok {
-		return hostedSessionStatusStale
-	}
-	if windowName != session.SessionLabel {
+	if _, ok := HostedSessionActiveWindowID(windows, session); !ok {
 		return hostedSessionStatusStale
 	}
 	return hostedSessionStatusActive
+}
+
+func HostedSessionActiveWindowID(windows map[string]string, session HostedSessionRecord) (string, bool) {
+	if session.TmuxWindowID == "" {
+		return "", false
+	}
+	windowName, ok := windows[session.TmuxWindowID]
+	if ok && windowName == session.SessionLabel {
+		return session.TmuxWindowID, true
+	}
+	for windowID, windowName := range windows {
+		if windowName == session.TmuxWindowID {
+			return windowID, true
+		}
+	}
+	return "", false
 }
 
 func hostedWindowSet(out string) map[string]struct{} {
@@ -171,19 +199,26 @@ func hostedWindowDetailsFromRunnerForSettings(settings config.Settings, runner h
 		return map[string]string{}, nil
 	}
 	if _, err := runner.Run(TmuxHasSessionCommandForSettings(settings)); err != nil {
-		errText := err.Error()
-		if strings.Contains(errText, tmuxNoServerRunningError) ||
-			strings.Contains(errText, tmuxCantFindSessionError) ||
-			(strings.Contains(errText, tmuxErrorConnectingError) && strings.Contains(errText, tmuxNoSuchFileError)) {
+		if isTmuxHostMissingError(err) {
 			return map[string]string{}, nil
 		}
 		return nil, err
 	}
 	stdout, err := runner.Run(TmuxListWindowDetailsCommandForSettings(settings))
 	if err != nil {
+		if isTmuxHostMissingError(err) {
+			return map[string]string{}, nil
+		}
 		return nil, err
 	}
 	return hostedWindowDetails(stdout), nil
+}
+
+func isTmuxHostMissingError(err error) bool {
+	errText := err.Error()
+	return strings.Contains(errText, tmuxNoServerRunningError) ||
+		strings.Contains(errText, tmuxCantFindSessionError) ||
+		(strings.Contains(errText, tmuxErrorConnectingError) && strings.Contains(errText, tmuxNoSuchFileError))
 }
 
 func hostedWindowSetFromRunnerForSettings(settings config.Settings, runner hostedTMuxRunner) (map[string]struct{}, error) {

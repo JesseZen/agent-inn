@@ -171,7 +171,41 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowIDMarksCompletedTurnRead(t 
 		t.Fatal(err)
 	}
 
-	got, ok, err := registry.AcknowledgeTurnByWindowID("@12")
+	got, ok, err := registry.AcknowledgeTurnByWindow("@12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := done
+	want.TurnAcknowledgedGeneration = running.TurnGeneration
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryAcknowledgeTurnByWindowNameMarksLegacyCompletedTurnRead(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "ainn:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.AcknowledgeTurnByWindow("@12", "ainn:worker-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,6 +363,50 @@ func TestHostedSessionRegistryRemoveKillsActiveWindow(t *testing.T) {
 	}
 }
 
+func TestHostedSessionRegistryRemoveKillsLegacyNamedWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "ainn:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		if reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())) {
+			return "@12\tainn:worker-1\n", nil
+		}
+		return "", nil
+	})
+
+	if err := registry.Remove(created.SessionID, runner); err != nil {
+		t.Fatal(err)
+	}
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []HostedSessionRecord{}) {
+		t.Fatalf("got records %#v, want none", records)
+	}
+	want := [][]string{
+		TmuxHasSessionCommand(),
+		TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings()),
+		TmuxKillWindowCommand("@12"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, want)
+	}
+}
+
 func TestHostedSessionRegistryRemoveReturnsUnexpectedHasSessionError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -475,6 +553,50 @@ func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxSocketMissing(t *testing
 		t.Fatalf("got records %#v, want none", records)
 	}
 	want := [][]string{TmuxHasSessionCommand()}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, want)
+	}
+}
+
+func TestHostedSessionRegistryRemoveDeletesStaleWhenTmuxHostDisappearsDuringWindowList(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "ainn:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		if reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings())) {
+			return "", errors.New(tmuxCantFindSessionError)
+		}
+		return "", nil
+	})
+
+	if err := registry.Remove(created.SessionID, runner); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []HostedSessionRecord{}) {
+		t.Fatalf("got records %#v, want none", records)
+	}
+	want := [][]string{
+		TmuxHasSessionCommand(),
+		TmuxListWindowDetailsCommandForSettings(defaultTmuxSettings()),
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, want)
 	}

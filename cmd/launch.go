@@ -227,6 +227,10 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
 			return 1
 		}
+		if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
+			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement mouse binding: %v\n", err)
+			return 1
+		}
 		session, ok, err := registry.Get(sessionID)
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
@@ -236,13 +240,14 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			fmt.Fprintf(stderr, "hosted session %q not found\n", sessionID)
 			return 1
 		}
-		activeWindow := false
+		activeWindowID := ""
 		if session.TmuxWindowID != "" {
 			windowDetails, err := runner.Run(manager.TmuxListWindowDetailsCommandForSettings(settings))
 			if err != nil {
 				fmt.Fprintf(stderr, "failed to inspect tmux windows: %v\n", err)
 				return 1
 			}
+			windows := map[string]string{}
 			for _, line := range strings.Split(windowDetails, "\n") {
 				line = strings.TrimSpace(line)
 				if line == "" {
@@ -252,14 +257,14 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 				if len(parts) != 2 {
 					continue
 				}
-				if parts[0] == session.TmuxWindowID && parts[1] == session.SessionLabel {
-					activeWindow = true
-					break
-				}
+				windows[parts[0]] = parts[1]
+			}
+			if windowID, active := manager.HostedSessionActiveWindowID(windows, session); active {
+				activeWindowID = windowID
 			}
 		}
-		if activeWindow {
-			if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
+		if activeWindowID != "" {
+			if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, activeWindowID)); err != nil {
 				fmt.Fprintf(stderr, "failed to select tmux window: %v\n", err)
 				return 1
 			}
@@ -272,18 +277,21 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			}
 			return 0
 		}
-		if session.LauncherSessionID == "" {
-			fmt.Fprintf(stderr, "hosted session %q is stale and has no launcher session id\n", sessionID)
-			return 1
-		}
 		reopenOpts := opts
 		reopenOpts.Profile = session.WorkerName
 		reopenOpts.WorkerPort = session.WorkerPort
 		reopenOpts.Workspace = session.Workspace
 		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
 		reopenOpts.Model = session.Model
-		reopenOpts.LauncherSessionID = session.LauncherSessionID
-		reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
+		if session.LauncherSessionID == "" {
+			if session.TurnGeneration > 0 {
+				fmt.Fprintf(stderr, "hosted session %q is stale and has no launcher session id\n", sessionID)
+				return 1
+			}
+		} else {
+			reopenOpts.LauncherSessionID = session.LauncherSessionID
+			reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
+		}
 		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID)
 		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, launchCmd))
 		if err != nil {
@@ -381,6 +389,11 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 	if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
 		cleanupIncompleteSession()
 		fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
+		return 1
+	}
+	if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
+		cleanupIncompleteSession()
+		fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement mouse binding: %v\n", err)
 		return 1
 	}
 	if !reuseFirstWindow {
