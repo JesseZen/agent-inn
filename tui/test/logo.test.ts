@@ -39,8 +39,8 @@ describe("logo styles", () => {
       metrics: {
         "ascii-shadow": {
           rows: 10,
-          width: 36,
-          fullWidth: 37,
+          width: 42,
+          fullWidth: 43,
           anchors: {
             a: [2, 2],
             i: [10, 2],
@@ -54,12 +54,12 @@ describe("logo styles", () => {
         },
         terrace: {
           rows: 10,
-          width: 36,
-          fullWidth: 37,
+          width: 42,
+          fullWidth: 43,
           anchors: {
-            a: [1, 2],
-            i: [11, 2],
-            n: [17, 2],
+            a: [2, 2],
+            i: [14, 2],
+            n: [19, 2],
           },
           anchorText: {
             a: "░",

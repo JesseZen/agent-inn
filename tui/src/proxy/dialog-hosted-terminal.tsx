@@ -153,7 +153,12 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           return
         }
         if (option.value.type === "delete") {
-          dialog.replace(() => <DialogHostedTerminalDelete />)
+          dialog.push(() => (
+            <DialogHostedTerminalDelete
+              initialSessions={sessions()}
+              onSessionsChanged={(nextSessions) => setSessions(nextSessions)}
+            />
+          ))
           return
         }
         const session = option.value.session

@@ -298,20 +298,36 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 
 	lockPath, err := rootLockPath(resolvedConfigDir)
 	if err != nil {
+		writeRootStartupFailureLog(cfg.Settings, err)
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
 	release, err := rootLockerFactory(lockPath).Acquire()
 	if err != nil {
+		writeRootStartupFailureLog(cfg.Settings, err)
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
 	defer release()
 	if err := rootRunner(RootOptions{ConfigDir: resolvedConfigDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
+		writeRootStartupFailureLog(cfg.Settings, err)
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func writeRootStartupFailureLog(settings config.Settings, err error) {
+	logDir := expandHome(settings.LogDir)
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		return
+	}
+	f, openErr := os.OpenFile(filepath.Join(logDir, "ainn.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if openErr != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "failed to start: %v\n", err)
 }
 
 func expandHome(path string) string {

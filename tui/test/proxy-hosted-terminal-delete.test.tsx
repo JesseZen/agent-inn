@@ -213,6 +213,47 @@ test("hosted terminal delete page still deletes selected session on enter", asyn
   }
 })
 
+test("hosted terminal delete page escape returns to hosted terminal picker", async () => {
+  const app = await setupHostedTerminal()
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete Hosted Session") && frame.includes("solve problem A")
+    })
+
+    app.setup.mockInput.pressEscape()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session") && frame.includes("solve problem A")
+    })
+
+    const frame = app.setup.captureCharFrame()
+    expect({
+      hasHostedTerminal: frame.includes("Hosted Terminal"),
+      hasDeleteHostedSession: frame.includes("Delete Hosted Session"),
+      hasCreateNewSession: frame.includes("Create new session"),
+      hasSession: frame.includes("solve problem A"),
+    }).toEqual({
+      hasHostedTerminal: true,
+      hasDeleteHostedSession: false,
+      hasCreateNewSession: true,
+      hasSession: true,
+    })
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("hosted terminal delete page does not show ctrl d delete hint", async () => {
   const app = await setupHostedTerminal()
 

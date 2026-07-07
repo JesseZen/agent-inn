@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -50,6 +51,26 @@ func TestTmuxListWindowDetailsCommandForSettings(t *testing.T) {
 		},
 	})
 	want := []string{"tmux", "-L", "ainn-test", "list-windows", "-t", "ainn-test-host", "-F", "#{window_id}\t#{window_name}"}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestTmuxActiveWindowDetailsCommandForSettings(t *testing.T) {
+	got := TmuxActiveWindowDetailsCommandForSettings(config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	})
+	want := []string{"tmux", "-L", "ainn-test", "display-message", "-p", "-t", "ainn-test-host", "#{window_id}\t#{window_name}"}
 	if len(got) != len(want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -174,10 +195,62 @@ func TestTmuxAcknowledgeTurnHookCommandForSettings(t *testing.T) {
 		"tmux", "-L", "ainn-test",
 		"set-hook", "-t", "ainn-test-host",
 		"after-select-window[90]",
-		"run-shell -b \"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id}\"",
+		"run-shell -b \"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\"",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxAcknowledgeTurnMouseBindingCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin")
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"bind-key", "-T", "root", "MouseDown1Status",
+		"switch-client -t = ; run-shell -b -t = \"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\"",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxAcknowledgeTurnCommandsShellQuoteExpandedWindowName(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	commands := [][]string{
+		TmuxAcknowledgeTurnHookCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin"),
+		TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin"),
+	}
+	for _, got := range commands {
+		command := got[len(got)-1]
+		start := strings.Index(command, "\"")
+		end := strings.LastIndex(command, "\"")
+		if start < 0 || end <= start {
+			t.Fatalf("got command %q, want quoted shell command", command)
+		}
+		shellCommand := command[start+1 : end]
+		shellCommand = strings.ReplaceAll(shellCommand, `\\`, `\`)
+		shellCommand = strings.ReplaceAll(shellCommand, `\"`, `"`)
+		shellCommand = strings.ReplaceAll(shellCommand, "#{window_id}", "@12")
+		shellCommand = strings.ReplaceAll(shellCommand, "#{q:window_name}", `O\'Brien`)
+		shellCommand = strings.ReplaceAll(shellCommand, "#{window_name}", "O'Brien")
+		if out, err := exec.Command("sh", "-n", "-c", shellCommand).CombinedOutput(); err != nil {
+			t.Fatalf("expanded shell command %q did not parse: %v: %s", shellCommand, err, string(out))
+		}
 	}
 }
 

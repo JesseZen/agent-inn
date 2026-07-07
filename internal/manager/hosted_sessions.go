@@ -138,8 +138,8 @@ func (r *HostedSessionRegistry) RemoveForSettings(sessionID string, settings con
 		if err != nil {
 			return err
 		}
-		if status := hostedSessionStatusForWindow(windows, session); status == hostedSessionStatusActive {
-			if _, err := runner.Run(TmuxKillWindowCommandForSettings(settings, session.TmuxWindowID)); err != nil {
+		if windowID, active := HostedSessionActiveWindowID(windows, session); active {
+			if _, err := runner.Run(TmuxKillWindowCommandForSettings(settings, windowID)); err != nil {
 				return err
 			}
 		}
@@ -267,12 +267,12 @@ func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, re
 	return updated, err
 }
 
-func (r *HostedSessionRegistry) AcknowledgeTurnByWindowID(windowID string) (HostedSessionRecord, bool, error) {
+func (r *HostedSessionRegistry) AcknowledgeTurnByWindow(windowID string, windowName string) (HostedSessionRecord, bool, error) {
 	var updated HostedSessionRecord
 	found := false
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		for sessionID, session := range file.Sessions {
-			if session.TmuxWindowID != windowID {
+			if session.TmuxWindowID != windowID && session.TmuxWindowID != windowName {
 				continue
 			}
 			found = true
