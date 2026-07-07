@@ -14,6 +14,7 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/manager"
 )
 
@@ -66,11 +67,30 @@ type RootOptions struct {
 }
 
 var rootManagerFactory = func(opts RootOptions) rootManager {
+	logDir := opts.Config.Settings.LogDir
+	if logDir == "" {
+		logDir = "~/.ainn/logs"
+	}
+	logDir = expandHome(logDir)
+	logPath := filepath.Join(logDir, "ainn.log")
+	logWriter, err := logging.NewRotatingWriter(logPath, 10*1024*1024, 3)
+	if err != nil {
+		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
+	}
+	if logWriter == nil {
+		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
+	}
+	level := opts.Config.Settings.LogLevel
+	if level == "" {
+		level = "simple"
+	}
+	logger := logging.New(logWriter, level, logging.ComponentManagerSuper)
 	return manager.New(manager.Config{
 		Config:             opts.Config,
 		ConfigPath:         opts.ConfigPath,
 		Starter:            manager.ExecStarter{},
 		ReconcileTurnHooks: true,
+		Logger:             logger,
 	})
 }
 
@@ -141,6 +161,24 @@ func setRootLockerFactoryForTest(locker rootLocker) func() {
 var errAlreadyLocked = fmt.Errorf("another instance is already running")
 
 var rootRunner = func(opts RootOptions) error {
+	logDir := opts.Config.Settings.LogDir
+	if logDir == "" {
+		logDir = "~/.ainn/logs"
+	}
+	logDir = expandHome(logDir)
+	logPath := filepath.Join(logDir, "ainn.log")
+	logWriter, _ := logging.NewRotatingWriter(logPath, 10*1024*1024, 3)
+	if logWriter == nil {
+		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
+	}
+	level := opts.Config.Settings.LogLevel
+	if level == "" {
+		level = "simple"
+	}
+	rootLogger := logging.New(logWriter, level, logging.ComponentRoot)
+	rootLogger.Info(logging.EventRootStart, "port", opts.ManagerPort)
+	defer rootLogger.Info(logging.EventRootStop)
+
 	mgr := rootManagerFactory(opts)
 	defer mgr.Close()
 	startupStatus := ""

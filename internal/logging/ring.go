@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type WorkerLogSink struct {
@@ -207,17 +208,39 @@ func shouldKeepLine(line string, level string) bool {
 	}
 }
 
+// logSeverity extracts the level from a log line. Structured lines from this
+// package lead with a timestamp and carry the level in column 2; raw subprocess
+// stdout/stderr and panics carry it in column 1 (or not at all). It checks both
+// positions so simple-mode filtering works for either shape; anything without a
+// recognizable level is UNKNOWN and kept (so stack traces and third-party output
+// are never silently dropped).
 func logSeverity(line string) string {
-	switch {
-	case strings.HasPrefix(line, "ERROR "):
-		return "ERROR"
-	case strings.HasPrefix(line, "WARN "):
-		return "WARN"
-	case strings.HasPrefix(line, "INFO "):
-		return "INFO"
-	case strings.HasPrefix(line, "DEBUG "):
-		return "DEBUG"
-	default:
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
 		return "UNKNOWN"
 	}
+	if level := knownLevel(fields[0]); level != "" {
+		return level
+	}
+	if len(fields) > 1 && looksLikeTimestamp(fields[0]) {
+		if level := knownLevel(fields[1]); level != "" {
+			return level
+		}
+	}
+	return "UNKNOWN"
 }
+
+func knownLevel(token string) string {
+	switch token {
+	case "ERROR", "WARN", "INFO", "DEBUG":
+		return token
+	default:
+		return ""
+	}
+}
+
+func looksLikeTimestamp(token string) bool {
+	_, err := time.Parse(timestampLayout, token)
+	return err == nil
+}
+

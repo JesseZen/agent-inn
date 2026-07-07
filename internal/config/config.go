@@ -37,6 +37,7 @@ type PluginDefinition struct {
 type Settings struct {
 	StateDir string           `yaml:"state_dir" json:"state_dir"`
 	LogDir   string           `yaml:"log_dir" json:"log_dir"`
+	LogLevel string           `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	Launch   LaunchSettings   `yaml:"launch" json:"launch"`
 	Terminal TerminalSettings `yaml:"terminal" json:"terminal"`
 }
