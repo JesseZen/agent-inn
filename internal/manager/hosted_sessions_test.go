@@ -244,6 +244,49 @@ func TestHostedSessionRegistryMarkTurnStatePreservesLauncherSessionIDWhenEmpty(t
 	}
 }
 
+func TestHostedSessionRegistryDuplicateCreatesFreshSessionFromWorkspaceAndWorker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "worker",
+		WorkerPort:                 11199,
+		Workspace:                  "/tmp/work",
+		Model:                      "gpt-5.5",
+		AddDirs:                    []string{"/tmp/shared"},
+		TmuxWindowID:               "@12",
+		LauncherSessionID:          "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	duplicated, err := registry.Duplicate(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := HostedSessionRecord{
+		SessionID:    duplicated.SessionID,
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		Workspace:    "/tmp/work",
+		Model:        "gpt-5.5",
+		AddDirs:      []string{"/tmp/shared"},
+		CreatedAt:    duplicated.CreatedAt,
+		LastOpenedAt: duplicated.LastOpenedAt,
+	}
+	if !reflect.DeepEqual(duplicated, want) {
+		t.Fatalf("got %#v, want %#v", duplicated, want)
+	}
+}
+
 func TestHostedSessionRegistrySummariesTreatsMissingTmuxSocketAsStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

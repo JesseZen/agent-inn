@@ -144,6 +144,27 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ))
   }
 
+  async function duplicateSession(session: HostedSessionSummary) {
+    try {
+      const duplicated = await sdk.client.duplicateHostedSession(session.session_id)
+      const settings = await sdk.client.getSettings()
+      await launchProxySession({
+        executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+        workerPort: duplicated.worker_port,
+        profile: duplicated.worker_name,
+        configDir: Global.Path.config,
+        mode: "hosted-terminal",
+        sessionID: duplicated.session_id,
+        opener: settings.settings.terminal.opener,
+        tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+        tmuxHostSession: settings.settings.terminal.tmux.host_session,
+      })
+      await refreshSessions()
+    } catch (err) {
+      await DialogAlert.show(dialog, "Duplicate hosted session failed", String(err instanceof Error ? err.message : err))
+    }
+  }
+
   return (
     <DialogSelect
       title="Hosted Terminal"
@@ -157,6 +178,15 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             changeSessionWorker(option.value.session)
+          },
+        },
+        {
+          command: "session.duplicate",
+          title: "duplicate",
+          disabled: (option) => option?.value.type !== "session",
+          onTrigger: (option) => {
+            if (option.value.type !== "session") return
+            void duplicateSession(option.value.session)
           },
         },
         {

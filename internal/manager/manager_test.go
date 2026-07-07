@@ -304,6 +304,66 @@ func TestManagerHostedSessionsUseSettingsStateDir(t *testing.T) {
 	}
 }
 
+func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
+	stateDir := t.TempDir()
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+		},
+	})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "cli-openai",
+		WorkerPort:                 11199,
+		Workspace:                  "/tmp/work",
+		Model:                      "gpt-5.5",
+		AddDirs:                    []string{"/tmp/shared"},
+		TmuxWindowID:               "@12",
+		LauncherSessionID:          "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions/"+created.SessionID+"/duplicate", nil))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := HostedSessionRecord{
+		SessionID:    got.SessionID,
+		SessionLabel: "cli-openai 1",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+		Workspace:    "/tmp/work",
+		Model:        "gpt-5.5",
+		AddDirs:      []string{"/tmp/shared"},
+		CreatedAt:    got.CreatedAt,
+		LastOpenedAt: got.LastOpenedAt,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+	persisted, ok, err := registry.Get(got.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected duplicated hosted session %q", got.SessionID)
+	}
+	if !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	}
+}
+
 func TestManagerAPIPatchesStaleHostedSessionWorker(t *testing.T) {
 	stateDir := t.TempDir()
 	settings := config.Settings{StateDir: stateDir}

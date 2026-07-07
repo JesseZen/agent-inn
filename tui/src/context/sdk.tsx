@@ -208,6 +208,11 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             body: JSON.stringify(patch),
           })
         },
+        async duplicateHostedSession(sessionID: string) {
+          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}/duplicate`, {
+            method: "POST",
+          })
+        },
         async deleteHostedSession(sessionID: string) {
           return request<{ session_id: string }>(`/api/hosted-sessions/${sessionID}`, {
             method: "DELETE",

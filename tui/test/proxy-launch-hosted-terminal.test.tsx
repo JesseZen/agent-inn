@@ -397,6 +397,111 @@ test("stale hosted session changes worker from session list", async () => {
   }
 })
 
+test("hosted session duplicate creates and launches a fresh session id", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      let onStdoutData: ((chunk: Buffer) => void) | undefined
+      const child = {
+        stdout: {
+          on(event: string, handler: (data: Buffer) => void) {
+            if (event === "data") onStdoutData = handler
+          },
+        },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") {
+            queueMicrotask(() => {
+              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
+              handler(0)
+            })
+          }
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  let duplicateCalls = 0
+  let sessions = [
+    {
+      ...activeHostedSession,
+      workspace: "/tmp/work",
+      model: "gpt-5.5",
+      add_dirs: ["/tmp/shared"],
+      launcher_session_id: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
+    },
+  ]
+  const duplicated = {
+    session_id: "hs_dup",
+    session_label: "test-cli 2",
+    worker_name: "test-cli",
+    worker_port: 1234,
+    workspace: "/tmp/work",
+    model: "gpt-5.5",
+    add_dirs: ["/tmp/shared"],
+    created_at: "2026-06-23T00:01:00Z",
+    last_opened_at: "2026-06-23T00:01:00Z",
+    status: "active",
+  }
+  const app = await mountHostedTerminalApp((url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
+      return json({
+        sessions,
+      })
+    if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
+      duplicateCalls += 1
+      sessions = [sessions[0], duplicated]
+      return json(duplicated, { status: 201 })
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("solve problem A")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("session.duplicate")
+    await wait(async () =>
+      duplicateCalls === 1 &&
+      spawns.some((spawned) =>
+        spawned.cmd.endsWith("ainn") &&
+        spawned.args.join(" ") === "launch --worker 1234 --mode hosted-terminal --no-attach --profile test-cli --config-dir " + Global.Path.config + " --session-id hs_dup"
+      ),
+    )
+
+    expect(duplicateCalls).toBe(1)
+    expect(spawns).toEqual([
+      {
+        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_dup"],
+      },
+      {
+        cmd: "tmux",
+        args: ["-L", "ainn", "list-clients", "-t", "ainn-host"],
+      },
+      {
+        cmd: "osascript",
+        args: ["-e", 'tell application "Terminal" to activate'],
+      },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("stale hosted session launches reopen through CLI", async () => {
   const originalPath = process.env.PATH
   const originalExecutable = process.env.AINN_EXECUTABLE

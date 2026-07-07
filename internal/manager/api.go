@@ -159,6 +159,20 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 		http.NotFound(rw, r)
 		return
 	}
+	if strings.HasSuffix(id, "/duplicate") {
+		id = strings.TrimSuffix(id, "/duplicate")
+		if id == "" || r.Method != http.MethodPost {
+			http.NotFound(rw, r)
+			return
+		}
+		session, err := m.hostedSessions.Duplicate(id)
+		if err != nil {
+			writeJSON(rw, http.StatusNotFound, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		writeJSON(rw, http.StatusCreated, session)
+		return
+	}
 	session, ok, err := m.hostedSessions.Get(id)
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})

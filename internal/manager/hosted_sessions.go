@@ -225,6 +225,23 @@ func (r *HostedSessionRegistry) Create(input HostedSessionRecord) (HostedSession
 	return created, nil
 }
 
+func (r *HostedSessionRegistry) Duplicate(sessionID string) (HostedSessionRecord, error) {
+	session, ok, err := r.Get(sessionID)
+	if err != nil {
+		return HostedSessionRecord{}, err
+	}
+	if !ok {
+		return HostedSessionRecord{}, fmt.Errorf("hosted session %q not found", sessionID)
+	}
+	return r.Create(HostedSessionRecord{
+		WorkerName: session.WorkerName,
+		WorkerPort: session.WorkerPort,
+		Workspace:  session.Workspace,
+		Model:      session.Model,
+		AddDirs:    append([]string{}, session.AddDirs...),
+	})
+}
+
 func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string) error {
 	return r.withLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
