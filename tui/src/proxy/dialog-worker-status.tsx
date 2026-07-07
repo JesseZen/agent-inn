@@ -10,6 +10,7 @@ import { DialogUpstreamPicker } from "./dialog-upstream-picker"
 import { DialogLogs } from "./dialog-logs"
 import { DialogModulePicker } from "./dialog-module"
 import { DialogConfirm } from "../ui/dialog-confirm"
+import { DialogPrompt } from "../ui/dialog-prompt"
 
 const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
@@ -192,9 +193,35 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     },
   }
 
+  const portAction: DialogSelectOption<string> = {
+    title: "Port",
+    value: "port",
+    description: `:${props.worker.port}`,
+    onSelect: async () => {
+      const value = await DialogPrompt.show(dialog, `Port: ${props.worker.name}`, {
+        placeholder: "Port number",
+        value: String(props.worker.port),
+      })
+      if (value === null) return
+      const next = parseInt(value, 10)
+      if (isNaN(next) || next <= 0) {
+        toast.show({ message: "Invalid port number", variant: "error" })
+        return
+      }
+      if (next === props.worker.port) return
+      try {
+        await sdk.client.patchWorker(props.worker.port, { port: next })
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Saved ${props.worker.name} port: ${next}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+    },
+  }
+
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, restartAction, stopAction, deleteAction]
+      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 

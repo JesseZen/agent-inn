@@ -238,6 +238,29 @@ func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string
 	})
 }
 
+func (r *HostedSessionRegistry) UpdateWorker(sessionID string, workerName string, workerPort int) (HostedSessionRecord, error) {
+	var updated HostedSessionRecord
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+		workerName = strings.TrimSpace(workerName)
+		if workerName == "" {
+			return errors.New("worker name is required")
+		}
+		if workerPort <= 0 {
+			return errors.New("worker port is required")
+		}
+		session.WorkerName = workerName
+		session.WorkerPort = workerPort
+		file.Sessions[sessionID] = session
+		updated = session
+		return nil
+	})
+	return updated, err
+}
+
 func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string, launcherSessionID string) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {

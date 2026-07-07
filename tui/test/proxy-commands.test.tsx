@@ -444,7 +444,7 @@ test("proxy workers detail exposes worker status and scoped actions", async () =
     expect(app.frame()).toContain("Manage Modules")
     expect(app.frame()).toContain("View Logs")
     expect(app.frame()).toContain("Launcher")
-    expect(app.frame()).toContain("Restart Worker")
+    expect(app.frame()).toContain("Port")
   } finally {
     await app.cleanup()
   }
@@ -601,12 +601,11 @@ test("proxy workers create claudecode worker payload", async () => {
   try {
     await runCommand(app, "proxy.workers")
     await runCommand(app, "dialog.select.submit")
-    await app.mockInput.typeText("11201")
-    app.mockInput.pressEnter()
     await wait(async () => {
       await app.render()
       return app.frame().includes("Worker Name")
     })
+    await app.mockInput.typeText("claude-main")
     app.mockInput.pressEnter()
     await wait(async () => {
       await app.render()
@@ -625,7 +624,7 @@ test("proxy workers create claudecode worker payload", async () => {
     await app.render()
 
     expect(app.calls.createWorker).toEqual([
-      { name: "worker-11201", port: 11201, upstream: "anthropic", launcher: "claudecode" },
+      { name: "claude-main", upstream: "anthropic", launcher: "claudecode" },
     ])
   } finally {
     await app.cleanup()
@@ -1098,6 +1097,38 @@ test("proxy workers editor patches launcher field", async () => {
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "simple", launcher: "claudecode" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers editor patches port field", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await runCommand(app, "proxy.workers")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("app (:6767)")
+
+    for (let i = 0; i < 5; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Port: app")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused worker port prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("11200")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.patchWorker.some((c) => c.next_port === 11200))
+    await app.render()
+
+    expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "simple", next_port: 11200 }])
   } finally {
     await app.cleanup()
   }

@@ -959,7 +959,7 @@ settings:
       host_start_mode: new-window
 workers:
   claude-main:
-    port: 11199
+    port: 11200
     upstream: anthropic
     launcher: claudecode
 upstreams:
@@ -1021,7 +1021,7 @@ upstreams:
 		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
 		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
 		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11199", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11200", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
 		manager.TmuxAttachCommand(),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -1495,7 +1495,7 @@ settings:
       host_session: ` + hostSession + `
       host_start_mode: ` + hostStartMode + `
 workers:
-  cli-openrouter:
+  cli-openai:
     port: 11199
     upstream: openrouter
 upstreams:

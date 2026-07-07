@@ -141,7 +141,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "failed to load config: %v\n", configLoadErr)
 			return 1
 		}
-		return runHostedTerminalLaunch(cfg.Settings, opts, resolvedConfigDir, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
+		return runHostedTerminalLaunch(cfg, opts, resolvedConfigDir, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
 	}
 
 	if err := runTerminalLaunchCommand(cmd, stdout, stderr); err != nil {
@@ -179,8 +179,9 @@ func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) 
 // name so re-launching the same session switches to the existing window.
 // When noAttach is true, the setup runs but the attach step is skipped so the
 // caller (TUI) can decide whether to open a new terminal.
-func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOptions, configDir string, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
+func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, configDir string, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
 	runner := launchRunnerFactory(stdout, stderr)
+	settings := cfg.Settings
 
 	if _, err := runner.Run(manager.TmuxDetectCommand()); err != nil {
 		fmt.Fprintf(stderr, "tmux is required for hosted-terminal mode: %v\n", err)
@@ -278,8 +279,14 @@ func runHostedTerminalLaunch(settings config.Settings, opts manager.LaunchOption
 			return 0
 		}
 		reopenOpts := opts
+		workerCfg, ok := cfg.Workers[session.WorkerName]
+		if !ok {
+			fmt.Fprintf(stderr, "worker %q not found for hosted session %q\n", session.WorkerName, sessionID)
+			return 1
+		}
+		reopenOpts.Launcher = workerCfg.Launcher
 		reopenOpts.Profile = session.WorkerName
-		reopenOpts.WorkerPort = session.WorkerPort
+		reopenOpts.WorkerPort = workerCfg.Port
 		reopenOpts.Workspace = session.Workspace
 		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
 		reopenOpts.Model = session.Model

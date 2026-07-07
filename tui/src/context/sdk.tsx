@@ -67,7 +67,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async getWorker(port: number) {
           return request<WorkerDetail>(`/api/workers/${port}`)
         },
-        async createWorker(input: { name: string; port: number; upstream: string; launcher?: string }) {
+        async createWorker(input: { name: string; port?: number; upstream: string; launcher?: string }) {
           return request<WorkerSummary>("/api/workers", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -200,6 +200,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
         async getHostedSession(sessionID: string) {
           return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`)
+        },
+        async patchHostedSession(sessionID: string, patch: Partial<Pick<HostedSessionRecord, "worker_name">>) {
+          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(patch),
+          })
         },
         async deleteHostedSession(sessionID: string) {
           return request<{ session_id: string }>(`/api/hosted-sessions/${sessionID}`, {

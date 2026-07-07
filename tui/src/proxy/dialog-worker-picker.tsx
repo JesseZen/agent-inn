@@ -6,12 +6,13 @@ import type { WorkerSummary } from "../context/sdk"
 export function DialogWorkerPicker(props: {
   title: string
   placeholder: string
+  workers?: WorkerSummary[]
   onSelect: (worker: WorkerSummary) => void
 }) {
   const sync = useSync()
 
   const options = createMemo<DialogSelectOption<number>[]>(() =>
-    sync.data.workers.map((worker) => ({
+    (props.workers ?? sync.data.workers).map((worker) => ({
       title: worker.name,
       value: worker.port,
       description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,

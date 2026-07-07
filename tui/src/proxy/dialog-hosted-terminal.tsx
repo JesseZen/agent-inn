@@ -122,12 +122,43 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ))
   }
 
+  function changeSessionWorker(session: HostedSessionSummary) {
+    const currentWorker = sync.data.workers.find((worker) => worker.name === session.worker_name)
+    const currentLauncher = currentWorker?.launcher ?? "codex"
+    const workers = sync.data.workers.filter((worker) => (worker.launcher ?? "codex") === currentLauncher)
+    dialog.push(() => (
+      <DialogWorkerPicker
+        title={`Change worker: ${session.session_label}`}
+        placeholder="Search workers..."
+        workers={workers}
+        onSelect={async (worker) => {
+          try {
+            await sdk.client.patchHostedSession(session.session_id, { worker_name: worker.name })
+            await refreshSessions()
+            dialog.pop()
+          } catch (err) {
+            await DialogAlert.show(dialog, "Change hosted session worker failed", String(err instanceof Error ? err.message : err))
+          }
+        }}
+      />
+    ))
+  }
+
   return (
     <DialogSelect
       title="Hosted Terminal"
       options={options()}
       placeholder="Select hosted session..."
       actions={[
+        {
+          command: "session.change_worker",
+          title: "change worker",
+          disabled: (option) => option?.value.type !== "session" || option.value.session.status !== "stale",
+          onTrigger: (option) => {
+            if (option.value.type !== "session") return
+            changeSessionWorker(option.value.session)
+          },
+        },
         {
           command: "session.delete",
           title: "delete",

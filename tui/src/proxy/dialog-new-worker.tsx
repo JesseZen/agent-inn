@@ -9,21 +9,13 @@ import { createMemo } from "solid-js"
 type Launcher = "codex" | "claudecode"
 
 export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../ui/dialog").useDialog>, sdk: ReturnType<typeof import("../context/sdk").useSDK>["client"], toast: ReturnType<typeof import("../ui/toast").useToast>) {
-  const portStr = await DialogPrompt.show(dialog, "New Worker", { placeholder: "Port number (e.g. 9094)" })
-  if (!portStr) return
-  const port = parseInt(portStr, 10)
-  if (isNaN(port) || port <= 0) {
-    toast.show({ message: "Invalid port number", variant: "error" })
-    return
-  }
-
-  const name = await DialogPrompt.show(dialog, "Worker Name", { placeholder: "e.g. worker-default", value: `worker-${port}` })
+  const name = await DialogPrompt.show(dialog, "Worker Name", { placeholder: "e.g. worker-main" })
   if (!name) return
 
-  dialog.replace(() => <LauncherStep name={name} port={port} />)
+  dialog.replace(() => <LauncherStep name={name} />)
 }
 
-function LauncherStep(props: { name: string; port: number }) {
+function LauncherStep(props: { name: string }) {
   const dialog = useDialog()
   const options: DialogSelectOption<Launcher>[] = [
     {
@@ -44,13 +36,13 @@ function LauncherStep(props: { name: string; port: number }) {
       options={options}
       placeholder="Search launchers..."
       onSelect={async (opt) => {
-        dialog.replace(() => <UpstreamStep name={props.name} port={props.port} launcher={opt.value} />)
+        dialog.replace(() => <UpstreamStep name={props.name} launcher={opt.value} />)
       }}
     />
   )
 }
 
-function UpstreamStep(props: { name: string; port: number; launcher: Launcher }) {
+function UpstreamStep(props: { name: string; launcher: Launcher }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
@@ -71,7 +63,7 @@ function UpstreamStep(props: { name: string; port: number; launcher: Launcher })
       placeholder="Search upstreams..."
       onSelect={async (opt) => {
         try {
-          await sdk.client.createWorker({ name: props.name, port: props.port, upstream: opt.value, launcher: props.launcher })
+          await sdk.client.createWorker({ name: props.name, upstream: opt.value, launcher: props.launcher })
           toast.show({ message: `Created worker ${props.name}`, variant: "success" })
         } catch (err) {
           toast.error(err)
