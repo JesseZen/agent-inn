@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+const (
+	DefaultRotateMaxBytes = 10 * 1024 * 1024
+	DefaultRotateKeep     = 3
+)
+
 // RotatingWriter appends to a file, rotating it aside once it exceeds maxBytes.
 // On rotation the active file becomes name.1, name.1 becomes name.2, and so on
 // up to keep backups; the oldest is discarded. This keeps a bounded amount of
@@ -45,6 +50,9 @@ func NewRotatingWriter(path string, maxBytes int64, keep int) (*RotatingWriter, 
 func (w *RotatingWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.file == nil {
+		return 0, os.ErrClosed
+	}
 	if w.size+int64(len(p)) > w.maxBytes {
 		if err := w.rotateLocked(); err != nil {
 			return 0, err

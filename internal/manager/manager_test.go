@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/hostedhooks"
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/module"
 	"github.com/jesse/agent-inn/internal/modulehook"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
@@ -2388,14 +2390,50 @@ func TestManagerStartConfiguredWorkersLeavesManualEditConflictUnresolvedBeforeSp
 	}
 }
 
+func TestManagerStartWorkerSpawnLogUsesSpawnPortAfterConfigDeletion(t *testing.T) {
+	var logBuf bytes.Buffer
+	starter := &recordingStarter{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: starter,
+		Logger:  logging.New(&logBuf, "detail", logging.ComponentManagerSuper),
+	})
+	starter.onStart = func(spawn WorkerSpawn) {
+		m.updateConfig(func(cfgRoot *config.Config) {
+			delete(cfgRoot.Workers, "app")
+		})
+	}
+
+	if err := m.StartWorker("app"); err != nil {
+		t.Fatal(err)
+	}
+
+	line := logBuf.String()
+	if !strings.Contains(line, logging.EventWorkerSpawn) || !strings.Contains(line, "port=6767") {
+		t.Fatalf("spawn log should use spawned port, got %q", line)
+	}
+}
+
 type recordingStarter struct {
 	spawns     []WorkerSpawn
 	processes  []*recordingProcess
 	forcedStop bool
+	onStart    func(WorkerSpawn)
 }
 
 func (s *recordingStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	s.spawns = append(s.spawns, spawn)
+	if s.onStart != nil {
+		s.onStart(spawn)
+	}
 	process := &recordingProcess{forcedStop: s.forcedStop}
 	s.processes = append(s.processes, process)
 	return process, nil
@@ -2759,6 +2797,37 @@ func TestManagerHealthFailureRestartsWorker(t *testing.T) {
 		t.Fatalf("expected old process to be stopped before respawn, got %d stops", starter.processes[0].stops)
 	}
 	assertWorkerStatus(t, m, "running")
+}
+
+func TestManagerHealthFailureUsesHealthLogger(t *testing.T) {
+	var logBuf bytes.Buffer
+	starter := &recordingStarter{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter:      starter,
+		Logger:       logging.New(&logBuf, "detail", logging.ComponentManagerSuper),
+		HealthLogger: logging.New(&logBuf, "detail", logging.ComponentManagerHealth),
+	})
+	if err := m.StartWorker("app"); err != nil {
+		t.Fatal(err)
+	}
+
+	m.RecordHealth("app", false)
+
+	for _, line := range strings.Split(logBuf.String(), "\n") {
+		if strings.Contains(line, logging.EventHealthFail) && strings.Contains(line, logging.ComponentManagerHealth) {
+			return
+		}
+	}
+	t.Fatalf("missing health.fail under manager.health: %s", logBuf.String())
 }
 
 func TestManagerHealthFailureStopsRestartingAfterRetryLimit(t *testing.T) {

@@ -5,7 +5,7 @@ import "regexp"
 var redactPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)\S+`),
 	regexp.MustCompile(`(?i)("api_key"\s*:\s*")\S+(")`),
-	regexp.MustCompile(`(?i)([?&]key=)[^&\s]+`),
+	regexp.MustCompile(`(?i)([?&](?:api_key|access_token|token|key)=)[^&\s"]+`),
 }
 
 func Redact(line string) string {

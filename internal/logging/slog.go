@@ -112,11 +112,11 @@ func writeAttr(b *strings.Builder, key string, value slog.Value) {
 	}
 	b.WriteString(key)
 	b.WriteByte('=')
-	b.WriteString(formatValue(value.String()))
+	b.WriteString(formatValue(Redact(value.String())))
 }
 
 func formatValue(s string) string {
-	if s == "" || strings.ContainsAny(s, " \t\"") {
+	if s == "" || strings.ContainsAny(s, " \t\"\r\n") {
 		return strconv.Quote(s)
 	}
 	return s

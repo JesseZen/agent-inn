@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -43,7 +42,7 @@ func New(opts Options) (*Worker, error) {
 	}
 	logger := opts.Logger
 	if logger == nil {
-		logger = logging.New(os.Stdout, "simple", logging.ComponentWorkerProxy)
+		logger = logging.New(io.Discard, "simple", logging.ComponentWorkerProxy)
 	}
 	snapshot := opts.Snapshot
 	if opts.Runtime.Upstream.BaseURL != "" {
@@ -105,6 +104,9 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	err := w.proxyRequest(rec, r.WithContext(ctx), snapshot)
 	dur := time.Since(start)
 	if err != nil {
+		if rec.status == 0 {
+			http.Error(rec, err.Error(), http.StatusBadGateway)
+		}
 		w.logger.ErrorContext(ctx, logging.EventRequestDone,
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -112,7 +114,6 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			"dur", dur.Truncate(time.Millisecond).String(),
 			"err", err.Error(),
 		)
-		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
 	}
 	level := logging.LevelForStatus(rec.status)
@@ -144,6 +145,12 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	n, err := r.ResponseWriter.Write(b)
 	r.written += int64(n)
 	return n, err
+}
+
+func (r *responseRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot RuntimeConfigSnapshot) error {

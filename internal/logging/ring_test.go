@@ -43,6 +43,41 @@ func TestWorkerLogSinkRedactsAndKeepsRingTail(t *testing.T) {
 	}
 }
 
+func TestWorkerLogSinkRotatesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "worker-6767.log")
+	sink, err := newWorkerLogSink(path, 10, 32, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sink.Close()
+	sink.SetLevel("detail")
+
+	for i := 0; i < 8; i++ {
+		if _, err := sink.Write([]byte("INFO 0123456789abcdef\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if len(names) > 3 {
+		t.Fatalf("rotation did not bound worker log backups, got %#v", names)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active worker log missing after rotation: %v", err)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("worker log backup missing after rotation: %v", err)
+	}
+}
+
 func TestWorkerLogSinkSimpleModeKeepsWarnAndErrorOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "worker-11199.log")

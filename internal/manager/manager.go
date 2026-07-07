@@ -34,6 +34,7 @@ type Config struct {
 	WorkerClient       WorkerClient
 	ReconcileTurnHooks bool
 	Logger             *slog.Logger
+	HealthLogger       *slog.Logger
 }
 
 type Manager struct {
@@ -52,6 +53,7 @@ type Manager struct {
 	stopConfigWriter   func()
 	events             *eventBus
 	logger             *slog.Logger
+	healthLogger       *slog.Logger
 	portIndex          map[int]string
 	supervisors        map[string]*WorkerSupervisor
 	processes          map[string]ManagedProcess
@@ -144,6 +146,10 @@ func New(cfg Config) *Manager {
 	if logger == nil {
 		logger = logging.New(io.Discard, "simple", logging.ComponentManagerSuper)
 	}
+	healthLogger := cfg.HealthLogger
+	if healthLogger == nil {
+		healthLogger = logger
+	}
 	m := &Manager{
 		config:             cfg.Config,
 		configPath:         cfg.ConfigPath,
@@ -158,6 +164,7 @@ func New(cfg Config) *Manager {
 		store:              store,
 		events:             newEventBus(defaultEventBusCapacity),
 		logger:             logger,
+		healthLogger:       healthLogger,
 		portIndex:          map[int]string{},
 		supervisors:        map[string]*WorkerSupervisor{},
 		processes:          map[string]ManagedProcess{},
@@ -699,7 +706,7 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 	m.statuses[name] = WorkerStateRunning
 	m.setWorkerGenerationLocked(name, 1)
 	m.mu.Unlock()
-	m.logger.Info(logging.EventWorkerSpawn, "worker", name, "port", m.config.Workers[name].Port)
+	m.logger.Info(logging.EventWorkerSpawn, "worker", name, "port", spawn.Port)
 	m.publishEvent(EventWorkerStarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 	return nil
 }
@@ -950,7 +957,7 @@ func (m *Manager) RecordHealth(name string, healthy bool) {
 	}
 	m.retries[name]++
 	m.supervisorFor(name).setRetryCount(m.retries[name])
-	m.logger.Warn(logging.EventHealthFail, "worker", name, "retries", m.retries[name])
+	m.healthLogger.Warn(logging.EventHealthFail, "worker", name, "retries", m.retries[name])
 	if m.retries[name] >= 10 {
 		m.statuses[name] = WorkerStateFailed
 		m.supervisorFor(name).setStatus(WorkerStateFailed)

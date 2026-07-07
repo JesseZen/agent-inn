@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,31 +11,35 @@ import (
 )
 
 type WorkerLogSink struct {
-	mu       sync.Mutex
-	file     *os.File
-	capacity int
-	level    string
-	lines    []string
-	pending  bytes.Buffer
+	mu          sync.Mutex
+	writer      io.WriteCloser
+	capacity    int
+	level       string
+	lines       []string
+	pending     bytes.Buffer
 	subscribers map[chan string]struct{}
 	closed      bool
 }
 
 func NewWorkerLogSink(path string, capacity int) (*WorkerLogSink, error) {
+	return newWorkerLogSink(path, capacity, DefaultRotateMaxBytes, DefaultRotateKeep)
+}
+
+func newWorkerLogSink(path string, capacity int, maxBytes int64, keep int) (*WorkerLogSink, error) {
 	if capacity <= 0 {
 		capacity = 1000
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	writer, err := NewRotatingWriter(path, maxBytes, keep)
 	if err != nil {
 		return nil, err
 	}
 	return &WorkerLogSink{
-		file:     file,
-		capacity: capacity,
-		level:    "simple",
+		writer:      writer,
+		capacity:    capacity,
+		level:       "simple",
 		subscribers: make(map[chan string]struct{}),
 	}, nil
 }
@@ -153,15 +158,15 @@ func (s *WorkerLogSink) Close() error {
 		s.appendLineLocked(s.pending.String())
 		s.pending.Reset()
 	}
-	if s.file == nil {
+	if s.writer == nil {
 		for ch := range s.subscribers {
 			delete(s.subscribers, ch)
 			close(ch)
 		}
 		return nil
 	}
-	err := s.file.Close()
-	s.file = nil
+	err := s.writer.Close()
+	s.writer = nil
 	for ch := range s.subscribers {
 		delete(s.subscribers, ch)
 		close(ch)
@@ -178,8 +183,8 @@ func (s *WorkerLogSink) appendLineLocked(line string) {
 	if len(s.lines) > s.capacity {
 		s.lines = append([]string(nil), s.lines[len(s.lines)-s.capacity:]...)
 	}
-	if s.file != nil {
-		_, _ = s.file.WriteString(line + "\n")
+	if s.writer != nil {
+		_, _ = s.writer.Write([]byte(line + "\n"))
 	}
 	for ch := range s.subscribers {
 		select {
@@ -243,4 +248,3 @@ func looksLikeTimestamp(token string) bool {
 	_, err := time.Parse(timestampLayout, token)
 	return err == nil
 }
-

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -60,37 +61,22 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 type RootOptions struct {
-	ConfigDir   string
-	ConfigPath  string
-	ManagerPort int
-	Config      config.Config
+	ConfigDir           string
+	ConfigPath          string
+	ManagerPort         int
+	Config              config.Config
+	ManagerLogger       *slog.Logger
+	ManagerHealthLogger *slog.Logger
 }
 
 var rootManagerFactory = func(opts RootOptions) rootManager {
-	logDir := opts.Config.Settings.LogDir
-	if logDir == "" {
-		logDir = "~/.ainn/logs"
-	}
-	logDir = expandHome(logDir)
-	logPath := filepath.Join(logDir, "ainn.log")
-	logWriter, err := logging.NewRotatingWriter(logPath, 10*1024*1024, 3)
-	if err != nil {
-		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
-	}
-	if logWriter == nil {
-		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
-	}
-	level := opts.Config.Settings.LogLevel
-	if level == "" {
-		level = "simple"
-	}
-	logger := logging.New(logWriter, level, logging.ComponentManagerSuper)
 	return manager.New(manager.Config{
 		Config:             opts.Config,
 		ConfigPath:         opts.ConfigPath,
 		Starter:            manager.ExecStarter{},
 		ReconcileTurnHooks: true,
-		Logger:             logger,
+		Logger:             opts.ManagerLogger,
+		HealthLogger:       opts.ManagerHealthLogger,
 	})
 }
 
@@ -167,15 +153,21 @@ var rootRunner = func(opts RootOptions) error {
 	}
 	logDir = expandHome(logDir)
 	logPath := filepath.Join(logDir, "ainn.log")
-	logWriter, _ := logging.NewRotatingWriter(logPath, 10*1024*1024, 3)
-	if logWriter == nil {
-		logWriter, _ = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), 10*1024*1024, 3)
+	logWriter, err := logging.NewRotatingWriter(logPath, logging.DefaultRotateMaxBytes, logging.DefaultRotateKeep)
+	if err != nil {
+		logWriter, err = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), logging.DefaultRotateMaxBytes, logging.DefaultRotateKeep)
 	}
+	if err != nil {
+		return fmt.Errorf("open root log: %w", err)
+	}
+	defer logWriter.Close()
 	level := opts.Config.Settings.LogLevel
 	if level == "" {
 		level = "simple"
 	}
 	rootLogger := logging.New(logWriter, level, logging.ComponentRoot)
+	opts.ManagerLogger = logging.New(logWriter, level, logging.ComponentManagerSuper)
+	opts.ManagerHealthLogger = logging.New(logWriter, level, logging.ComponentManagerHealth)
 	rootLogger.Info(logging.EventRootStart, "port", opts.ManagerPort)
 	defer rootLogger.Info(logging.EventRootStop)
 

@@ -2474,7 +2474,9 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 
 	err := rootRunner(RootOptions{
 		ManagerPort: 19090,
-		Config:      config.Config{},
+		Config: config.Config{
+			Settings: config.Settings{LogDir: t.TempDir()},
+		},
 	})
 	if err != nil {
 		t.Fatalf("expected root runner to keep manager running despite worker startup failure, got %v", err)
@@ -2499,6 +2501,54 @@ func TestRootRunnerContinuesAfterConfiguredWorkerStartupFailure(t *testing.T) {
 	}
 	if program.startupStatus != startErr.Error() {
 		t.Fatalf("expected startup status %q, got %q", startErr.Error(), program.startupStatus)
+	}
+}
+
+func TestRootRunnerPassesManagerLoggerToFactory(t *testing.T) {
+	mgr := &fakeRootManager{}
+	server := &fakeRootServer{listenStarted: make(chan struct{})}
+	program := &fakeRootProgram{waitForListen: server.listenStarted}
+	managerLoggerSet := false
+	healthLoggerSet := false
+
+	restoreManager := setRootManagerFactoryForTest(func(opts RootOptions) rootManager {
+		managerLoggerSet = opts.ManagerLogger != nil
+		healthLoggerSet = opts.ManagerHealthLogger != nil
+		return mgr
+	})
+	defer restoreManager()
+	restoreServer := setRootServerFactoryForTest(func(addr string, handler http.Handler) rootServer {
+		server.addr = addr
+		server.handler = handler
+		return server
+	})
+	defer restoreServer()
+	restoreProgram := func() func() {
+		previous := rootProgramFactory
+		rootProgramFactory = func(addr string, startupStatus string, configDir string) rootProgram {
+			program.addr = addr
+			program.startupStatus = startupStatus
+			program.configDir = configDir
+			return program
+		}
+		return func() { rootProgramFactory = previous }
+	}()
+	defer restoreProgram()
+
+	err := rootRunner(RootOptions{
+		ManagerPort: 19090,
+		Config: config.Config{
+			Settings: config.Settings{LogDir: t.TempDir()},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected root runner to finish, got %v", err)
+	}
+	if !managerLoggerSet {
+		t.Fatal("expected root runner to pass manager logger to manager factory")
+	}
+	if !healthLoggerSet {
+		t.Fatal("expected root runner to pass health logger to manager factory")
 	}
 }
 
@@ -2562,7 +2612,12 @@ func TestRootRunnerDoesNotWriteConfiguredWorkerStartupFailureToTerminal(t *testi
 	}()
 	defer restoreProgram()
 
-	err := rootRunner(RootOptions{ManagerPort: 19090, Config: config.Config{}})
+	err := rootRunner(RootOptions{
+		ManagerPort: 19090,
+		Config: config.Config{
+			Settings: config.Settings{LogDir: t.TempDir()},
+		},
+	})
 	if err != nil {
 		t.Fatalf("expected root runner to keep running, got %v", err)
 	}

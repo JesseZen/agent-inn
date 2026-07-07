@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,29 @@ func TestNewRedactsAttrValues(t *testing.T) {
 	}
 }
 
+func TestNewRedactsJSONAttrValuesBeforeQuoting(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New(&buf, "detail", ComponentWorkerProxy)
+
+	logger.Error(EventModuleFail, "err", `{"api_key":"sk-live"}`)
+
+	got := struct {
+		leaked   bool
+		redacted bool
+	}{
+		leaked:   strings.Contains(buf.String(), "sk-live"),
+		redacted: strings.Contains(buf.String(), `err="{\"api_key\":\"***REDACTED***\"}"`),
+	}
+	want := struct {
+		leaked   bool
+		redacted bool
+	}{}
+	want.redacted = true
+	if got != want {
+		t.Fatalf("JSON attr redaction mismatch:\n got %#v\nwant %#v\n(log %q)", got, want, buf.String())
+	}
+}
+
 func TestNewQuotesValuesWithSpaces(t *testing.T) {
 	var buf bytes.Buffer
 	logger := New(&buf, "detail", ComponentManagerSuper)
@@ -83,6 +107,21 @@ func TestNewQuotesValuesWithSpaces(t *testing.T) {
 
 	if !strings.Contains(buf.String(), `err="connection refused"`) {
 		t.Fatalf("value with space not quoted: %q", buf.String())
+	}
+}
+
+func TestNewQuotesValuesWithNewlines(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New(&buf, "detail", ComponentWorkerProxy)
+
+	logger.Info(EventRequestStart, "path", "/foo\nERROR")
+
+	lines := nonEmptyLines(buf.String())
+	if len(lines) != 1 {
+		t.Fatalf("expected one physical log line, got %#v", lines)
+	}
+	if !strings.Contains(lines[0], `path="/foo\nERROR"`) {
+		t.Fatalf("newline value was not quoted: %q", lines[0])
 	}
 }
 
@@ -115,6 +154,23 @@ func TestRotatingWriterKeepsBoundedBackups(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("active log missing after rotation: %v", err)
+	}
+}
+
+func TestRotatingWriterWriteAfterCloseReturnsClosedError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ainn.log")
+	w, err := NewRotatingWriter(path, 16, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := w.Write([]byte("late log\n"))
+	if n != 0 || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("write after close = %d, %v; want 0, %v", n, err, os.ErrClosed)
 	}
 }
 

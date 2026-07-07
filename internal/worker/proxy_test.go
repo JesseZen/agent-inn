@@ -739,6 +739,23 @@ func TestCopyResponseSkipsEmptyReads(t *testing.T) {
 	}
 }
 
+func TestCopyResponseFlushesThroughResponseRecorder(t *testing.T) {
+	writer := &recordingResponseWriter{header: http.Header{}}
+	rec := &responseRecorder{ResponseWriter: writer}
+	resp := &module.ProxyResponse{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("ok")),
+	}
+
+	err := copyProxyResponse(context.Background(), rec, resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writer.flushCount != 1 {
+		t.Fatalf("expected recorder to forward flush, got %d", writer.flushCount)
+	}
+}
+
 func TestWorkerLogsRequestStartAndDoneWithCorrelationID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -846,6 +863,75 @@ func TestWorkerLogsUpstreamFail(t *testing.T) {
 
 	if !strings.Contains(logBuf.String(), logging.EventUpstreamFail) {
 		t.Fatalf("missing %s in log output: %s", logging.EventUpstreamFail, logBuf.String())
+	}
+}
+
+func TestWorkerLogsBadGatewayStatusOnUpstreamFail(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := logging.New(&logBuf, "detail", logging.ComponentWorkerProxy)
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: "http://127.0.0.1:1"},
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadGateway {
+		t.Fatalf("got response status %d, want %d", res.Code, http.StatusBadGateway)
+	}
+	for _, line := range strings.Split(logBuf.String(), "\n") {
+		if strings.Contains(line, logging.EventRequestDone) && strings.Contains(line, "status=502") {
+			return
+		}
+	}
+	t.Fatalf("missing request.done status=502 in log output: %s", logBuf.String())
+}
+
+func TestNewWithNilLoggerDoesNotWriteStdout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStdout := os.Stdout
+	os.Stdout = stdoutWriter
+	worker, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
+		},
+	})
+	os.Stdout = originalStdout
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	res := httptest.NewRecorder()
+	worker.ServeHTTP(res, req)
+	if err := stdoutWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(stdoutReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(out) != "" {
+		t.Fatalf("nil logger wrote to stdout: %q", string(out))
 	}
 }
 
