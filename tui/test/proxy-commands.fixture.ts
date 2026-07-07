@@ -41,26 +41,22 @@ function frameLines(frame: string) {
     .filter(Boolean)
 }
 
-function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelayMs?: number } = {}) {
-  const providers = new Map<string, RedactedUpstream>([
-    [
-      "openai",
+function createProxyHarness(input: { workers?: WorkerSummary[]; upstreams?: RedactedUpstream[]; patchWorkerDelayMs?: number } = {}) {
+  const providers = new Map<string, RedactedUpstream>(
+    (input.upstreams ?? [
       {
         name: "openai",
         base_url: "https://api.openai.com/v1",
         has_api_key: true,
       },
-    ],
-    [
-      "anthropic",
       {
         name: "anthropic",
         base_url: "https://api.anthropic.com/v1",
         has_api_key: true,
         api_format: "anthropic",
       },
-    ],
-  ])
+    ]).map((upstream) => [upstream.name, upstream]),
+  )
 
   const workers = new Map<number, WorkerSummary>([
     [
@@ -436,7 +432,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
   return { calls, fetch: override, hostedSessions }
 }
 
-export async function mountProxyApp(input: { workers?: WorkerSummary[]; patchWorkerDelayMs?: number } = {}) {
+export async function mountProxyApp(input: { workers?: WorkerSummary[]; upstreams?: RedactedUpstream[]; patchWorkerDelayMs?: number } = {}) {
   const tmp = await tmpdir()
   const home = tmp.path
   const app = "ainn"
