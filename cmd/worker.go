@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/module"
 	"github.com/jesse/agent-inn/internal/modulehook"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
@@ -156,7 +157,10 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		}
 		snapshot.HookStatuses[hook.Name()] = modulehook.Status{State: hook.State(), Detail: hook.Detail()}
 	}
-	w, err := worker.New(worker.Options{Snapshot: snapshot})
+	w, err := worker.New(worker.Options{
+		Snapshot: snapshot,
+		Logger:   logging.New(os.Stdout, string(cfg.LogLevel), logging.ComponentWorkerProxy),
+	})
 	if err != nil {
 		return err
 	}

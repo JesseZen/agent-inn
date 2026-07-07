@@ -138,6 +138,18 @@ func RequestIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// LevelForStatus maps an HTTP status code to the appropriate slog level so
+// that 4xx/5xx responses surface in simple mode without extra configuration.
+func LevelForStatus(status int) slog.Level {
+	if status >= 500 {
+		return slog.LevelError
+	}
+	if status >= 400 {
+		return slog.LevelWarn
+	}
+	return slog.LevelInfo
+}
+
 // NewRequestID returns a short correlation id (8 hex chars) for one request.
 func NewRequestID() string {
 	var buf [4]byte

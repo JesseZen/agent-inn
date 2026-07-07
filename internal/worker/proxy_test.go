@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/module"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 	"github.com/jesse/agent-inn/internal/upstream"
@@ -736,6 +738,148 @@ func TestCopyResponseSkipsEmptyReads(t *testing.T) {
 		t.Fatalf("bad copy behavior: writes=%d flushes=%d body=%q", writer.emptyWriteCount, writer.flushCount, writer.body)
 	}
 }
+
+func TestWorkerLogsRequestStartAndDoneWithCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	var logBuf bytes.Buffer
+	logger := logging.New(&logBuf, "detail", logging.ComponentWorkerProxy)
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL, APIKey: "test-key"},
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	out := logBuf.String()
+	if !strings.Contains(out, logging.EventRequestStart) {
+		t.Fatalf("missing %s in log output: %s", logging.EventRequestStart, out)
+	}
+	if !strings.Contains(out, logging.EventRequestDone) {
+		t.Fatalf("missing %s in log output: %s", logging.EventRequestDone, out)
+	}
+
+	// Both lines must share the same req= correlation id.
+	var reqID string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, logging.EventRequestStart) {
+			for _, field := range strings.Fields(line) {
+				if strings.HasPrefix(field, "req=") {
+					reqID = field
+				}
+			}
+		}
+	}
+	if reqID == "" {
+		t.Fatalf("no req= field found in request.start line: %s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, logging.EventRequestDone) && !strings.Contains(line, reqID) {
+			t.Fatalf("request.done line missing correlation id %q: %s", reqID, line)
+		}
+	}
+}
+
+func TestWorkerReusesInboundRequestID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	var logBuf bytes.Buffer
+	logger := logging.New(&logBuf, "detail", logging.ComponentWorkerProxy)
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("X-Request-Id", "inbound-abc123")
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if !strings.Contains(logBuf.String(), "req=inbound-abc123") {
+		t.Fatalf("inbound request id not propagated in logs: %s", logBuf.String())
+	}
+}
+
+func TestWorkerLogsUpstreamFail(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := logging.New(&logBuf, "detail", logging.ComponentWorkerProxy)
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: "http://127.0.0.1:1"},
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if !strings.Contains(logBuf.String(), logging.EventUpstreamFail) {
+		t.Fatalf("missing %s in log output: %s", logging.EventUpstreamFail, logBuf.String())
+	}
+}
+
+func TestWorkerLogsSnapshotReloadOnUpdateRuntime(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := logging.New(&logBuf, "detail", logging.ComponentWorkerProxy)
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{Generation: 1,
+			Upstream: upstream.RuntimeUpstream{BaseURL: "http://localhost:9999"}},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = w.UpdateRuntime(appruntime.WorkerRuntime{
+		Upstream: appruntime.UpstreamRuntime{
+			ID:        "openai",
+			BaseURL:   "http://localhost:9999",
+			APIFormat: "openai",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(logBuf.String(), logging.EventSnapshotReload) {
+		t.Fatalf("missing %s in log output: %s", logging.EventSnapshotReload, logBuf.String())
+	}
+}
+
+// Ensure slog.Logger is passed through and not a nil-logger dependency.
+var _ *slog.Logger = (*slog.Logger)(nil)
 
 func TestNewRejectsInvalidRuntimeInsteadOfPanicking(t *testing.T) {
 	worker, err := New(Options{

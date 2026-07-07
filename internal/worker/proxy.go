@@ -7,31 +7,43 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/jesse/agent-inn/internal/constants"
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/module"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
+const headerRequestID = "X-Request-Id"
+
 type Worker struct {
 	snapshots *snapshotHolder
 	client    *http.Client
+	logger    *slog.Logger
 }
 
 type Options struct {
 	Snapshot RuntimeConfigSnapshot
 	Runtime  appruntime.WorkerRuntime
 	Client   *http.Client
+	Logger   *slog.Logger
 }
 
 func New(opts Options) (*Worker, error) {
 	client := opts.Client
 	if client == nil {
 		client = http.DefaultClient
+	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = logging.New(os.Stdout, "simple", logging.ComponentWorkerProxy)
 	}
 	snapshot := opts.Snapshot
 	if opts.Runtime.Upstream.BaseURL != "" {
@@ -45,6 +57,7 @@ func New(opts Options) (*Worker, error) {
 	return &Worker{
 		snapshots: newSnapshotHolder(snapshot),
 		client:    client,
+		logger:    logger,
 	}, nil
 }
 
@@ -55,6 +68,7 @@ func (w *Worker) UpdateRuntime(runtime appruntime.WorkerRuntime) (appruntime.Gen
 	}
 	snapshot = snapshot.withCompiledUpstream()
 	w.snapshots.Store(snapshot)
+	w.logger.Info(logging.EventSnapshotReload, "generation", snapshot.Generation)
 	return appruntime.Generation(snapshot.Generation), nil
 }
 
@@ -73,11 +87,63 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reqID := r.Header.Get(headerRequestID)
+	if reqID == "" {
+		reqID = logging.NewRequestID()
+	}
+	ctx := logging.ContextWithRequestID(r.Context(), reqID)
+
+	rec := &responseRecorder{ResponseWriter: rw}
+	start := time.Now()
+	w.logger.InfoContext(ctx, logging.EventRequestStart,
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
+
 	snapshot := w.snapshots.Load()
 	snapshot = snapshot.withCompiledUpstream()
-	if err := w.proxyRequest(rw, r, snapshot); err != nil {
+	err := w.proxyRequest(rec, r.WithContext(ctx), snapshot)
+	dur := time.Since(start)
+	if err != nil {
+		w.logger.ErrorContext(ctx, logging.EventRequestDone,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"dur", dur.Truncate(time.Millisecond).String(),
+			"err", err.Error(),
+		)
 		http.Error(rw, err.Error(), http.StatusBadGateway)
+		return
 	}
+	level := logging.LevelForStatus(rec.status)
+	w.logger.Log(ctx, level, logging.EventRequestDone,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", rec.status,
+		"dur", dur.Truncate(time.Millisecond).String(),
+		"bytes", rec.written,
+	)
+}
+
+// responseRecorder wraps http.ResponseWriter to capture status code and byte count.
+type responseRecorder struct {
+	http.ResponseWriter
+	status  int
+	written int64
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.written += int64(n)
+	return n, err
 }
 
 func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot RuntimeConfigSnapshot) error {
@@ -115,6 +181,12 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	}
 	for _, middleware := range snapshot.Modules {
 		if err := middleware.ProcessRequest(ctx, proxyReq); err != nil {
+			w.logger.ErrorContext(ctx, logging.EventModuleFail,
+				"module", middleware.Name(),
+				"method", proxyReq.Method,
+				"path", proxyReq.Path,
+				"err", err.Error(),
+			)
 			return err
 		}
 	}
@@ -152,6 +224,12 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 
 	upstreamHTTPResp, err := w.client.Do(upstreamReq)
 	if err != nil {
+		w.logger.ErrorContext(ctx, logging.EventUpstreamFail,
+			"method", proxyReq.Method,
+			"path", proxyReq.Path,
+			"url", upstreamURL,
+			"err", err.Error(),
+		)
 		return err
 	}
 	proxyResp := &module.ProxyResponse{
@@ -165,6 +243,13 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		proxyResp, err = snapshot.Modules[i].WrapResponse(ctx, proxyReq, proxyResp)
 		if err != nil {
 			_ = upstreamHTTPResp.Body.Close()
+			w.logger.ErrorContext(ctx, logging.EventModuleFail,
+				"module", snapshot.Modules[i].Name(),
+				"method", proxyReq.Method,
+				"path", proxyReq.Path,
+				"phase", "wrap_response",
+				"err", err.Error(),
+			)
 			return err
 		}
 	}
