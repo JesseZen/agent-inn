@@ -188,21 +188,44 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 	}
 	if r.Method == http.MethodPatch {
 		var payload struct {
-			WorkerName string `json:"worker_name"`
+			WorkerName   *string `json:"worker_name"`
+			SessionLabel *string `json:"session_label"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
 		}
-		payload.WorkerName = strings.TrimSpace(payload.WorkerName)
-		if payload.WorkerName == "" {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker name is required"})
+		if (payload.WorkerName == nil && payload.SessionLabel == nil) || (payload.WorkerName != nil && payload.SessionLabel != nil) {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "exactly one hosted session field is required"})
 			return
 		}
 		cfg, _ := m.syncConfigFromStore()
-		targetWorker, ok := cfg.Workers[payload.WorkerName]
+		if payload.SessionLabel != nil {
+			sessionLabel := strings.TrimSpace(*payload.SessionLabel)
+			if sessionLabel == "" {
+				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "session label is required"})
+				return
+			}
+			updated, err := m.hostedSessions.RenameForSettings(id, sessionLabel, cfg.Settings, hostedTMuxRunnerFactory())
+			if err != nil {
+				if strings.Contains(err.Error(), "already exists") {
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+			writeJSON(rw, http.StatusOK, updated)
+			return
+		}
+		workerName := strings.TrimSpace(*payload.WorkerName)
+		if workerName == "" {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker name is required"})
+			return
+		}
+		targetWorker, ok := cfg.Workers[workerName]
 		if !ok {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("worker %q not found", payload.WorkerName)})
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("worker %q not found", workerName)})
 			return
 		}
 		currentWorker, ok := cfg.Workers[session.WorkerName]
@@ -214,7 +237,7 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 			writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("hosted session worker launcher cannot change from %q to %q", currentWorker.Launcher, targetWorker.Launcher)})
 			return
 		}
-		if payload.WorkerName != session.WorkerName {
+		if workerName != session.WorkerName {
 			sessions, err := m.hostedSessions.SummariesForSettings(cfg.Settings)
 			if err != nil {
 				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
@@ -227,7 +250,7 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 				}
 			}
 		}
-		updated, err := m.hostedSessions.UpdateWorker(id, payload.WorkerName, targetWorker.Port)
+		updated, err := m.hostedSessions.UpdateWorker(id, workerName, targetWorker.Port)
 		if err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return

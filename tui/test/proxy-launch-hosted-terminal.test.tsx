@@ -397,6 +397,72 @@ test("stale hosted session changes worker from session list", async () => {
   }
 })
 
+test("hosted session rename patches label from session list", async () => {
+  const patches: Array<{ session_id: string; session_label: string }> = []
+  let sessions = [{ ...activeHostedSession }]
+  const app = await mountHostedTerminalApp(async (url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      return json({
+        sessions,
+      })
+    }
+    if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "PATCH") {
+      const body = (await request.json()) as { session_label: string }
+      patches.push({ session_id: "hs_1", session_label: body.session_label })
+      sessions = sessions.map((session) =>
+        session.session_id === "hs_1" ? { ...session, session_label: body.session_label } : session,
+      )
+      const updated = sessions[0]
+      return json({
+        session_id: updated.session_id,
+        session_label: updated.session_label,
+        worker_name: updated.worker_name,
+        worker_port: updated.worker_port,
+        created_at: updated.created_at,
+        last_opened_at: updated.last_opened_at,
+      })
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("solve problem A")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("session.rename")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Rename Hosted Session")
+    })
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused hosted session rename prompt")
+    editor.selectAll()
+    await app.setup.mockInput.typeText("solve problem B")
+    await app.setup.renderOnce()
+    app.setup.mockInput.pressEnter()
+    await wait(() => patches.length === 1)
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("solve problem B")
+    })
+
+    expect(patches).toEqual([{ session_id: "hs_1", session_label: "solve problem B" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("hosted session duplicate creates and launches a fresh session id", async () => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
   mock.module("node:child_process", () => ({

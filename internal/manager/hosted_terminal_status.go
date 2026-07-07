@@ -71,6 +71,11 @@ func TmuxKillWindowCommandForSettings(settings config.Settings, windowID string)
 	return append(tmuxPrefixForSettings(settings), "kill-window", "-t", target)
 }
 
+func TmuxRenameWindowCommandForSettings(settings config.Settings, windowID string, name string) []string {
+	target := tmuxHostSessionForSettings(settings) + ":" + windowID
+	return append(tmuxPrefixForSettings(settings), "rename-window", "-t", target, name)
+}
+
 func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID string, state string) []string {
 	return tmuxHostedTurnStatusCommand(settings, windowID, state, true)
 }

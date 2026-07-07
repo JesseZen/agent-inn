@@ -469,16 +469,22 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     return (
       <box
         flexDirection="row"
+        flexShrink={0}
         backgroundColor={active() ? theme.primary : RGBA.fromInts(0, 0, 0, 0)}
         onMouseUp={() => triggerAction(item)}
       >
         <text
+          flexShrink={0}
+          wrapMode="none"
           fg={disabled() ? theme.textMuted : active() ? fg : theme.text}
           attributes={active() ? TextAttributes.BOLD : undefined}
         >
           {item.title}
         </text>
-        <text fg={disabled() ? theme.textMuted : active() ? fg : theme.textMuted}> {item.label}</text>
+        <text flexShrink={0} wrapMode="none" fg={disabled() ? theme.textMuted : active() ? fg : theme.textMuted}>
+          {" "}
+          {item.label}
+        </text>
       </box>
     )
   }

@@ -144,6 +144,22 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ))
   }
 
+  async function renameSession(session: HostedSessionSummary) {
+    const label = await DialogPrompt.show(dialog, "Rename Hosted Session", {
+      placeholder: "Session label",
+      value: session.session_label,
+      description: () => <text>Label must be unique. It will appear on the tmux tab.</text>,
+    })
+    if (label === null) return
+    try {
+      await sdk.client.patchHostedSession(session.session_id, { session_label: label })
+      const nextSessions = await sdk.client.listHostedSessions()
+      dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} />)
+    } catch (err) {
+      await DialogAlert.show(dialog, "Rename hosted session failed", String(err instanceof Error ? err.message : err))
+    }
+  }
+
   async function duplicateSession(session: HostedSessionSummary) {
     try {
       const duplicated = await sdk.client.duplicateHostedSession(session.session_id)
@@ -181,8 +197,18 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           },
         },
         {
+          command: "session.rename",
+          title: "rename",
+          disabled: (option) => option?.value.type !== "session",
+          onTrigger: (option) => {
+            if (option.value.type !== "session") return
+            void renameSession(option.value.session)
+          },
+        },
+        {
           command: "session.duplicate",
           title: "duplicate",
+          side: "right",
           disabled: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
@@ -192,6 +218,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         {
           command: "session.delete",
           title: "delete",
+          side: "right",
           disabled: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return

@@ -308,6 +308,46 @@ func (r *HostedSessionRegistry) UpdateWorker(sessionID string, workerName string
 	return updated, err
 }
 
+func (r *HostedSessionRegistry) RenameForSettings(sessionID string, sessionLabel string, settings config.Settings, runner hostedTMuxRunner) (HostedSessionRecord, error) {
+	var updated HostedSessionRecord
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+		sessionLabel = strings.TrimSpace(sessionLabel)
+		if sessionLabel == "" {
+			return errors.New("session label is required")
+		}
+		if session.SessionLabel == sessionLabel {
+			updated = session
+			return nil
+		}
+		for _, other := range file.Sessions {
+			if other.SessionID != sessionID && other.SessionLabel == sessionLabel {
+				return fmt.Errorf("hosted session label %q already exists", sessionLabel)
+			}
+		}
+		if session.TmuxWindowID != "" {
+			windows, err := hostedWindowDetailsFromRunnerForSettings(settings, runner)
+			if err != nil {
+				return err
+			}
+			if windowID, active := HostedSessionActiveWindowID(windows, session); active {
+				if _, err := runner.Run(TmuxRenameWindowCommandForSettings(settings, windowID, sessionLabel)); err != nil {
+					return err
+				}
+				session.TmuxWindowID = windowID
+			}
+		}
+		session.SessionLabel = sessionLabel
+		file.Sessions[sessionID] = session
+		updated = session
+		return nil
+	})
+	return updated, err
+}
+
 func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string, launcherSessionID string) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
