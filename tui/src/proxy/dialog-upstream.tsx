@@ -159,7 +159,7 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
       } catch (err) {
         toast.error(err)
       }
-      dialog.clear()
+      dialog.pop()
     },
   }
   const testAction: DialogSelectOption<string> = {

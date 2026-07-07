@@ -531,6 +531,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       (isEmpty, wasEmpty) => {
         // only trigger when we transition into an empty-provider state
         if (!isEmpty || wasEmpty) return
+        if (dialog.stack.length > 0) return
         dialog.replace(() => <DialogProviderList />)
       },
     ),

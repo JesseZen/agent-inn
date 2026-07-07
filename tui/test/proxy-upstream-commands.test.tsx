@@ -246,11 +246,53 @@ test("proxy upstream editor deletes upstream after confirmation", async () => {
 
     app.mockInput.pressEnter()
     await wait(() => app.calls.deleteUpstream.length === 1)
-    await app.render()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Manage Upstreams")
+    })
 
     expect(app.calls.deleteUpstream).toEqual(["openai"])
+    expect(app.frame()).toContain("Manage Upstreams")
+    expect(app.frame()).not.toContain("openai https://api.openai.com/v1")
+    expect(app.frame()).toContain("anthropic")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream editor returns to manager after deleting the last upstream", async () => {
+  const app = await mountProxyApp({
+    upstreams: [
+      {
+        name: "openai",
+        base_url: "https://api.openai.com/v1",
+        has_api_key: true,
+      },
+    ],
+  })
+
+  try {
     await openUpstreamManager(app)
-    expect(app.frame()).not.toContain("openai")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await runCommand(app, "dialog.select.end")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete upstream")
+    })
+
+    app.mockInput.pressEnter()
+    await wait(() => app.calls.deleteUpstream.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Manage Upstreams")
+    })
+
+    expect(app.calls.deleteUpstream).toEqual(["openai"])
+    expect(app.frame()).toContain("Manage Upstreams")
+    expect(app.frame()).not.toContain("openai https://api.openai.com/v1")
   } finally {
     await app.cleanup()
   }

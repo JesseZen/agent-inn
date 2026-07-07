@@ -45,3 +45,10 @@
 
 21. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置
 22. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
+
+## 人工验证
+
+23. 修 TUI 视觉/交互问题时，自动测试通过后必须提供隔离人工验证命令，让我亲自检查。
+24. 人工验证命令必须使用 worktree build 产物、独立临时 config/state/log、非默认 manager port、唯一 tmux socket/session；禁止复用 `~/.ainn`、`9090` 或当前主实例状态。
+25. 优先使用最小假配置复现 UI 行为，避免真实 upstream/API key 和真实 worker；最终回复必须包含启动命令、操作路径、预期结果和清理命令。
+26. 人工发现的新场景要补自动回归测试，再修源头。
