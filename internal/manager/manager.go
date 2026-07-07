@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +33,7 @@ type Config struct {
 	HealthChecker      HealthChecker
 	WorkerClient       WorkerClient
 	ReconcileTurnHooks bool
+	Logger             *slog.Logger
 }
 
 type Manager struct {
@@ -48,6 +51,7 @@ type Manager struct {
 	store              *config.Store
 	stopConfigWriter   func()
 	events             *eventBus
+	logger             *slog.Logger
 	portIndex          map[int]string
 	supervisors        map[string]*WorkerSupervisor
 	processes          map[string]ManagedProcess
@@ -136,6 +140,10 @@ const healthyRetryResetWindow = 60 * time.Second
 func New(cfg Config) *Manager {
 	cfg.Config.ApplyDefaults()
 	store := config.NewStore(cfg.ConfigPath, cfg.Config)
+	logger := cfg.Logger
+	if logger == nil {
+		logger = logging.New(io.Discard, "simple", logging.ComponentManagerSuper)
+	}
 	m := &Manager{
 		config:             cfg.Config,
 		configPath:         cfg.ConfigPath,
@@ -149,6 +157,7 @@ func New(cfg Config) *Manager {
 		healthPoll:         100 * time.Millisecond,
 		store:              store,
 		events:             newEventBus(defaultEventBusCapacity),
+		logger:             logger,
 		portIndex:          map[int]string{},
 		supervisors:        map[string]*WorkerSupervisor{},
 		processes:          map[string]ManagedProcess{},
@@ -678,6 +687,7 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 		m.supervisorFor(name).setStatus(WorkerStateFailed)
 		m.statuses[name] = WorkerStateFailed
 		m.mu.Unlock()
+		m.logger.Error(logging.EventWorkerSpawn, "worker", name, "err", err.Error())
 		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 		return err
 	}
@@ -689,6 +699,7 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 	m.statuses[name] = WorkerStateRunning
 	m.setWorkerGenerationLocked(name, 1)
 	m.mu.Unlock()
+	m.logger.Info(logging.EventWorkerSpawn, "worker", name, "port", m.config.Workers[name].Port)
 	m.publishEvent(EventWorkerStarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 	return nil
 }
@@ -753,6 +764,7 @@ func (m *Manager) StopWorker(name string) error {
 	m.statuses[name] = status
 	m.supervisorFor(name).setStatus(status)
 	m.mu.Unlock()
+	m.logger.Info(logging.EventWorkerExit, "worker", name, "status", string(status))
 	m.publishEvent(EventWorkerStopped, map[string]any{"worker": name, "status": string(status)})
 	return nil
 }
@@ -902,6 +914,7 @@ func (m *Manager) restartWorker(name string, resetRetries bool) error {
 	if err := m.startWorker(name, resetRetries); err != nil {
 		return err
 	}
+	m.logger.Info(logging.EventWorkerRestart, "worker", name)
 	m.publishEvent(EventWorkerRestarted, map[string]any{"worker": name, "status": string(WorkerStateRunning)})
 	return nil
 }
@@ -937,6 +950,7 @@ func (m *Manager) RecordHealth(name string, healthy bool) {
 	}
 	m.retries[name]++
 	m.supervisorFor(name).setRetryCount(m.retries[name])
+	m.logger.Warn(logging.EventHealthFail, "worker", name, "retries", m.retries[name])
 	if m.retries[name] >= 10 {
 		m.statuses[name] = WorkerStateFailed
 		m.supervisorFor(name).setStatus(WorkerStateFailed)
