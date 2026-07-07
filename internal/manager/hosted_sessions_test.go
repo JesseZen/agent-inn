@@ -273,12 +273,86 @@ func TestHostedSessionRegistryDuplicateCreatesFreshSessionFromWorkspaceAndWorker
 
 	want := HostedSessionRecord{
 		SessionID:    duplicated.SessionID,
-		SessionLabel: "worker 1",
+		SessionLabel: "solve problem A 2",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
 		Model:        "gpt-5.5",
 		AddDirs:      []string{"/tmp/shared"},
+		CreatedAt:    duplicated.CreatedAt,
+		LastOpenedAt: duplicated.LastOpenedAt,
+	}
+	if !reflect.DeepEqual(duplicated, want) {
+		t.Fatalf("got %#v, want %#v", duplicated, want)
+	}
+}
+
+func TestHostedSessionRegistryDuplicateIncrementsExistingLabelSuffix(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	_, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A 2",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	duplicated, err := registry.Duplicate(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := HostedSessionRecord{
+		SessionID:    duplicated.SessionID,
+		SessionLabel: "solve problem A 3",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		AddDirs:      []string{},
+		CreatedAt:    duplicated.CreatedAt,
+		LastOpenedAt: duplicated.LastOpenedAt,
+	}
+	if !reflect.DeepEqual(duplicated, want) {
+		t.Fatalf("got %#v, want %#v", duplicated, want)
+	}
+}
+
+func TestHostedSessionRegistryDuplicateIncrementsInitialLabelSuffix(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	duplicated, err := registry.Duplicate(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := HostedSessionRecord{
+		SessionID:    duplicated.SessionID,
+		SessionLabel: "worker 2",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		AddDirs:      []string{},
 		CreatedAt:    duplicated.CreatedAt,
 		LastOpenedAt: duplicated.LastOpenedAt,
 	}

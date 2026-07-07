@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 )
 
 const hostedSessionsFileName = "hosted-terminal-sessions.json"
+const firstDuplicateLabelSuffix = 2
 
 const (
 	hostedSessionStatusActive = "active"
@@ -226,20 +228,48 @@ func (r *HostedSessionRegistry) Create(input HostedSessionRecord) (HostedSession
 }
 
 func (r *HostedSessionRegistry) Duplicate(sessionID string) (HostedSessionRecord, error) {
-	session, ok, err := r.Get(sessionID)
+	var duplicated HostedSessionRecord
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+
+		labelBase := session.SessionLabel
+		nextSuffix := firstDuplicateLabelSuffix
+		if index := strings.LastIndex(labelBase, " "); index >= 0 {
+			suffix, err := strconv.Atoi(labelBase[index+1:])
+			if err == nil && suffix > 0 {
+				labelBase = labelBase[:index]
+				nextSuffix = suffix + 1
+			}
+		}
+		label := fmt.Sprintf("%s %d", labelBase, nextSuffix)
+		for hasSessionLabel(file.Sessions, label) {
+			nextSuffix++
+			label = fmt.Sprintf("%s %d", labelBase, nextSuffix)
+		}
+
+		file.NextSessionID++
+		now := time.Now().UTC()
+		duplicated = HostedSessionRecord{
+			SessionID:    fmt.Sprintf("hs_%d", file.NextSessionID),
+			SessionLabel: label,
+			WorkerName:   session.WorkerName,
+			WorkerPort:   session.WorkerPort,
+			Workspace:    session.Workspace,
+			Model:        session.Model,
+			AddDirs:      append([]string{}, session.AddDirs...),
+			CreatedAt:    now,
+			LastOpenedAt: now,
+		}
+		file.Sessions[duplicated.SessionID] = duplicated
+		return nil
+	})
 	if err != nil {
 		return HostedSessionRecord{}, err
 	}
-	if !ok {
-		return HostedSessionRecord{}, fmt.Errorf("hosted session %q not found", sessionID)
-	}
-	return r.Create(HostedSessionRecord{
-		WorkerName: session.WorkerName,
-		WorkerPort: session.WorkerPort,
-		Workspace:  session.Workspace,
-		Model:      session.Model,
-		AddDirs:    append([]string{}, session.AddDirs...),
-	})
+	return duplicated, nil
 }
 
 func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string) error {

@@ -340,7 +340,7 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	}
 	want := HostedSessionRecord{
 		SessionID:    got.SessionID,
-		SessionLabel: "cli-openai 1",
+		SessionLabel: "solve problem A 2",
 		WorkerName:   "cli-openai",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
