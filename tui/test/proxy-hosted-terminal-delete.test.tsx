@@ -67,6 +67,29 @@ test("hosted terminal picker shows ctrl d delete hint", async () => {
   }
 })
 
+test("hosted terminal picker shows ctrl w change worker hint", async () => {
+  const app = await setupHostedTerminal([activeHostedSession, staleHostedSessionA])
+
+  try {
+    await app.openHostedTerminal()
+
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame.includes("Hosted Terminal")).toBe(true)
+    expect(frame.includes("ctrl+w")).toBe(true)
+    expect(frame.includes("change worker")).toBe(true)
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("hosted terminal picker ctrl d deletes the highlighted session", async () => {
   const app = await setupHostedTerminal()
 

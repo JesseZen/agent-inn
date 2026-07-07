@@ -147,8 +147,8 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
     },
   }
   const calls = {
-    createWorker: [] as Array<{ name: string; port: number; upstream: string; launcher?: string }>,
-    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string }>,
+    createWorker: [] as Array<{ name: string; port?: number; upstream: string; launcher?: string }>,
+    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     patchSettings: [] as ProxySettingsPatch[],
@@ -241,11 +241,12 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
       if (input.patchWorkerDelayMs) await Bun.sleep(input.patchWorkerDelayMs)
-      const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; log_level?: string; launcher?: string }
+      const body = JSON.parse(String(init?.body ?? "null")) as { port: number; upstream: string; log_level?: string; launcher?: string }
       calls.patchWorker.push({
         port: 6767,
         upstream: body.upstream,
         log_level: body.log_level,
+        ...(body.port !== 6767 ? { next_port: body.port } : {}),
         ...(body.launcher ? { launcher: body.launcher } : {}),
       })
       const nextUpstream = providers.get(body.upstream)
@@ -261,15 +262,22 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; patchWorkerDelay
       if (body.launcher) {
         workers.set(6767, { ...workers.get(6767)!, launcher: body.launcher })
       }
+      if (body.port !== 6767) {
+        const worker = { ...workers.get(6767)!, port: body.port }
+        workers.delete(6767)
+        workers.set(body.port, worker)
+        return json(worker)
+      }
       return json(workers.get(6767)!)
     }
 
     if (url.pathname === "/api/workers" && method === "POST") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { name: string; port: number; upstream: string; launcher?: string }
+      const body = JSON.parse(String(init?.body ?? "null")) as { name: string; port?: number; upstream: string; launcher?: string }
       calls.createWorker.push(body)
-      workers.set(body.port, {
+      const port = body.port ?? 11201
+      workers.set(port, {
         name: body.name,
-        port: body.port,
+        port,
         role: "cli",
         launcher: body.launcher ?? "codex",
         protocol: providers.get(body.upstream)?.api_format === "anthropic" ? "anthropic" : "responses",

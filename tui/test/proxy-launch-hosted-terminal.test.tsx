@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 import { chmod, mkdtemp } from "node:fs/promises"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
-import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
+import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalApp, staleHostedSessionA, wait } from "./proxy-hosted-terminal.fixture"
 
 afterEach(() => {
   mock.restore()
@@ -325,6 +325,73 @@ test("hosted terminal duplicate label alert returns to worker picker", async () 
       const frame = app.setup.captureCharFrame()
       return frame.includes("Choose worker") && frame.includes("test-cli")
     })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("stale hosted session changes worker from session list", async () => {
+  const localWorker = {
+    ...defaultWorker,
+    name: "local-cli",
+    port: 5678,
+  }
+  const patches: Array<{ session_id: string; worker_name: string }> = []
+  let sessions = [{ ...staleHostedSessionA }]
+  const app = await mountHostedTerminalApp(async (url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker, localWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
+      return json({
+        sessions,
+      })
+    if (url.pathname === "/api/hosted-sessions/hs_2" && request.method === "PATCH") {
+      const body = (await request.json()) as { worker_name: string }
+      patches.push({ session_id: "hs_2", worker_name: body.worker_name })
+      sessions = sessions.map((session) =>
+        session.session_id === "hs_2"
+          ? { ...session, worker_name: body.worker_name, worker_port: localWorker.port }
+          : session,
+      )
+      const updated = sessions[0]
+      return json({
+        session_id: updated.session_id,
+        session_label: updated.session_label,
+        worker_name: updated.worker_name,
+        worker_port: updated.worker_port,
+        created_at: updated.created_at,
+        last_opened_at: updated.last_opened_at,
+      })
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("stale problem A")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("session.change_worker")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Change worker") && frame.includes("local-cli")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return patches.length === 1 && frame.includes("Hosted Terminal") && frame.includes("local-cli • stale")
+    })
+
+    expect(patches).toEqual([{ session_id: "hs_2", worker_name: "local-cli" }])
   } finally {
     await app.cleanup()
   }
