@@ -117,6 +117,36 @@ func TestWorkerLogSinkDetailModeKeepsAllLevels(t *testing.T) {
 	}
 }
 
+func TestWorkerLogSinkSimpleModeParsesTimestampLedLevel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "worker-fmt.log")
+	sink, err := NewWorkerLogSink(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sink.Close()
+	sink.SetLevel("simple")
+
+	// New structured format: timestamp leads, level in column 2.
+	_, _ = sink.Write([]byte("2026-07-07T14:32:01.123Z INFO  worker.proxy request.start req=a1\n"))
+	_, _ = sink.Write([]byte("2026-07-07T14:32:01.200Z DEBUG worker.proxy sse.chunk req=a1\n"))
+	_, _ = sink.Write([]byte("2026-07-07T14:32:03.456Z ERROR worker.proxy upstream.fail req=a1\n"))
+	// Unstructured subprocess output / panic: no level, must be kept.
+	_, _ = sink.Write([]byte("panic: runtime error: index out of range\n"))
+
+	lines := sink.Lines()
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "request.start") || strings.Contains(joined, "sse.chunk") {
+		t.Fatalf("simple mode kept info/debug from new format: %#v", lines)
+	}
+	if !strings.Contains(joined, "upstream.fail") {
+		t.Fatalf("simple mode dropped error from new format: %#v", lines)
+	}
+	if !strings.Contains(joined, "panic: runtime error") {
+		t.Fatalf("simple mode dropped unknown-severity panic line: %#v", lines)
+	}
+}
+
 func TestWorkerLogSinkSubscribeReceivesRedactedLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "worker-11201.log")
