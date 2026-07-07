@@ -43,5 +43,6 @@
 
 ## 调试
 
-21. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，可通过 `defaults.log_dir` 配置
-22. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
+21. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，主进程日志在 `~/.ainn/logs/ainn.log`，可通过 `settings.log_dir` 配置
+22. 日志事件手册（事件名含义、字段、常见问题 grep 命令）：`internal/logging/EVENTS.md`——遇到 bug 先查这里，不要直接读源码
+23. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
