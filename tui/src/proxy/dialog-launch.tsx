@@ -10,6 +10,7 @@ import { createProxyLaunchCommand, launchProxySession, renderProxyLaunchCommand,
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 import { Global } from "@agent-inn/core/global"
 import { useSDK } from "../context/sdk"
+import { useWorkerFrecency } from "./worker-frecency-context"
 
 export function DialogLaunch() {
   const dialog = useDialog()
@@ -40,17 +41,24 @@ function DialogExternalWindowLaunch() {
   const project = useProject()
   const dialog = useDialog()
   const clipboard = useClipboard()
+  const workerFrecency = useWorkerFrecency()
 
-  const options = createMemo<DialogSelectOption<string>[]>(() =>
-    sync.data.workers
-      .filter((worker) => worker.role === "cli")
-      .map((worker) => ({
-        title: worker.name,
-        value: worker.name,
-        description: `:${worker.port} • ${worker.upstream.name}`,
-        category: worker.status === "running" ? "Running cli workers" : "Stopped cli workers",
-      })),
-  )
+  const options = createMemo<DialogSelectOption<string>[]>(() => {
+    const sections = workerFrecency.sections(sync.data.workers.filter((worker) => worker.role === "cli"))
+    const toOption = (worker: (typeof sections.recent)[number], category: string) => ({
+      title: worker.name,
+      value: worker.name,
+      description: `:${worker.port} • ${worker.upstream.name}`,
+      category,
+    })
+
+    return [
+      ...sections.recent.map((worker) => toOption(worker, "Recent")),
+      ...sections.rest.map((worker) =>
+        toOption(worker, worker.status === "running" ? "Running cli workers" : "Stopped cli workers"),
+      ),
+    ]
+  })
 
   async function launch(workerName: string) {
     const worker = sync.data.workers.find((item) => item.name === workerName)
@@ -91,6 +99,7 @@ function DialogExternalWindowLaunch() {
         await DialogAlert.show(dialog, "Launch Command", rendered)
         return
       }
+      workerFrecency.record(worker.name)
       await DialogAlert.show(dialog, "Launch", "Opened a new worker session.")
     } catch (err) {
       await DialogAlert.show(dialog, "Launch failed", String(err instanceof Error ? err.message : err))

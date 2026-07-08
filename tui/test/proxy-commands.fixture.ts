@@ -41,7 +41,14 @@ function frameLines(frame: string) {
     .filter(Boolean)
 }
 
-function createProxyHarness(input: { workers?: WorkerSummary[]; upstreams?: RedactedUpstream[]; patchWorkerDelayMs?: number } = {}) {
+type ProxyHarnessInput = {
+  workers?: WorkerSummary[]
+  upstreams?: RedactedUpstream[]
+  patchWorkerDelayMs?: number
+  settings?: ProxySettingsPatch
+}
+
+function createProxyHarness(input: ProxyHarnessInput = {}) {
   const providers = new Map<string, RedactedUpstream>(
     (input.upstreams ?? [
       {
@@ -141,6 +148,18 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; upstreams?: Reda
       request_log: { kind: "request_middleware", source: "external", path: "plugins/request/request_log/plugin.yaml" },
       config_patch: { kind: "lifecycle_hook", source: "builtin" },
     },
+  }
+  if (input.settings) {
+    config.settings = {
+      ...config.settings,
+      ...input.settings,
+      launch: { ...config.settings.launch, ...input.settings.launch },
+      terminal: {
+        ...config.settings.terminal,
+        ...input.settings.terminal,
+        tmux: { ...config.settings.terminal.tmux, ...input.settings.terminal?.tmux },
+      },
+    }
   }
   const calls = {
     createWorker: [] as Array<{ name: string; port?: number; upstream: string; launcher?: string }>,
@@ -432,7 +451,7 @@ function createProxyHarness(input: { workers?: WorkerSummary[]; upstreams?: Reda
   return { calls, fetch: override, hostedSessions }
 }
 
-export async function mountProxyApp(input: { workers?: WorkerSummary[]; upstreams?: RedactedUpstream[]; patchWorkerDelayMs?: number } = {}) {
+export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Record<string, string> } = {}) {
   const tmp = await tmpdir()
   const home = tmp.path
   const app = "ainn"
@@ -444,6 +463,9 @@ export async function mountProxyApp(input: { workers?: WorkerSummary[]; upstream
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
+  for (const [name, content] of Object.entries(input.stateFiles ?? {})) {
+    await Bun.write(path.join(state, name), content)
+  }
   const events = createEventSource()
   const proxy = createProxyHarness(input)
   let api!: TuiPluginApi

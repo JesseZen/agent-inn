@@ -7,19 +7,29 @@ export function DialogWorkerPicker(props: {
   title: string
   placeholder: string
   workers?: WorkerSummary[]
+  recentWorkers?: WorkerSummary[]
   onSelect: (worker: WorkerSummary) => void
 }) {
   const sync = useSync()
 
-  const options = createMemo<DialogSelectOption<number>[]>(() =>
-    (props.workers ?? sync.data.workers).map((worker) => ({
+  const options = createMemo<DialogSelectOption<number>[]>(() => {
+    const recentWorkers = props.recentWorkers ?? []
+    const recentNames = new Set(recentWorkers.map((worker) => worker.name))
+    const toOption = (worker: WorkerSummary, category: string) => ({
       title: worker.name,
       value: worker.port,
       description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
-      category: worker.status === "running" ? "Running" : "Stopped",
+      category,
       onSelect: () => props.onSelect(worker),
-    })),
-  )
+    })
+
+    return [
+      ...recentWorkers.map((worker) => toOption(worker, "Recent")),
+      ...(props.workers ?? sync.data.workers)
+        .filter((worker) => !recentNames.has(worker.name))
+        .map((worker) => toOption(worker, worker.status === "running" ? "Running" : "Stopped")),
+    ]
+  })
 
   return <DialogSelect title={props.title} options={options()} placeholder={props.placeholder} />
 }
