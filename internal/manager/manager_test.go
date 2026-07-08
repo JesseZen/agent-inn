@@ -2630,6 +2630,30 @@ func TestManagerSettingsAPIReconcilesTurnStatusHooks(t *testing.T) {
 	if !loaded.Settings.Terminal.Tmux.TurnStatusHooks {
 		t.Fatalf("turn status hook setting was not persisted: %#v", loaded.Settings.Terminal.Tmux)
 	}
+	wantStatus := hostedhooks.StatusReport{
+		ScriptInstalled: true,
+		CodexInstalled:  true,
+		ClaudeInstalled: true,
+	}
+	status, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(status, wantStatus) {
+		t.Fatalf("bad turn status hook status:\n got %#v\nwant %#v", status, wantStatus)
+	}
+	wantScript, err := os.ReadFile(hostedhooks.TurnStatusScriptPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCodexHooks, err := os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantClaudeHooks, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	res = httptest.NewRecorder()
 	m.ServeHTTP(
@@ -2643,15 +2667,33 @@ func TestManagerSettingsAPIReconcilesTurnStatusHooks(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
 	}
-	if _, err := os.Stat(hostedhooks.TurnStatusScriptPath()); !os.IsNotExist(err) {
-		t.Fatalf("expected turn status hook script to be removed, got %v", err)
-	}
-	codexHooks, err = os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	status, err = hostedhooks.Status()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(codexHooks), "hosted-turn-status") {
-		t.Fatalf("codex hooks were not removed:\n%s", codexHooks)
+	if !reflect.DeepEqual(status, wantStatus) {
+		t.Fatalf("bad turn status hook status:\n got %#v\nwant %#v", status, wantStatus)
+	}
+	gotScript, err := os.ReadFile(hostedhooks.TurnStatusScriptPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCodexHooks, err := os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotClaudeHooks, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotScript, wantScript) {
+		t.Fatalf("bad preserved turn status script:\n got %q\nwant %q", gotScript, wantScript)
+	}
+	if !bytes.Equal(gotCodexHooks, wantCodexHooks) {
+		t.Fatalf("bad preserved codex hooks:\n got %q\nwant %q", gotCodexHooks, wantCodexHooks)
+	}
+	if !bytes.Equal(gotClaudeHooks, wantClaudeHooks) {
+		t.Fatalf("bad preserved claude hooks:\n got %q\nwant %q", gotClaudeHooks, wantClaudeHooks)
 	}
 	loaded, err = config.LoadFile(configPath)
 	if err != nil {
@@ -2659,6 +2701,75 @@ func TestManagerSettingsAPIReconcilesTurnStatusHooks(t *testing.T) {
 	}
 	if loaded.Settings.Terminal.Tmux.TurnStatusHooks {
 		t.Fatalf("turn status hook setting should be false: %#v", loaded.Settings.Terminal.Tmux)
+	}
+}
+
+func TestManagerStartupDoesNotUninstallTurnStatusHooksWhenDisabled(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	if err := hostedhooks.Install(); err != nil {
+		t.Fatal(err)
+	}
+	wantScript, err := os.ReadFile(hostedhooks.TurnStatusScriptPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCodexHooks, err := os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantClaudeHooks, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	m := New(Config{
+		ConfigPath:         filepath.Join(dir, "config.yaml"),
+		ReconcileTurnHooks: true,
+		Config: config.Config{
+			Settings: config.Settings{
+				StateDir: filepath.Join(dir, "state"),
+				Terminal: config.TerminalSettings{
+					Tmux: config.TmuxSettings{TurnStatusHooks: false},
+				},
+			},
+		},
+	})
+	defer m.Close()
+
+	wantStatus := hostedhooks.StatusReport{
+		ScriptInstalled: true,
+		CodexInstalled:  true,
+		ClaudeInstalled: true,
+	}
+	status, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(status, wantStatus) {
+		t.Fatalf("bad turn status hook status:\n got %#v\nwant %#v", status, wantStatus)
+	}
+	gotScript, err := os.ReadFile(hostedhooks.TurnStatusScriptPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCodexHooks, err := os.ReadFile(filepath.Join(homeDir, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotClaudeHooks, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotScript, wantScript) {
+		t.Fatalf("bad preserved turn status script:\n got %q\nwant %q", gotScript, wantScript)
+	}
+	if !bytes.Equal(gotCodexHooks, wantCodexHooks) {
+		t.Fatalf("bad preserved codex hooks:\n got %q\nwant %q", gotCodexHooks, wantCodexHooks)
+	}
+	if !bytes.Equal(gotClaudeHooks, wantClaudeHooks) {
+		t.Fatalf("bad preserved claude hooks:\n got %q\nwant %q", gotClaudeHooks, wantClaudeHooks)
 	}
 }
 

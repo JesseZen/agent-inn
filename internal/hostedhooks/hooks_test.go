@@ -108,36 +108,58 @@ func TestReconcileInstallsTurnStatusHooks(t *testing.T) {
 	}
 }
 
-func TestReconcileDisablesOnlyManagedTurnStatusHooks(t *testing.T) {
+func TestReconcileDisabledPreservesManagedTurnStatusHooks(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	if err := hostedhooks.Install(); err != nil {
+		t.Fatal(err)
+	}
 	scriptPath := hostedhooks.TurnStatusScriptPath()
-	if err := os.MkdirAll(filepath.Dir(scriptPath), 0700); err != nil {
+	codexPath := filepath.Join(homeDir, ".codex", "hooks.json")
+	claudePath := filepath.Join(homeDir, ".claude", "settings.json")
+
+	wantScript, err := os.ReadFile(scriptPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0700); err != nil {
+	wantCodex := readTestHookRoot(t, codexPath)
+	wantClaude := readTestHookRoot(t, claudePath)
+
+	if err := hostedhooks.Reconcile(config.Settings{}); err != nil {
 		t.Fatal(err)
 	}
-	doneCommand := testShellQuote(scriptPath) + " done"
+
+	gotScript, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCodex := readTestHookRoot(t, codexPath)
+	gotClaude := readTestHookRoot(t, claudePath)
+	if !reflect.DeepEqual(gotScript, wantScript) {
+		t.Fatalf("bad shim script:\n got %q\nwant %q", gotScript, wantScript)
+	}
+	if !reflect.DeepEqual(gotCodex, wantCodex) {
+		t.Fatalf("bad codex hooks:\n got %#v\nwant %#v", gotCodex, wantCodex)
+	}
+	if !reflect.DeepEqual(gotClaude, wantClaude) {
+		t.Fatalf("bad claude settings:\n got %#v\nwant %#v", gotClaude, wantClaude)
+	}
+}
+
+func TestUninstallRemovesOnlyManagedTurnStatusHooks(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	if err := hostedhooks.Install(); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := hostedhooks.TurnStatusScriptPath()
 	userCommand := "echo user-stop"
 	codexPath := filepath.Join(homeDir, ".codex", "hooks.json")
 	claudePath := filepath.Join(homeDir, ".claude", "settings.json")
 	for _, path := range []string{codexPath, claudePath} {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		root := testHookRoot{
-			Theme: "dark",
-			Hooks: map[string][]testHookMatcher{
-				"Stop": {{
-					Matcher: "",
-					Hooks: []testCommandHook{
-						{Type: "command", Command: userCommand},
-						{Type: "command", Command: doneCommand},
-					},
-				}},
-			},
-		}
+		root := readTestHookRoot(t, path)
+		root.Theme = "dark"
+		root.Hooks["Stop"][0].Hooks = append([]testCommandHook{{Type: "command", Command: userCommand}}, root.Hooks["Stop"][0].Hooks...)
 		data, err := json.Marshal(root)
 		if err != nil {
 			t.Fatal(err)
@@ -147,7 +169,7 @@ func TestReconcileDisablesOnlyManagedTurnStatusHooks(t *testing.T) {
 		}
 	}
 
-	if err := hostedhooks.Reconcile(config.Settings{}); err != nil {
+	if err := hostedhooks.Uninstall(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,6 +190,68 @@ func TestReconcileDisablesOnlyManagedTurnStatusHooks(t *testing.T) {
 	}
 	if _, err := os.Stat(scriptPath); !os.IsNotExist(err) {
 		t.Fatalf("expected shim script to be removed, got %v", err)
+	}
+}
+
+func TestStatusReportsInstalledAndMissingState(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	missing, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMissing := hostedhooks.StatusReport{}
+	if !reflect.DeepEqual(missing, wantMissing) {
+		t.Fatalf("bad missing status:\n got %#v\nwant %#v", missing, wantMissing)
+	}
+
+	if err := hostedhooks.Install(); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInstalled := hostedhooks.StatusReport{
+		ScriptInstalled: true,
+		CodexInstalled:  true,
+		ClaudeInstalled: true,
+	}
+	if !reflect.DeepEqual(installed, wantInstalled) {
+		t.Fatalf("bad installed status:\n got %#v\nwant %#v", installed, wantInstalled)
+	}
+
+	if err := os.Remove(filepath.Join(homeDir, ".codex", "hooks.json")); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPartial := hostedhooks.StatusReport{
+		ScriptInstalled: true,
+		ClaudeInstalled: true,
+	}
+	if !reflect.DeepEqual(partial, wantPartial) {
+		t.Fatalf("bad partial status:\n got %#v\nwant %#v", partial, wantPartial)
+	}
+}
+
+func TestStatusDoesNotCreateHookState(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	report, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReport := hostedhooks.StatusReport{}
+	if !reflect.DeepEqual(report, wantReport) {
+		t.Fatalf("bad status:\n got %#v\nwant %#v", report, wantReport)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".ainn")); !os.IsNotExist(err) {
+		t.Fatalf("expected status to leave hook state missing, got %v", err)
 	}
 }
 

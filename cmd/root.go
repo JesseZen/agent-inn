@@ -50,6 +50,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return runLaunch(args[1:], stdout, stderr)
 		case "hosted-session":
 			return runHostedSession(args[1:], stdout, stderr)
+		case "hooks":
+			return runHooks(args[1:], stdout, stderr)
 		}
 	}
 

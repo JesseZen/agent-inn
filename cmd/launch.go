@@ -199,6 +199,15 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(settings.StateDir))
 	if sessionID != "" {
+		session, ok, err := registry.Get(sessionID)
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
+			return 1
+		}
+		if !ok {
+			fmt.Fprintf(stderr, "hosted session %q not found\n", sessionID)
+			return 1
+		}
 		if hostCreated {
 			if _, err := runner.Run(manager.TmuxStartHostCommandForSettings(settings)); err != nil {
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
@@ -224,22 +233,11 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 			return 1
 		}
-		if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
-			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
-			return 1
-		}
-		if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
-			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement mouse binding: %v\n", err)
-			return 1
-		}
-		session, ok, err := registry.Get(sessionID)
-		if err != nil {
-			fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
-			return 1
-		}
-		if !ok {
-			fmt.Fprintf(stderr, "hosted session %q not found\n", sessionID)
-			return 1
+		if settings.Terminal.Tmux.TurnStatusHooks {
+			if err := installTmuxTurnStatusHooks(runner, settings, configDir, hostedSessionExecutable()); err != nil {
+				fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hooks: %v\n", err)
+				return 1
+			}
 		}
 		activeWindowID := ""
 		if session.TmuxWindowID != "" {
@@ -299,7 +297,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			reopenOpts.LauncherSessionID = session.LauncherSessionID
 			reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
 		}
-		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID)
+		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, launchCmd))
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to reopen tmux window: %v\n", err)
@@ -337,7 +335,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		}
 	}
 	windowName := session.SessionLabel
-	launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(opts), configDir, session.SessionID)
+	launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(opts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
 		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, launchCmd))
@@ -393,15 +391,12 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 		return 1
 	}
-	if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
-		cleanupIncompleteSession()
-		fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hook: %v\n", err)
-		return 1
-	}
-	if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, hostedSessionExecutable())); err != nil {
-		cleanupIncompleteSession()
-		fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement mouse binding: %v\n", err)
-		return 1
+	if settings.Terminal.Tmux.TurnStatusHooks {
+		if err := installTmuxTurnStatusHooks(runner, settings, configDir, hostedSessionExecutable()); err != nil {
+			cleanupIncompleteSession()
+			fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hooks: %v\n", err)
+			return 1
+		}
 	}
 	if !reuseFirstWindow {
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
@@ -429,14 +424,99 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	return 0
 }
 
-func hostedSessionLaunchCommand(command []string, configDir string, sessionID string) []string {
-	executable := hostedSessionExecutable()
-	env := []string{
-		"env",
-		"AINN_HOSTED_SESSION_ID=" + sessionID,
-		"AINN_CONFIG_DIR=" + configDir,
-		"AINN_EXECUTABLE=" + executable,
+func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, configDir string, executable string) error {
+	ownerOut, err := runner.Run(manager.TmuxTurnStatusOwnerCommandForSettings(settings))
+	if err != nil {
+		return fmt.Errorf("inspect tmux turn status owner: %w", err)
 	}
+	owner := strings.TrimSpace(ownerOut)
+	if owner != "" {
+		if owner != configDir {
+			return fmt.Errorf("tmux turn status hooks are owned by config dir %q, current config dir is %q; use a unique tmux socket/session for test instances", owner, configDir)
+		}
+	} else {
+		hooksOut, err := runner.Run(manager.TmuxShowHooksCommandForSettings(settings))
+		if err != nil {
+			return fmt.Errorf("inspect tmux hooks: %w", err)
+		}
+		mouseBindingOut, err := runner.Run(manager.TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings))
+		if err != nil {
+			return fmt.Errorf("inspect tmux mouse binding: %w", err)
+		}
+		legacyOwner, found, err := managedAcknowledgeConfigDir(hooksOut, mouseBindingOut)
+		if err != nil {
+			return err
+		}
+		if found && legacyOwner != configDir {
+			return fmt.Errorf("tmux turn status hooks are owned by legacy config dir %q, current config dir is %q; use a unique tmux socket/session for test instances", legacyOwner, configDir)
+		}
+		if _, err := runner.Run(manager.TmuxSetTurnStatusOwnerCommandForSettings(settings, configDir)); err != nil {
+			return fmt.Errorf("set tmux turn status owner: %w", err)
+		}
+	}
+	if _, err := runner.Run(manager.TmuxAcknowledgeTurnHookCommandForSettings(settings, configDir, executable)); err != nil {
+		return fmt.Errorf("install tmux turn acknowledgement hook: %w", err)
+	}
+	if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, executable)); err != nil {
+		return fmt.Errorf("install tmux turn acknowledgement mouse binding: %w", err)
+	}
+	return nil
+}
+
+func managedAcknowledgeConfigDir(outputs ...string) (string, bool, error) {
+	owner := ""
+	found := false
+	for _, output := range outputs {
+		for _, line := range strings.Split(output, "\n") {
+			if !strings.Contains(line, "hosted-session acknowledge") {
+				continue
+			}
+			marker := "--config-dir "
+			index := strings.Index(line, marker)
+			if index < 0 {
+				return "", false, fmt.Errorf("failed to parse managed tmux turn status hook config dir from %q", line)
+			}
+			configDir, ok := parseTmuxSingleQuotedToken(line[index+len(marker):])
+			if !ok {
+				return "", false, fmt.Errorf("failed to parse managed tmux turn status hook config dir from %q", line)
+			}
+			if found && owner != configDir {
+				return "", false, fmt.Errorf("tmux turn status hooks contain multiple legacy config dirs %q and %q; use a unique tmux socket/session for test instances", owner, configDir)
+			}
+			owner = configDir
+			found = true
+		}
+	}
+	return owner, found, nil
+}
+
+func parseTmuxSingleQuotedToken(value string) (string, bool) {
+	if value == "" || value[0] != '\'' {
+		return "", false
+	}
+	var parsed strings.Builder
+	for i := 1; i < len(value); {
+		if strings.HasPrefix(value[i:], "'\\''") {
+			parsed.WriteByte('\'')
+			i += len("'\\''")
+			continue
+		}
+		if value[i] == '\'' {
+			return parsed.String(), true
+		}
+		parsed.WriteByte(value[i])
+		i++
+	}
+	return "", false
+}
+
+func hostedSessionLaunchCommand(command []string, configDir string, sessionID string, turnStatusHooks bool) []string {
+	executable := hostedSessionExecutable()
+	env := []string{"env"}
+	if turnStatusHooks {
+		env = append(env, "AINN_HOSTED_SESSION_ID="+sessionID)
+	}
+	env = append(env, "AINN_CONFIG_DIR="+configDir, "AINN_EXECUTABLE="+executable)
 	if len(command) > 0 && command[0] == "env" {
 		return append(env, command[1:]...)
 	}

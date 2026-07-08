@@ -66,6 +66,55 @@ func hostedTestAcknowledgeMouseBindingCommand(t *testing.T, settings config.Sett
 	return manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, exe)
 }
 
+func hostedTestTurnStatusInstallCommands(t *testing.T, settings config.Settings, configDir string) [][]string {
+	t.Helper()
+	return [][]string{
+		manager.TmuxTurnStatusOwnerCommandForSettings(settings),
+		manager.TmuxShowHooksCommandForSettings(settings),
+		manager.TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings),
+		manager.TmuxSetTurnStatusOwnerCommandForSettings(settings, configDir),
+		hostedTestAcknowledgeHookCommand(t, settings, configDir),
+		hostedTestAcknowledgeMouseBindingCommand(t, settings, configDir),
+	}
+}
+
+func hostedTestHasTmuxSubcommand(commands [][]string, subcommand string) bool {
+	for _, command := range commands {
+		for _, arg := range command {
+			if arg == subcommand {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hostedTestHasArg(commands [][]string, arg string) bool {
+	for _, command := range commands {
+		for _, got := range command {
+			if got == arg {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hostedTestHasCommand(commands [][]string, want []string) bool {
+	for _, command := range commands {
+		if reflect.DeepEqual(command, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func hostedTestLegacyAcknowledgeHookOutput(t *testing.T, settings config.Settings, configDir string) string {
+	t.Helper()
+	command := hostedTestAcknowledgeHookCommand(t, settings, configDir)
+	return command[len(command)-2] + " " + command[len(command)-1] + "\n"
+}
+
 func TestRunLaunchRequiresWorker(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runLaunch([]string{"--cd", "/tmp/work"}, &bytes.Buffer{}, &stderr)
@@ -257,6 +306,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
@@ -265,12 +315,13 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "mouse", "on"},
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
-		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai", "--cd", "/tmp/work")...),
-		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
+		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai", "--cd", "/tmp/work")...),
+		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -389,12 +440,13 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
 		manager.TmuxEnableExtendedKeysCommandForSettings(cfg.Settings),
 		manager.TmuxThemeCommandForSettings(cfg.Settings),
-		hostedTestAcknowledgeHookCommand(t, cfg.Settings, configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, cfg.Settings, configDir),
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, cfg.Settings, configDir)...)
+	want = append(want,
 		manager.TmuxSelectWindowCommandForSettings(cfg.Settings, "solve problem A"),
 		manager.TmuxCreateWindowCommandForSettings(cfg.Settings, "solve problem A", launchCmd),
 		manager.TmuxAttachCommandForSettings(cfg.Settings),
-	}
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -443,6 +495,324 @@ func TestRunLaunchHostedTerminalInjectsAbsoluteConfigDir(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing %q in commands: %#v", want, got)
+}
+
+func TestRunLaunchHostedTerminalTurnStatusHooksDisabledOrOmittedDoesNotInjectSessionID(t *testing.T) {
+	cases := []struct {
+		name      string
+		tmuxExtra string
+	}{
+		{name: "disabled", tmuxExtra: "      turn_status_hooks: false\n"},
+		{name: "omitted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configDir := filepath.Join(dir, "config")
+			stateDir := filepath.Join(dir, "state")
+			if err := os.MkdirAll(configDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			data := []byte(`
+settings:
+  state_dir: ` + stateDir + `
+  log_dir: ` + filepath.Join(configDir, "logs") + `
+  launch:
+    default_mode: hosted-terminal
+  terminal:
+    host: tmux
+    opener: default
+    tmux:
+      socket_name: ainn-test
+      host_session: ainn-test-host
+      host_start_mode: new-window
+` + tc.tmuxExtra + `workers:
+  cli-openai:
+    port: 11199
+    upstream: openrouter
+upstreams:
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+`)
+			if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			var got [][]string
+			restore := func() func() {
+				previous := launchRunnerFactory
+				launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+					return launchRunnerFunc(func(args []string) (string, error) {
+						got = append(got, append([]string{}, args...))
+						if len(args) > 3 && args[3] == "show" {
+							return "on\n", nil
+						}
+						if len(args) > 3 && args[3] == "has-session" {
+							return "", errors.New("can't find session")
+						}
+						if len(args) > 3 && args[3] == "select-window" {
+							return "", errors.New("can't find window")
+						}
+						if len(args) > 3 && args[3] == "new-window" {
+							return "@12\n", nil
+						}
+						return "", nil
+					})
+				}
+				return func() { launchRunnerFactory = previous }
+			}()
+			defer restore()
+
+			var stderr bytes.Buffer
+			code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+			if code != 0 {
+				t.Fatalf("expected success, got %d: %s", code, stderr.String())
+			}
+
+			wantConfigDir := "AINN_CONFIG_DIR=" + configDir
+			foundConfigDir := false
+			foundExecutable := false
+			for _, command := range got {
+				for _, arg := range command {
+					if strings.HasPrefix(arg, "AINN_HOSTED_SESSION_ID=") {
+						t.Fatalf("unexpected hosted session env in commands: %#v", got)
+					}
+					if arg == wantConfigDir {
+						foundConfigDir = true
+					}
+					if strings.HasPrefix(arg, "AINN_EXECUTABLE=") {
+						foundExecutable = true
+					}
+				}
+			}
+			if !foundConfigDir || !foundExecutable {
+				t.Fatalf("missing hosted runtime env: config_dir=%v executable=%v commands=%#v", foundConfigDir, foundExecutable, got)
+			}
+			for _, subcommand := range []string{"show-option", "show-hooks", "list-keys", "set-hook", "bind-key"} {
+				if hostedTestHasTmuxSubcommand(got, subcommand) {
+					t.Fatalf("turn status hooks disabled should not run %s: %#v", subcommand, got)
+				}
+			}
+			if hostedTestHasArg(got, "@ainn_turn_status_owner") {
+				t.Fatalf("turn status hooks disabled should not touch owner option: %#v", got)
+			}
+		})
+	}
+}
+
+func TestRunLaunchHostedTerminalKeepsExistingTurnStatusOwner(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "show-option" {
+					return configDir + "\n", nil
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	if !hostedTestHasCommand(got, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+		t.Fatalf("missing owner read command: %#v", got)
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) {
+		t.Fatalf("same owner should not rewrite owner option: %#v", got)
+	}
+	if !hostedTestHasTmuxSubcommand(got, "set-hook") || !hostedTestHasTmuxSubcommand(got, "bind-key") {
+		t.Fatalf("same owner should install hook and mouse binding: %#v", got)
+	}
+}
+
+func TestRunLaunchHostedTerminalRejectsDifferentTurnStatusOwner(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	otherConfigDir := filepath.Join(dir, "other-config")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "show-option" {
+					return otherConfigDir + "\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected owner conflict to fail")
+	}
+	if !strings.Contains(stderr.String(), otherConfigDir) || !strings.Contains(stderr.String(), configDir) {
+		t.Fatalf("expected owner conflict to name both config dirs, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) ||
+		hostedTestHasTmuxSubcommand(got, "set-hook") ||
+		hostedTestHasTmuxSubcommand(got, "bind-key") {
+		t.Fatalf("owner conflict should not write turn status hooks: %#v", got)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []manager.HostedSessionRecord{}) {
+		t.Fatalf("owner conflict should clean up new hosted session, got %#v", records)
+	}
+}
+
+func TestRunLaunchHostedTerminalRejectsLegacyTurnStatusOwnerMismatch(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	otherConfigDir := filepath.Join(dir, "other-config")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "show-hooks" {
+					return hostedTestLegacyAcknowledgeHookOutput(t, tmuxSettings, otherConfigDir), nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected legacy owner conflict to fail")
+	}
+	if !strings.Contains(stderr.String(), otherConfigDir) || !strings.Contains(stderr.String(), configDir) {
+		t.Fatalf("expected legacy owner conflict to name both config dirs, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) ||
+		hostedTestHasTmuxSubcommand(got, "set-hook") ||
+		hostedTestHasTmuxSubcommand(got, "bind-key") {
+		t.Fatalf("legacy owner conflict should not write turn status hooks: %#v", got)
+	}
+}
+
+func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "show-hooks" {
+					return "after-select-window[90] run-shell -b \"'/tmp/ainn' hosted-session acknowledge --config-dir --window-id #{window_id}\"\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected unparseable legacy hook to fail")
+	}
+	if !strings.Contains(stderr.String(), "parse") {
+		t.Fatalf("expected parse failure, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) ||
+		hostedTestHasTmuxSubcommand(got, "set-hook") ||
+		hostedTestHasTmuxSubcommand(got, "bind-key") {
+		t.Fatalf("unparseable legacy hook should not write turn status hooks: %#v", got)
+	}
+}
+
+func TestRunLaunchHostedTerminalMissingSessionDoesNotTouchTmuxHostSettings(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", "hs_missing"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected missing hosted session to fail")
+	}
+	if !strings.Contains(stderr.String(), "hosted session \"hs_missing\" not found") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+	for _, subcommand := range []string{"show", "show-option", "show-hooks", "list-keys", "set-option", "set-hook", "bind-key"} {
+		if hostedTestHasTmuxSubcommand(got, subcommand) {
+			t.Fatalf("missing hosted session should not touch tmux host settings, ran %s in %#v", subcommand, got)
+		}
+	}
 }
 
 func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) {
@@ -534,18 +904,20 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -598,18 +970,20 @@ func TestRunLaunchHostedTerminalSwitchesExistingLegacyNamedWindow(t *testing.T) 
 		t.Fatalf("expected success, got %d: %s", code, stderr.String())
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
@@ -684,6 +1058,7 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
@@ -691,11 +1066,12 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 		{"tmux", "-L", "ainn", "set-option", "-g", "mouse", "on"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		manager.TmuxSelectWindowCommand("@12"),
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+		manager.TmuxSelectWindowCommand("@12"),
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands (no attach), got %d: %#v", len(want), len(got), got)
 	}
@@ -779,18 +1155,20 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 		t.Fatalf("got %#v ok=%v, want %#v", gotSession, ok, wantSession)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
@@ -871,18 +1249,20 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 		t.Fatalf("got %#v ok=%v, want %#v", gotSession, ok, wantSession)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5")...),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
@@ -957,6 +1337,7 @@ settings:
       socket_name: ainn
       host_session: ainn-host
       host_start_mode: new-window
+      turn_status_hooks: true
 workers:
   claude-main:
     port: 11200
@@ -1012,18 +1393,20 @@ upstreams:
 		t.Fatalf("expected success, got %d: %s", code, stderr.String())
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11200", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
@@ -1072,18 +1455,20 @@ func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn", "ainn-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommand(),
 		{"tmux", "-L", "ainn", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn"),
 		{"tmux", "-L", "ainn", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn", "ainn-host"), configDir),
-		{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
+	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
 		manager.TmuxSelectWindowCommand("@12"),
 		manager.TmuxAttachCommand(),
-	}
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -1127,6 +1512,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
@@ -1134,10 +1520,11 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -1193,6 +1580,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
@@ -1201,10 +1589,11 @@ func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -1311,18 +1700,20 @@ func TestRunLaunchHostedTerminalReuseFirstWindowStillUsesNewWindowOnExistingHost
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
-		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...),
-		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
+		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...),
+		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -1411,6 +1802,7 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 		t.Fatalf("expected success, got %d", code)
 	}
 
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
@@ -1418,12 +1810,13 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "status", "on", ";", "set-option", "-g", "status-left", "", ";", "set-option", "-g", "status-right", "", ";", "set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";", "set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";", "set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";", "set-window-option", "-g", "automatic-rename", "off"},
-		hostedTestAcknowledgeHookCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		hostedTestAcknowledgeMouseBindingCommand(t, hostedTestTmuxSettings("ainn-test", "ainn-test-host"), configDir),
-		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
-		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...),
-		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	}
+	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
+	want = append(want,
+		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
+		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...),
+		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	)
 	if len(got) != len(want) {
 		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
 	}
@@ -1494,6 +1887,7 @@ settings:
       socket_name: ` + socketName + `
       host_session: ` + hostSession + `
       host_start_mode: ` + hostStartMode + `
+      turn_status_hooks: true
 workers:
   cli-openai:
     port: 11199

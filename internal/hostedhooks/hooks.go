@@ -33,6 +33,12 @@ type managedHook struct {
 	watchCodexTurn bool
 }
 
+type StatusReport struct {
+	ScriptInstalled bool
+	CodexInstalled  bool
+	ClaudeInstalled bool
+}
+
 var (
 	codexManagedHooks = []managedHook{
 		{event: "SessionStart", state: constants.HostedTurnStateIdle},
@@ -48,12 +54,10 @@ var (
 )
 
 func Reconcile(settings config.Settings) error {
-	return withHookConfigLock(func() error {
-		if settings.Terminal.Tmux.TurnStatusHooks {
-			return install()
-		}
-		return uninstall()
-	})
+	if settings.Terminal.Tmux.TurnStatusHooks {
+		return Install()
+	}
+	return nil
 }
 
 func TurnStatusScriptPath() string {
@@ -88,6 +92,28 @@ func Uninstall() error {
 	return withHookConfigLock(uninstall)
 }
 
+func Status() (StatusReport, error) {
+	var report StatusReport
+	scriptPath := TurnStatusScriptPath()
+	if _, err := os.Stat(scriptPath); err == nil {
+		report.ScriptInstalled = true
+	} else if !os.IsNotExist(err) {
+		return report, fmt.Errorf("stat turn status hook script: %w", err)
+	}
+
+	installed, err := managedHooksInstalled(codexHooksPath(), scriptPath, codexManagedHooks)
+	if err != nil {
+		return report, err
+	}
+	report.CodexInstalled = installed
+	installed, err = managedHooksInstalled(claudeSettingsPath(), scriptPath, claudeManagedHooks)
+	if err != nil {
+		return report, err
+	}
+	report.ClaudeInstalled = installed
+	return report, nil
+}
+
 func uninstall() error {
 	scriptPath := TurnStatusScriptPath()
 	if err := uninstallManagedHooks(codexHooksPath(), scriptPath); err != nil {
@@ -100,6 +126,61 @@ func uninstall() error {
 		return fmt.Errorf("remove turn status hook script: %w", err)
 	}
 	return nil
+}
+
+func managedHooksInstalled(path string, scriptPath string, managed []managedHook) (bool, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false, nil
+	}
+	root, err := readHookRoot(path)
+	if err != nil {
+		return false, err
+	}
+	rawHooks, ok := root["hooks"]
+	if !ok {
+		return false, nil
+	}
+	hooks, ok := rawHooks.(map[string]any)
+	if !ok {
+		return false, fmt.Errorf("hooks in %s must be an object", path)
+	}
+	for _, item := range managed {
+		items, err := hookList(path, item.event, hooks[item.event])
+		if err != nil {
+			return false, err
+		}
+		wantCommand := hookCommand(scriptPath, item)
+		found := false
+		for _, rawItem := range items {
+			matcher, ok := rawItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			rawCommands, ok := matcher["hooks"].([]any)
+			if !ok {
+				continue
+			}
+			for _, rawCommand := range rawCommands {
+				command, ok := rawCommand.(map[string]any)
+				if !ok {
+					continue
+				}
+				commandType, _ := command["type"].(string)
+				commandLine, _ := command["command"].(string)
+				if commandType == commandHookType && commandLine == wantCommand {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func installManagedHooks(path string, scriptPath string, managed []managedHook) error {

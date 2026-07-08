@@ -17,6 +17,7 @@ const (
 	// tmux hooks are array options; this slot lets AINN replace its own hook without clearing user hooks.
 	tmuxAcknowledgeTurnHook          = "after-select-window[90]"
 	tmuxAcknowledgeMouseKey          = "MouseDown1Status"
+	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 )
 
@@ -107,6 +108,28 @@ func TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings,
 		"bind-key", "-T", "root", tmuxAcknowledgeMouseKey,
 		command,
 	)
+}
+
+func TmuxTurnStatusOwnerCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"show-option", "-qv", "-t", tmuxHostSessionForSettings(settings),
+		tmuxTurnStatusOwnerOption,
+	)
+}
+
+func TmuxSetTurnStatusOwnerCommandForSettings(settings config.Settings, configDir string) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"set-option", "-t", tmuxHostSessionForSettings(settings),
+		tmuxTurnStatusOwnerOption, configDir,
+	)
+}
+
+func TmuxShowHooksCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "show-hooks", "-t", tmuxHostSessionForSettings(settings))
+}
+
+func TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", tmuxAcknowledgeMouseKey)
 }
 
 func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool) []string {

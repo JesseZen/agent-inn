@@ -222,6 +222,84 @@ func TestTmuxAcknowledgeTurnMouseBindingCommandForSettings(t *testing.T) {
 	}
 }
 
+func TestTmuxTurnStatusOwnerCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxTurnStatusOwnerCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"show-option", "-qv", "-t", "ainn-test-host",
+		"@ainn_turn_status_owner",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxSetTurnStatusOwnerCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxSetTurnStatusOwnerCommandForSettings(settings, "/tmp/ainn config")
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"set-option", "-t", "ainn-test-host",
+		"@ainn_turn_status_owner", "/tmp/ainn config",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxShowHooksCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxShowHooksCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"show-hooks", "-t", "ainn-test-host",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxListAcknowledgeTurnMouseBindingCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"list-keys", "-T", "root", "MouseDown1Status",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestTmuxAcknowledgeTurnCommandsShellQuoteExpandedWindowName(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{

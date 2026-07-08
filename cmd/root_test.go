@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/hostedhooks"
 	"github.com/jesse/agent-inn/internal/manager"
 )
 
@@ -51,6 +52,74 @@ func TestRunUnknownCommandReturnsUsageError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown command") {
 		t.Fatalf("expected unknown command error, got %q", stderr.String())
+	}
+}
+
+func TestRunHooksInstallStatusAndUninstall(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	wantInstalled := hostedhooks.StatusReport{
+		ScriptInstalled: true,
+		CodexInstalled:  true,
+		ClaudeInstalled: true,
+	}
+
+	var installStdout bytes.Buffer
+	var installStderr bytes.Buffer
+	installCode := Run([]string{"hooks", "install"}, &installStdout, &installStderr)
+	if installCode != 0 {
+		t.Fatalf("expected install exit 0, got %d: %s", installCode, installStderr.String())
+	}
+	if installStdout.String() != "installed\n" {
+		t.Fatalf("bad install stdout: %q", installStdout.String())
+	}
+	installed, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(installed, wantInstalled) {
+		t.Fatalf("bad installed status:\n got %#v\nwant %#v", installed, wantInstalled)
+	}
+
+	var statusStdout bytes.Buffer
+	var statusStderr bytes.Buffer
+	statusCode := Run([]string{"hooks", "status"}, &statusStdout, &statusStderr)
+	if statusCode != 0 {
+		t.Fatalf("expected status exit 0, got %d: %s", statusCode, statusStderr.String())
+	}
+	wantStatusStdout := "script: installed\ncodex: installed\nclaude: installed\n"
+	if statusStdout.String() != wantStatusStdout {
+		t.Fatalf("bad status stdout:\n got %q\nwant %q", statusStdout.String(), wantStatusStdout)
+	}
+
+	var uninstallStdout bytes.Buffer
+	var uninstallStderr bytes.Buffer
+	uninstallCode := Run([]string{"hooks", "uninstall"}, &uninstallStdout, &uninstallStderr)
+	if uninstallCode != 0 {
+		t.Fatalf("expected uninstall exit 0, got %d: %s", uninstallCode, uninstallStderr.String())
+	}
+	if uninstallStdout.String() != "uninstalled\n" {
+		t.Fatalf("bad uninstall stdout: %q", uninstallStdout.String())
+	}
+	uninstalled, err := hostedhooks.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantUninstalled := hostedhooks.StatusReport{}
+	if !reflect.DeepEqual(uninstalled, wantUninstalled) {
+		t.Fatalf("bad uninstalled status:\n got %#v\nwant %#v", uninstalled, wantUninstalled)
+	}
+}
+
+func TestRunHooksRejectsUnknownCommand(t *testing.T) {
+	var stderr bytes.Buffer
+	code := runHooks([]string{"bogus"}, &bytes.Buffer{}, &stderr)
+
+	if code != 2 {
+		t.Fatalf("expected exit code 2, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown hooks command") {
+		t.Fatalf("expected unknown hooks command error, got %q", stderr.String())
 	}
 }
 
@@ -2808,7 +2877,7 @@ fi
 cmd=""
 for arg in "$@"; do
   case "$arg" in
-    has-session|new-session|list-panes|list-clients|select-window|new-window|respawn-pane|move-window|switch-client|attach-session|show|set-option|set-hook|bind-key)
+    has-session|new-session|list-panes|list-clients|select-window|new-window|respawn-pane|move-window|switch-client|attach-session|show|show-option|show-hooks|list-keys|set-option|set-hook|bind-key)
       cmd="$arg"
       break
       ;;
@@ -2895,6 +2964,24 @@ case "$cmd" in
     printf '%s' "${FAKE_TMUX_SHOW_STDOUT:-on\n}"
     printf '%s' "${FAKE_TMUX_SHOW_STDERR:-}" >&2
     [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "show" ]] && exit 1
+    exit 0
+    ;;
+  show-option)
+    printf '%s' "${FAKE_TMUX_SHOW_OPTION_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_SHOW_OPTION_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "show-option" ]] && exit 1
+    exit 0
+    ;;
+  show-hooks)
+    printf '%s' "${FAKE_TMUX_SHOW_HOOKS_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_SHOW_HOOKS_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "show-hooks" ]] && exit 1
+    exit 0
+    ;;
+  list-keys)
+    printf '%s' "${FAKE_TMUX_LIST_KEYS_STDOUT:-}"
+    printf '%s' "${FAKE_TMUX_LIST_KEYS_STDERR:-}" >&2
+    [[ "${FAKE_TMUX_FAIL_COMMAND:-}" == "list-keys" ]] && exit 1
     exit 0
     ;;
   set-option)
