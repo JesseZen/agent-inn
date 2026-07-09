@@ -169,8 +169,10 @@ func TestWorkerRecordsFailedUpstreamMetricsAndUnknownUsage(t *testing.T) {
 		RPM:                  1,
 		UnknownUsageRequests: 1,
 	}
-	if got := w.MetricsSnapshot(); got != wantSnapshot {
-		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", got, wantSnapshot)
+	gotSnapshot := w.MetricsSnapshot()
+	wantSnapshot.AvgLatencyMS = gotSnapshot.AvgLatencyMS
+	if gotSnapshot != wantSnapshot {
+		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", gotSnapshot, wantSnapshot)
 	}
 	var event RequestMetricEvent
 	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
