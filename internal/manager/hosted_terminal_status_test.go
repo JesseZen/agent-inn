@@ -2,6 +2,7 @@ package manager
 
 import (
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -321,6 +322,43 @@ func TestTmuxSetTurnStatusOwnerCommandForSettings(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxHostedPopupOwnerCommandsForSettings(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+
+	gotOwner := TmuxHostedPopupOwnerCommandForSettings(settings)
+	wantOwner := []string{"tmux", "-L", "ainn-test", "show-option", "-qv", "-t", "ainn-test-host", "@ainn_hosted_popup_owner"}
+	if !reflect.DeepEqual(gotOwner, wantOwner) {
+		t.Fatalf("got %#v, want %#v", gotOwner, wantOwner)
+	}
+
+	gotSetOwner := TmuxSetHostedPopupOwnerCommandForSettings(settings, "/tmp/ainn config")
+	wantSetOwner := []string{"tmux", "-L", "ainn-test", "set-option", "-t", "ainn-test-host", "@ainn_hosted_popup_owner", "/tmp/ainn config"}
+	if !reflect.DeepEqual(gotSetOwner, wantSetOwner) {
+		t.Fatalf("got %#v, want %#v", gotSetOwner, wantSetOwner)
+	}
+
+	gotList := TmuxListHostedPopupBindingCommandForSettings(settings, "H")
+	wantList := []string{"tmux", "-L", "ainn-test", "list-keys", "-T", "prefix", "H"}
+	if !reflect.DeepEqual(gotList, wantList) {
+		t.Fatalf("got %#v, want %#v", gotList, wantList)
+	}
+}
+
+func TestTmuxHostedPopupCommandsForSettings(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	gotDisplay := TmuxDisplayHostedPopupCommandForSettings(settings, "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin")
+	wantDisplay := []string{"tmux", "-L", "ainn-test", "display-popup", "-E", "-x", "R", "-y", "0", "-w", "80%", "-h", "70%", "-T", "Hosted Terminal", "'/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
+	if !reflect.DeepEqual(gotDisplay, wantDisplay) {
+		t.Fatalf("got %#v, want %#v", gotDisplay, wantDisplay)
+	}
+
+	gotBinding := TmuxHostedPopupBindingCommandForSettings(settings, "H", "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin")
+	wantBinding := []string{"tmux", "-L", "ainn-test", "bind-key", "-T", "prefix", "H", "display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
+	if !reflect.DeepEqual(gotBinding, wantBinding) {
+		t.Fatalf("got %#v, want %#v", gotBinding, wantBinding)
 	}
 }
 

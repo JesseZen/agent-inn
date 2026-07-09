@@ -20,6 +20,7 @@ const (
 	modeHostedTerminal              = "hosted-terminal"
 	hostedSessionAcknowledgeCommand = "hosted-session acknowledge"
 	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
+	defaultManagerURL               = "http://127.0.0.1:9090"
 )
 
 type launchRunner interface {
@@ -243,6 +244,10 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 				return 1
 			}
 		}
+		if err := installTmuxHostedPopupBinding(runner, settings, configDir, hostedSessionExecutable()); err != nil {
+			fmt.Fprintf(stderr, "failed to install tmux hosted popup binding: %v\n", err)
+			return 1
+		}
 		activeWindowID := ""
 		if session.TmuxWindowID != "" {
 			windowDetails, err := runner.Run(manager.TmuxListWindowDetailsCommandForSettings(settings))
@@ -393,6 +398,11 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			return 1
 		}
 	}
+	if err := installTmuxHostedPopupBinding(runner, settings, configDir, hostedSessionExecutable()); err != nil {
+		cleanupIncompleteSession()
+		fmt.Fprintf(stderr, "failed to install tmux hosted popup binding: %v\n", err)
+		return 1
+	}
 	if !reuseFirstWindow {
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
 			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, launchCmd))
@@ -494,6 +504,45 @@ func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, c
 	}
 	if _, err := runner.Run(manager.TmuxToggleTodoMouseBindingCommandForSettings(settings, configDir, executable)); err != nil {
 		return fmt.Errorf("install tmux hosted todo mouse binding: %w", err)
+	}
+	return nil
+}
+
+func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings, configDir string, executable string) error {
+	key := strings.TrimSpace(settings.Terminal.Tmux.HostedPopupKey)
+	if key == "" {
+		return nil
+	}
+
+	ownerOut, err := runner.Run(manager.TmuxHostedPopupOwnerCommandForSettings(settings))
+	if err != nil {
+		return fmt.Errorf("inspect tmux hosted popup owner: %w", err)
+	}
+	owner := strings.TrimSpace(ownerOut)
+
+	bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, key))
+	if err != nil {
+		return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
+	}
+	binding := strings.TrimSpace(bindingOut)
+	if owner != "" && owner != configDir {
+		return fmt.Errorf("tmux hosted popup binding is owned by config dir %q, current config dir is %q; use a unique tmux socket/session for test instances", owner, configDir)
+	}
+	if binding != "" && owner == "" {
+		return fmt.Errorf("tmux hosted popup key %q already has a binding and no AINN owner; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+	}
+	if owner == "" {
+		if _, err := runner.Run(manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir)); err != nil {
+			return fmt.Errorf("set tmux hosted popup owner: %w", err)
+		}
+	}
+
+	managerURL := strings.TrimSpace(os.Getenv("AINN_URL"))
+	if managerURL == "" {
+		managerURL = defaultManagerURL
+	}
+	if _, err := runner.Run(manager.TmuxHostedPopupBindingCommandForSettings(settings, key, configDir, managerURL, executable)); err != nil {
+		return fmt.Errorf("install tmux hosted popup binding: %w", err)
 	}
 	return nil
 }

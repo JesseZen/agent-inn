@@ -25,6 +25,7 @@ settings:
       host_session: ainn-test-host
       host_start_mode: reuse-first-window
       turn_status_hooks: true
+      hosted_popup_key: H
 plugins:
   tool_filter:
     kind: request_middleware
@@ -68,6 +69,9 @@ upstreams:
 	}
 	if !cfg.Settings.Terminal.Tmux.TurnStatusHooks {
 		t.Fatalf("expected turn status hooks to load, got %#v", cfg.Settings.Terminal.Tmux)
+	}
+	if cfg.Settings.Terminal.Tmux.HostedPopupKey != "H" {
+		t.Fatalf("expected hosted popup key to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
@@ -113,9 +117,10 @@ upstreams:
 			Host:   "tmux",
 			Opener: "default",
 			Tmux: TmuxSettings{
-				SocketName:    "ainn",
-				HostSession:   "ainn-host",
-				HostStartMode: "new-window",
+				SocketName:     "ainn",
+				HostSession:    "ainn-host",
+				HostStartMode:  "new-window",
+				HostedPopupKey: "",
 			},
 		},
 	}

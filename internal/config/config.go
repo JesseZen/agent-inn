@@ -57,6 +57,7 @@ type TmuxSettings struct {
 	HostSession     string `yaml:"host_session" json:"host_session"`
 	HostStartMode   string `yaml:"host_start_mode" json:"host_start_mode"`
 	TurnStatusHooks bool   `yaml:"turn_status_hooks" json:"turn_status_hooks"`
+	HostedPopupKey  string `yaml:"hosted_popup_key" json:"hosted_popup_key"`
 }
 
 type WorkerConfig struct {

@@ -97,6 +97,20 @@ func hostedTestTurnStatusInstallCommands(t *testing.T, settings config.Settings,
 	}
 }
 
+func hostedTestPopupBindingInstallCommands(t *testing.T, settings config.Settings, configDir string, managerURL string, key string) [][]string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, key),
+		manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir),
+		manager.TmuxHostedPopupBindingCommandForSettings(settings, key, configDir, managerURL, exe),
+	}
+}
+
 func hostedTestHasTmuxSubcommand(commands [][]string, subcommand string) bool {
 	for _, command := range commands {
 		for _, arg := range command {
@@ -951,6 +965,237 @@ func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testin
 		hostedTestHasTmuxSubcommand(got, "set-hook") ||
 		hostedTestHasTmuxSubcommand(got, "bind-key") {
 		t.Fatalf("unparseable legacy hook should not write turn status hooks: %#v", got)
+	}
+}
+
+func TestRunLaunchHostedTerminalHostedPopupKeyOmittedOrEmptySkipsBindingInstall(t *testing.T) {
+	cases := []struct {
+		name     string
+		keyLine  string
+		settings config.Settings
+	}{
+		{
+			name:     "omitted",
+			settings: hostedTestTmuxSettings("ainn-test", "ainn-test-host"),
+		},
+		{
+			name:     "empty",
+			keyLine:  "      hosted_popup_key: \"\"\n",
+			settings: config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: ""}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configDir := filepath.Join(dir, "config")
+			stateDir := filepath.Join(dir, "state")
+			writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+			if tc.keyLine != "" {
+				appendHostedPopupKeyToLaunchConfig(t, configDir, tc.keyLine)
+			}
+
+			var got [][]string
+			restore := func() func() {
+				previous := launchRunnerFactory
+				launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+					return launchRunnerFunc(func(args []string) (string, error) {
+						got = append(got, append([]string{}, args...))
+						if len(args) > 3 && args[3] == "show" {
+							return "on\n", nil
+						}
+						if len(args) > 3 && args[3] == "show-option" {
+							return configDir + "\n", nil
+						}
+						if len(args) > 3 && args[3] == "select-window" {
+							return "", errors.New("can't find window")
+						}
+						if len(args) > 3 && args[3] == "new-window" {
+							return "@12\n", nil
+						}
+						return "", nil
+					})
+				}
+				return func() { launchRunnerFactory = previous }
+			}()
+			defer restore()
+
+			var stderr bytes.Buffer
+			code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+			if code != 0 {
+				t.Fatalf("expected success, got %d: %s", code, stderr.String())
+			}
+			popupCommands := [][]string{
+				manager.TmuxHostedPopupOwnerCommandForSettings(tc.settings),
+				manager.TmuxListHostedPopupBindingCommandForSettings(tc.settings, ""),
+				manager.TmuxSetHostedPopupOwnerCommandForSettings(tc.settings, configDir),
+				manager.TmuxHostedPopupBindingCommandForSettings(tc.settings, "", configDir, defaultManagerURL, hostedSessionExecutable()),
+			}
+			for _, command := range popupCommands {
+				if hostedTestHasCommand(got, command) {
+					t.Fatalf("hosted popup key %s should not run popup install command %#v in %#v", tc.name, command, got)
+				}
+			}
+		})
+	}
+}
+
+func TestRunLaunchHostedTerminalHostedPopupKeyInstallsBinding(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	t.Setenv("AINN_URL", "http://127.0.0.1:19090")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+					return "", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+					return "", nil
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	want := hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, "http://127.0.0.1:19090", "H")
+	for _, command := range want {
+		if !hostedTestHasCommand(got, command) {
+			t.Fatalf("missing popup install command %#v in %#v", command, got)
+		}
+	}
+	lastIndex := -1
+	for _, command := range want {
+		found := false
+		for j, gotCommand := range got {
+			if reflect.DeepEqual(gotCommand, command) {
+				if j <= lastIndex {
+					t.Fatalf("popup install command order got %#v, want %#v in %#v", gotCommand, want, got)
+				}
+				lastIndex = j
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing popup install command %#v in %#v", command, got)
+		}
+	}
+}
+
+func TestRunLaunchHostedTerminalHostedPopupExistingBindingWithoutOwnerFails(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+					return "", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+					return "bind-key -T prefix H display-message taken\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected existing popup binding without owner to fail")
+	}
+	if !strings.Contains(stderr.String(), "hosted popup") || !strings.Contains(stderr.String(), "H") {
+		t.Fatalf("expected popup binding conflict, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
+		t.Fatalf("existing binding conflict should not install popup binding: %#v", got)
+	}
+}
+
+func TestRunLaunchHostedTerminalHostedPopupDifferentOwnerFails(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	otherConfigDir := filepath.Join(dir, "other-config")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+					return otherConfigDir + "\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected different popup owner to fail")
+	}
+	if !strings.Contains(stderr.String(), otherConfigDir) || !strings.Contains(stderr.String(), configDir) {
+		t.Fatalf("expected popup owner conflict to name both config dirs, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
+		t.Fatalf("owner conflict should not install popup binding: %#v", got)
 	}
 }
 
@@ -2111,6 +2356,19 @@ upstreams:
     base_url: https://openrouter.ai/api/v1
 `)
 	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendHostedPopupKeyToLaunchConfig(t *testing.T, configDir string, keyLine string) {
+	t.Helper()
+	path := filepath.Join(configDir, "config.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := strings.Replace(string(data), "      turn_status_hooks: true\n", "      turn_status_hooks: true\n"+keyLine, 1)
+	if err := os.WriteFile(path, []byte(next), 0600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -19,6 +19,10 @@ const (
 	TmuxAcknowledgeMouseKey          = "MouseDown1Status"
 	TmuxToggleTodoMouseKey           = "DoubleClick1Status"
 	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
+	tmuxHostedPopupOwnerOption       = "@ainn_hosted_popup_owner"
+	hostedPopupTitle                 = "Hosted Terminal"
+	hostedPopupWidth                 = "80%"
+	hostedPopupHeight                = "70%"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 )
 
@@ -134,6 +138,50 @@ func TmuxSetTurnStatusOwnerCommandForSettings(settings config.Settings, configDi
 	return append(tmuxPrefixForSettings(settings),
 		"set-option", "-t", tmuxHostSessionForSettings(settings),
 		tmuxTurnStatusOwnerOption, configDir,
+	)
+}
+
+func TmuxHostedPopupOwnerCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"show-option", "-qv", "-t", tmuxHostSessionForSettings(settings),
+		tmuxHostedPopupOwnerOption,
+	)
+}
+
+func TmuxSetHostedPopupOwnerCommandForSettings(settings config.Settings, configDir string) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"set-option", "-t", tmuxHostSessionForSettings(settings),
+		tmuxHostedPopupOwnerOption, configDir,
+	)
+}
+
+func TmuxListHostedPopupBindingCommandForSettings(settings config.Settings, key string) []string {
+	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "prefix", key)
+}
+
+func TmuxDisplayHostedPopupCommandForSettings(settings config.Settings, configDir string, managerURL string, executable string) []string {
+	shellCommand := tmuxShellQuote(executable) +
+		" hosted-session popup --config-dir " + tmuxShellQuote(configDir) +
+		" --manager-url " + tmuxShellQuote(managerURL)
+	return append(tmuxPrefixForSettings(settings),
+		"display-popup", "-E",
+		"-x", "R", "-y", "0",
+		"-w", hostedPopupWidth, "-h", hostedPopupHeight,
+		"-T", hostedPopupTitle,
+		shellCommand,
+	)
+}
+
+func TmuxHostedPopupBindingCommandForSettings(settings config.Settings, key string, configDir string, managerURL string, executable string) []string {
+	shellCommand := tmuxShellQuote(executable) +
+		" hosted-session popup --config-dir " + tmuxShellQuote(configDir) +
+		" --manager-url " + tmuxShellQuote(managerURL)
+	command := "display-popup -E -x R -y 0 -w " + hostedPopupWidth +
+		" -h " + hostedPopupHeight +
+		" -T " + tmuxShellQuote(hostedPopupTitle) +
+		" " + shellCommand
+	return append(tmuxPrefixForSettings(settings),
+		"bind-key", "-T", "prefix", key, command,
 	)
 }
 
