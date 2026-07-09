@@ -181,6 +181,55 @@ func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *t
 	}
 }
 
+func TestTmuxHostedTurnStatusCommandForRecordRendersTodoBelowUnreadStates(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	cases := []struct {
+		name    string
+		session HostedSessionRecord
+		want    string
+	}{
+		{
+			name:    "idle todo",
+			session: HostedSessionRecord{TmuxWindowID: "@12", UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]",
+		},
+		{
+			name:    "read done todo",
+			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, TurnAcknowledgedGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]",
+		},
+		{
+			name:    "unread done wins",
+			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]",
+		},
+		{
+			name:    "running wins",
+			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateRunning, UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]",
+		},
+		{
+			name:    "failed unread wins",
+			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateFailed, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+		},
+		{
+			name:    "interrupted unread wins",
+			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateInterrupted, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			want:    "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := TmuxHostedTurnStatusCommandForRecord(settings, tc.session)
+			if got[7] != tc.want {
+				t.Fatalf("got %#v, want format %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTmuxAcknowledgeTurnHookCommandForSettings(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{
@@ -216,6 +265,19 @@ func TestTmuxAcknowledgeTurnMouseBindingCommandForSettings(t *testing.T) {
 		"tmux", "-L", "ainn-test",
 		"bind-key", "-T", "root", "MouseDown1Status",
 		"switch-client -t = ; run-shell -b -t = \"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\"",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxToggleTodoMouseBindingCommandForSettings(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	got := TmuxToggleTodoMouseBindingCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin")
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"bind-key", "-T", "root", "DoubleClick1Status",
+		"run-shell -b -t = \"'/tmp/ainn bin' hosted-session toggle-todo --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\"",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)

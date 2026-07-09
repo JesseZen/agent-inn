@@ -17,6 +17,7 @@ const (
 	// tmux hooks are array options; this slot lets AINN replace its own hook without clearing user hooks.
 	tmuxAcknowledgeTurnHook          = "after-select-window[90]"
 	tmuxAcknowledgeMouseKey          = "MouseDown1Status"
+	tmuxToggleTodoMouseKey           = "DoubleClick1Status"
 	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 )
@@ -78,12 +79,12 @@ func TmuxRenameWindowCommandForSettings(settings config.Settings, windowID strin
 }
 
 func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID string, state string) []string {
-	return tmuxHostedTurnStatusCommand(settings, windowID, state, true)
+	return tmuxHostedTurnStatusCommand(settings, windowID, state, true, "")
 }
 
 func TmuxHostedTurnStatusCommandForRecord(settings config.Settings, session HostedSessionRecord) []string {
 	unread := !isHostedTurnTerminalState(session.TurnState) || session.TurnGeneration > session.TurnAcknowledgedGeneration
-	return tmuxHostedTurnStatusCommand(settings, session.TmuxWindowID, session.TurnState, unread)
+	return tmuxHostedTurnStatusCommand(settings, session.TmuxWindowID, session.TurnState, unread, session.UserMarker)
 }
 
 func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configDir string, executable string) []string {
@@ -110,6 +111,18 @@ func TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings,
 	)
 }
 
+func TmuxToggleTodoMouseBindingCommandForSettings(settings config.Settings, configDir string, executable string) []string {
+	shellCommand := tmuxShellQuote(executable) +
+		" hosted-session toggle-todo --config-dir " + tmuxShellQuote(configDir) +
+		" --window-id #{window_id}" +
+		" --window-name " + tmuxShellEscapedWindowNameFormat
+	command := "run-shell -b -t = " + tmuxCommandQuote(shellCommand)
+	return append(tmuxPrefixForSettings(settings),
+		"bind-key", "-T", "root", tmuxToggleTodoMouseKey,
+		command,
+	)
+}
+
 func TmuxTurnStatusOwnerCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings),
 		"show-option", "-qv", "-t", tmuxHostSessionForSettings(settings),
@@ -132,7 +145,11 @@ func TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings config.Setti
 	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", tmuxAcknowledgeMouseKey)
 }
 
-func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool) []string {
+func TmuxListToggleTodoMouseBindingCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", tmuxToggleTodoMouseKey)
+}
+
+func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool, userMarker string) []string {
 	target := tmuxHostSessionForSettings(settings) + ":" + windowID
 	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
 	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
@@ -153,6 +170,19 @@ func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, stat
 		if !unread {
 			format = "#[fg=colour244,bg=colour235] #I:! #W #[default]"
 			currentFormat = "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"
+		}
+	}
+	if userMarker == HostedUserMarkerTodo {
+		switch state {
+		case HostedTurnStateRunning:
+		case HostedTurnStateDone, HostedTurnStateFailed, HostedTurnStateInterrupted:
+			if !unread {
+				format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
+				currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
+			}
+		default:
+			format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
+			currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
 		}
 	}
 	return append(tmuxPrefixForSettings(settings),
