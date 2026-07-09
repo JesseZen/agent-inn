@@ -14,10 +14,10 @@ plugins:
     api_translate:
         kind: request_middleware
         source: builtin
-    image_filter:
+    tool_filter:
         kind: request_middleware
         source: external
-        path: plugins/request/image_filter/plugin.yaml
+        path: plugins/request/tool_filter/plugin.yaml
     model_override:
         kind: request_middleware
         source: external
@@ -43,8 +43,10 @@ workers:
         request_modules:
             api_translate:
                 enabled: true
-            image_filter:
+            tool_filter:
                 enabled: true
+                blocked_tools:
+                    - image_generation
             model_override:
                 enabled: false
                 model: gpt-4o

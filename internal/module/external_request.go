@@ -103,8 +103,8 @@ func (m *ExternalRequestMiddleware) RequestBodyMode(req ProxyRequestMeta) Reques
 		return RequestBodyStream
 	}
 	switch m.name {
-	case "image_filter":
-		if !isJSONContentType(req.ContentType, req.Headers.Get("Content-Type")) {
+	case "tool_filter":
+		if len(blockedToolSet(m.config)) == 0 || !isJSONContentType(req.ContentType, req.Headers.Get("Content-Type")) {
 			return RequestBodyStream
 		}
 	case "model_override":

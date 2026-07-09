@@ -23,13 +23,13 @@ type requestMiddlewareDefinition struct {
 
 var requestMiddlewareDefinitions = []requestMiddlewareDefinition{
 	{
-		name: "image_filter",
+		name: "tool_filter",
 		support: appruntime.ModuleProtocolSupport{
 			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
 		},
 		build: func(cfg ModuleConfig, _ BuildDependencies) Middleware {
-			return NewImageFilter(cfg)
+			return NewToolFilter(cfg)
 		},
 	},
 	{

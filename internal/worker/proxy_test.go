@@ -321,7 +321,7 @@ func TestWorkerRunsModuleChain(t *testing.T) {
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
 			Modules: []module.Middleware{
-				module.NewImageFilter(module.ModuleConfig{Enabled: true}),
+				module.NewToolFilter(module.ModuleConfig{Enabled: true, Params: map[string]any{"blocked_tools": []any{"image_generation"}}}),
 			},
 		},
 	})
@@ -482,8 +482,8 @@ json.dump(payload, sys.stdout)
 	}
 }
 
-func TestWorkerExternalImageFilterPassesThroughNonJSONRequest(t *testing.T) {
-	scriptPath := repoRequestPluginScript(t, "image_filter")
+func TestWorkerExternalToolFilterPassesThroughNonJSONRequest(t *testing.T) {
+	scriptPath := repoRequestPluginScript(t, "tool_filter")
 	var receivedBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -505,7 +505,7 @@ func TestWorkerExternalImageFilterPassesThroughNonJSONRequest(t *testing.T) {
 				BaseURL: server.URL,
 			},
 			Plugins: map[string]appruntime.PluginRuntime{
-				"image_filter": {
+				"tool_filter": {
 					Kind:            "request_middleware",
 					Source:          "external",
 					Command:         "python3",
@@ -514,7 +514,7 @@ func TestWorkerExternalImageFilterPassesThroughNonJSONRequest(t *testing.T) {
 				},
 			},
 			Modules: map[string]appruntime.ModuleConfig{
-				"image_filter": {Enabled: true},
+				"tool_filter": {Enabled: true, Params: map[string]any{"blocked_tools": []any{"image_generation"}}},
 			},
 		},
 	})
@@ -800,7 +800,7 @@ func TestWorkerClearsContentEncodingAfterBufferingCompressedRequest(t *testing.T
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
 			Modules: []module.Middleware{
-				module.NewImageFilter(module.ModuleConfig{Enabled: true}),
+				module.NewToolFilter(module.ModuleConfig{Enabled: true, Params: map[string]any{"blocked_tools": []any{"image_generation"}}}),
 			},
 		},
 	})

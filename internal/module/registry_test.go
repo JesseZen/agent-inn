@@ -15,7 +15,7 @@ func TestBuildRequestMiddlewaresBuildsFixedOrderAndNormalizesAPITranslate(t *tes
 		"request_log":    {Enabled: true},
 		"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-test"}},
 		"api_translate":  {Enabled: true},
-		"image_filter":   {Enabled: true},
+		"tool_filter":    {Enabled: true},
 	}, BuildDependencies{
 		APIFormat: "chat_completions",
 		Stderr:    io.Discard,
@@ -24,7 +24,7 @@ func TestBuildRequestMiddlewaresBuildsFixedOrderAndNormalizesAPITranslate(t *tes
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"image_filter", "debug_sse", "api_translate", "model_override", "request_log"}) {
+	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"tool_filter", "debug_sse", "api_translate", "model_override", "request_log"}) {
 		t.Fatalf("bad middleware order: %#v", requestMiddlewareNames(modules))
 	}
 	if !reflect.DeepEqual(configs["api_translate"], ModuleConfig{
@@ -60,11 +60,11 @@ func TestBuildRequestMiddlewaresBuildsExternalRequestMiddleware(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"image_filter", "debug_sse", "api_translate", "model_override", "request_log", "external_filter"}) {
+	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"tool_filter", "debug_sse", "api_translate", "model_override", "request_log", "external_filter"}) {
 		t.Fatalf("bad middleware order: %#v", requestMiddlewareNames(modules))
 	}
 	want := map[string]ModuleConfig{
-		"image_filter":    {},
+		"tool_filter":     {},
 		"debug_sse":       {},
 		"api_translate":   {Enabled: true, Params: map[string]any{"api_format": "chat_completions"}},
 		"model_override":  {},
@@ -78,17 +78,17 @@ func TestBuildRequestMiddlewaresBuildsExternalRequestMiddleware(t *testing.T) {
 
 func TestBuildRequestMiddlewaresReplacesBuiltinWithExternalRuntime(t *testing.T) {
 	modules, _, _, err := BuildRequestMiddlewares(map[string]ModuleConfig{
-		"image_filter": {Enabled: true},
+		"tool_filter": {Enabled: true},
 	}, BuildDependencies{
 		Stderr: io.Discard,
 		ExternalRequest: map[string]ExternalRequestRuntime{
-			"image_filter": {Command: "/bin/cat", ProtocolVersion: "2"},
+			"tool_filter": {Command: "/bin/cat", ProtocolVersion: "2"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"image_filter", "debug_sse", "api_translate", "model_override", "request_log"}) {
+	if !reflect.DeepEqual(requestMiddlewareNames(modules), []string{"tool_filter", "debug_sse", "api_translate", "model_override", "request_log"}) {
 		t.Fatalf("bad middleware order: %#v", requestMiddlewareNames(modules))
 	}
 	req := &ProxyRequest{
@@ -102,7 +102,7 @@ func TestBuildRequestMiddlewaresReplacesBuiltinWithExternalRuntime(t *testing.T)
 		t.Fatal(err)
 	}
 	if string(req.Body) != `{"tools":[{"type":"image_generation"},{"type":"function","name":"keep"}]}` {
-		t.Fatalf("builtin image_filter was not replaced by external runtime: %s", req.Body)
+		t.Fatalf("builtin tool_filter was not replaced by external runtime: %s", req.Body)
 	}
 }
 
@@ -118,7 +118,7 @@ func TestBuildRequestMiddlewaresReturnsProtocolSupport(t *testing.T) {
 	}
 
 	want := map[string]appruntime.ModuleProtocolSupport{
-		"image_filter": {
+		"tool_filter": {
 			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
 		},
@@ -172,7 +172,7 @@ func TestRequestMiddlewareSupportForAnthropicExcludesIncompatibleModules(t *test
 				appruntime.ProtocolCapabilityStreamEvents,
 			},
 		},
-		"image_filter": {
+		"tool_filter": {
 			Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
 			Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
 		},

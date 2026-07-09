@@ -24,7 +24,7 @@ func TestWorkerManagementStatusRedactsSecretsAndIncludesGeneration(t *testing.T)
 				APIKey:    "sk-secret",
 				APIFormat: "responses",
 			},
-			Modules: []module.Middleware{module.NewImageFilter(module.ModuleConfig{Enabled: true})},
+			Modules: []module.Middleware{module.NewToolFilter(module.ModuleConfig{Enabled: true})},
 		},
 	})
 
@@ -121,7 +121,7 @@ func TestWorkerManagementStatusIncludesProtocolMetadata(t *testing.T) {
 			},
 			Protocol: appruntime.ProtocolResponses,
 			ModuleSupport: map[string]appruntime.ModuleProtocolSupport{
-				"image_filter": {
+				"tool_filter": {
 					Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
 					Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
 				},
@@ -148,7 +148,7 @@ func TestWorkerManagementStatusIncludesProtocolMetadata(t *testing.T) {
 	}{
 		Protocol: appruntime.ProtocolResponses,
 		ModuleSupport: map[string]appruntime.ModuleProtocolSupport{
-			"image_filter": {
+			"tool_filter": {
 				Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
 				Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
 			},
@@ -311,18 +311,18 @@ func TestWorkerManagementModuleToggle(t *testing.T) {
 		Snapshot: RuntimeConfigSnapshot{
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
-			Modules:    []module.Middleware{module.NewImageFilter(module.ModuleConfig{Enabled: false})},
+			Modules:    []module.Middleware{module.NewToolFilter(module.ModuleConfig{Enabled: false})},
 		},
 	})
 
 	res := httptest.NewRecorder()
-	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/_proxy/modules/image_filter/toggle", nil))
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/_proxy/modules/tool_filter/toggle", nil))
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected toggle status %d: %s", res.Code, res.Body.String())
 	}
 
 	status := httptest.NewRecorder()
-	w.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "http://proxy.local/_proxy/modules/image_filter", nil))
+	w.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "http://proxy.local/_proxy/modules/tool_filter", nil))
 	if !strings.Contains(status.Body.String(), `"enabled":true`) {
 		t.Fatalf("module was not toggled: %s", status.Body.String())
 	}

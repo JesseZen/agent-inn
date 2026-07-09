@@ -48,7 +48,7 @@ Each Worker is bound to one Upstream. You can run multiple Workers pointing to d
 | Module | Description |
 |--------|-------------|
 | `config_patch` | Auto-modify `~/.codex/config.toml` to point Codex at the Worker |
-| `image_filter` | Filter `image_generation` tool calls |
+| `tool_filter` | Filter configured tools from upstream requests |
 | `api_translate` | Chat Completions ↔ Responses API translation |
 | `model_override` | Override the `model` field in requests via `params.model` |
 | `request_log` | Log request method + path to stderr |
@@ -156,8 +156,10 @@ workers:
       config_patch:       # Auto-modify ~/.codex/config.toml
         enabled: true
         config_path: ~/.codex/config.toml
-      image_filter:       # Filter image_generation tool
+      tool_filter:       # Filter selected tools
         enabled: true
+        blocked_tools:
+          - image_generation
       api_translate:      # Chat Completions ↔ Responses API translation
         enabled: true
 

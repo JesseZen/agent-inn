@@ -48,7 +48,7 @@ Codex App / CLI
 | 模块 | 描述 |
 |------|------|
 | `config_patch` | 自动修改 `~/.codex/config.toml`，将 Codex 指向该 Worker |
-| `image_filter` | 过滤 `image_generation` 工具调用 |
+| `tool_filter` | 从上游请求中过滤已配置的工具 |
 | `api_translate` | Chat Completions ↔ Responses API 翻译 |
 | `model_override` | 通过 `params.model` 覆盖请求中的 `model` 字段 |
 | `request_log` | 将请求方法 + 路径记录到 stderr |
@@ -155,8 +155,10 @@ workers:
       config_patch:       # Auto-modify ~/.codex/config.toml
         enabled: true
         config_path: ~/.codex/config.toml
-      image_filter:       # Filter image_generation tool
+      tool_filter:       # 过滤指定工具
         enabled: true
+        blocked_tools:
+          - image_generation
       api_translate:      # Chat Completions ↔ Responses API translation
         enabled: true
 

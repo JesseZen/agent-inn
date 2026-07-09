@@ -1067,7 +1067,7 @@ func TestManagerAPITogglesConfiguredWorkerModule(t *testing.T) {
 					Port:     6767,
 					Upstream: "openai",
 					RequestModules: map[string]config.ModuleConfig{
-						"image_filter": {Enabled: false},
+						"tool_filter": {Enabled: false},
 					},
 				},
 			},
@@ -1080,7 +1080,7 @@ func TestManagerAPITogglesConfiguredWorkerModule(t *testing.T) {
 	m.statuses["codex-app"] = "running"
 
 	res := httptest.NewRecorder()
-	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers/6767/modules/image_filter/toggle", nil))
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers/6767/modules/tool_filter/toggle", nil))
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected toggle status %d: %s", res.Code, res.Body.String())
 	}
@@ -1093,7 +1093,7 @@ func TestManagerAPITogglesConfiguredWorkerModule(t *testing.T) {
 	if !strings.Contains(res.Body.String(), `"enabled":true`) {
 		t.Fatalf("worker list did not reflect toggle: %s", res.Body.String())
 	}
-	if client.toggledPort != 6767 || client.toggledModule != "image_filter" {
+	if client.toggledPort != 6767 || client.toggledModule != "tool_filter" {
 		t.Fatalf("live worker toggle was not called: port=%d module=%s", client.toggledPort, client.toggledModule)
 	}
 }
@@ -1344,8 +1344,8 @@ func TestManagerAPIStoppedWorkerUsesExternalSupportForBuiltinRequestName(t *test
 	if err := os.WriteFile(pluginPath, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	manifestPath := filepath.Join(dir, "image_filter.yaml")
-	if err := os.WriteFile(manifestPath, []byte(`name: image_filter
+	manifestPath := filepath.Join(dir, "tool_filter.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`name: tool_filter
 kind: request_middleware
 version: 0.1.0
 protocol_version: "2"
@@ -1358,7 +1358,7 @@ capabilities:
 		t.Fatal(err)
 	}
 	plugins := testPluginDefinitions()
-	plugins["image_filter"] = config.PluginDefinition{
+	plugins["tool_filter"] = config.PluginDefinition{
 		Kind:   config.PluginKindRequestMiddleware,
 		Source: config.PluginSourceExternal,
 		Path:   manifestPath,
@@ -1391,8 +1391,8 @@ capabilities:
 		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolChatCompletions},
 		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText},
 	}
-	if !reflect.DeepEqual(detail.ModuleSupport["image_filter"], want) {
-		t.Fatalf("bad detail support for image_filter:\ngot  %#v\nwant %#v", detail.ModuleSupport["image_filter"], want)
+	if !reflect.DeepEqual(detail.ModuleSupport["tool_filter"], want) {
+		t.Fatalf("bad detail support for tool_filter:\ngot  %#v\nwant %#v", detail.ModuleSupport["tool_filter"], want)
 	}
 
 	res = httptest.NewRecorder()
@@ -1409,8 +1409,8 @@ capabilities:
 	if len(list.Workers) != 1 {
 		t.Fatalf("expected one worker, got %#v", list.Workers)
 	}
-	if !reflect.DeepEqual(list.Workers[0].ModuleSupport["image_filter"], want) {
-		t.Fatalf("bad summary support for image_filter:\ngot  %#v\nwant %#v", list.Workers[0].ModuleSupport["image_filter"], want)
+	if !reflect.DeepEqual(list.Workers[0].ModuleSupport["tool_filter"], want) {
+		t.Fatalf("bad summary support for tool_filter:\ngot  %#v\nwant %#v", list.Workers[0].ModuleSupport["tool_filter"], want)
 	}
 }
 

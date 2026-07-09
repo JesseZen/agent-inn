@@ -80,7 +80,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         modules: {
           model_override: { enabled: false, params: { model: "gpt-old" } },
           api_translate: { enabled: true, params: { api_format: "chat_completions" } },
-          image_filter: { enabled: true },
+          tool_filter: { enabled: true },
         },
         hooks: {
           config_patch: { enabled: true, params: { config_path: "~/.codex/config.toml", state_dir: "~/.ainn" } },
@@ -91,7 +91,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         module_support: {
           model_override: { protocols: ["responses", "chat_completions"], capabilities: ["input_text"] },
           api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
-          image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+          tool_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
           request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
           config_patch: { protocols: ["responses", "chat_completions"] },
         },
@@ -143,7 +143,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     },
     plugins: {
       api_translate: { kind: "request_middleware", source: "builtin" },
-      image_filter: { kind: "request_middleware", source: "builtin" },
+      tool_filter: { kind: "request_middleware", source: "builtin" },
       model_override: { kind: "request_middleware", source: "external", path: "plugins/request/model_override/plugin.yaml" },
       request_log: { kind: "request_middleware", source: "external", path: "plugins/request/request_log/plugin.yaml" },
       config_patch: { kind: "lifecycle_hook", source: "builtin" },
@@ -314,7 +314,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         hooks: {},
         module_support: {
           api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
-          image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+          tool_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
           request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
         },
       })
@@ -342,21 +342,21 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       })
     }
 
-    if (url.pathname === "/api/workers/6767/modules/image_filter" && method === "PATCH") {
+    if (url.pathname === "/api/workers/6767/modules/tool_filter" && method === "PATCH") {
       const body = JSON.parse(String(init?.body ?? "null")) as { enabled: boolean }
-      calls.patchModule.push({ port: 6767, module: "image_filter", body })
+      calls.patchModule.push({ port: 6767, module: "tool_filter", body })
       workers.set(6767, {
         ...workers.get(6767)!,
         modules: {
           ...workers.get(6767)!.modules,
-          image_filter: body,
+          tool_filter: body,
         },
       })
       return json({
         worker: "app",
         port: 6767,
         module: {
-          name: "image_filter",
+          name: "tool_filter",
           enabled: body.enabled,
           params: undefined,
         },

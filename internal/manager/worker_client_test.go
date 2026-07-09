@@ -26,7 +26,7 @@ func TestHTTPWorkerClientPatchesAndTogglesWorkerModules(t *testing.T) {
 				t.Fatalf("bad patch payload: %#v", cfg)
 			}
 			sawPatch = true
-		case r.Method == http.MethodPost && r.URL.Path == "/_proxy/modules/image_filter/toggle":
+		case r.Method == http.MethodPost && r.URL.Path == "/_proxy/modules/tool_filter/toggle":
 			sawToggle = true
 		case r.Method == http.MethodPost && r.URL.Path == "/_proxy/switch":
 			var payload struct {
@@ -50,7 +50,7 @@ func TestHTTPWorkerClientPatchesAndTogglesWorkerModules(t *testing.T) {
 	if err := client.PatchModule(port, "model_override", config.ModuleConfig{Enabled: true, Params: map[string]any{"model": "gpt-live"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ToggleModule(port, "image_filter"); err != nil {
+	if err := client.ToggleModule(port, "tool_filter"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.SwitchUpstream(port, upstream.RuntimeUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "sk-live"}); err != nil {

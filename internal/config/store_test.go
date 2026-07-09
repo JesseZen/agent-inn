@@ -26,16 +26,16 @@ settings:
       host_start_mode: reuse-first-window
       turn_status_hooks: true
 plugins:
-  image_filter:
+  tool_filter:
     kind: request_middleware
     source: external
-    path: plugins/request/image_filter/plugin.yaml
+    path: plugins/request/tool_filter/plugin.yaml
 workers:
   codex-app:
     port: 6767
     upstream: openai
     request_modules:
-      image_filter:
+      tool_filter:
         enabled: true
 upstreams:
   openai:
@@ -72,7 +72,7 @@ upstreams:
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
 	}
-	if !cfg.Workers["codex-app"].RequestModules["image_filter"].Enabled {
+	if !cfg.Workers["codex-app"].RequestModules["tool_filter"].Enabled {
 		t.Fatal("expected module enabled")
 	}
 	if cfg.Workers["codex-app"].Role != "cli" {

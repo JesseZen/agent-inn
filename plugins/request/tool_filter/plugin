@@ -3,28 +3,36 @@ import json
 import sys
 
 
-def is_image_generation(tool):
+def tool_name(tool):
     if isinstance(tool, str):
-        return tool == "image_generation"
+        return tool
     if isinstance(tool, dict):
-        return tool.get("type") == "image_generation" or tool.get("name") == "image_generation"
-    return False
+        return tool.get("type") or tool.get("name") or ""
+    return ""
 
 
-def sanitize_tool_choice(tool_choice):
-    if tool_choice == "image_generation":
+def tool_blocked(tool, blocked_tools):
+    return tool_name(tool) in blocked_tools
+
+
+def sanitize_tool_choice(tool_choice, blocked_tools):
+    if tool_blocked(tool_choice, blocked_tools):
         return "auto"
     if not isinstance(tool_choice, dict):
         return tool_choice
-    if tool_choice.get("type") == "image_generation" or tool_choice.get("name") == "image_generation":
-        return "auto"
     nested = tool_choice.get("tool")
-    if isinstance(nested, dict) and (nested.get("type") == "image_generation" or nested.get("name") == "image_generation"):
+    if isinstance(nested, dict) and tool_blocked(nested, blocked_tools):
         return "auto"
     return tool_choice
 
 
 request = json.load(sys.stdin)
+params = request.get("params") or {}
+blocked_tools = {tool.strip() for tool in params.get("blocked_tools") or [] if isinstance(tool, str) and tool.strip()}
+if not blocked_tools:
+    json.dump(request, sys.stdout, separators=(",", ":"))
+    sys.exit(0)
+
 content_type = (request.get("content_type") or "").strip().lower()
 if content_type != "application/json" and not content_type.startswith("application/json;"):
     json.dump(request, sys.stdout, separators=(",", ":"))
@@ -40,14 +48,14 @@ tools = body.get("tools")
 if isinstance(tools, list):
     next_tools = []
     for tool in tools:
-        if is_image_generation(tool):
+        if tool_blocked(tool, blocked_tools):
             changed = True
             continue
         next_tools.append(tool)
     body["tools"] = next_tools
 
 if "tool_choice" in body:
-    sanitized = sanitize_tool_choice(body["tool_choice"])
+    sanitized = sanitize_tool_choice(body["tool_choice"], blocked_tools)
     if sanitized != body["tool_choice"]:
         body["tool_choice"] = sanitized
         changed = True

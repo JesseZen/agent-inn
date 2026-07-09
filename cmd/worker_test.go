@@ -104,14 +104,14 @@ func TestBuildModulesIncludesFixedOrderAuxiliaryModules(t *testing.T) {
 		"request_log":    {Enabled: true},
 		"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-test"}},
 		"api_translate":  {Enabled: true},
-		"image_filter":   {Enabled: true},
+		"tool_filter":    {Enabled: true},
 	}, "chat_completions")
 
 	var names []string
 	for _, middleware := range modules {
 		names = append(names, middleware.Name())
 	}
-	want := strings.Join([]string{"image_filter", "debug_sse", "api_translate", "model_override", "request_log"}, ",")
+	want := strings.Join([]string{"tool_filter", "debug_sse", "api_translate", "model_override", "request_log"}, ",")
 	if strings.Join(names, ",") != want {
 		t.Fatalf("bad module order %v", names)
 	}

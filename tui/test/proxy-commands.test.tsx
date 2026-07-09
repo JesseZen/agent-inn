@@ -685,7 +685,7 @@ test("proxy workers detail shows claudecode launcher and anthropic protocol", as
         hooks: {},
         module_support: {
           api_translate: { protocols: ["responses", "chat_completions"], capabilities: ["input_text", "tool_calls", "stream_events"] },
-          image_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+          tool_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
           request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
         },
       },
@@ -771,7 +771,7 @@ test("proxy workers module view shows lifecycle hooks separately", async () => {
 
     expect(app.frame()).toContain("Request Middleware")
     expect(app.frame()).toContain("request_log")
-    expect(app.frame()).toContain("image_filter")
+    expect(app.frame()).toContain("tool_filter")
     expect(app.frame()).toContain("unavailable")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
@@ -828,7 +828,7 @@ test("proxy workers module view opens configured unavailable module editor and a
 
     await wait(async () => {
       await app.render()
-      return app.frame().includes("image_filter") && app.frame().includes("unavailable")
+      return app.frame().includes("tool_filter") && app.frame().includes("unavailable")
     })
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
@@ -849,7 +849,7 @@ test("proxy workers module view opens configured unavailable module editor and a
     expect(app.calls.patchModule).toEqual([
       {
         port: 6767,
-        module: "image_filter",
+        module: "tool_filter",
         body: {
           enabled: false,
           params: undefined,

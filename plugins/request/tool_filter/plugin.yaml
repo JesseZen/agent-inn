@@ -1,4 +1,4 @@
-name: image_filter
+name: tool_filter
 kind: request_middleware
 version: 0.1.0
 protocol_version: "2"

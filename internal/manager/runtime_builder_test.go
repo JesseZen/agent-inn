@@ -499,10 +499,10 @@ func testPluginDefinitions() map[string]config.PluginDefinition {
 			Kind:   config.PluginKindRequestMiddleware,
 			Source: config.PluginSourceBuiltin,
 		},
-		"image_filter": {
+		"tool_filter": {
 			Kind:   config.PluginKindRequestMiddleware,
 			Source: config.PluginSourceExternal,
-			Path:   repoRequestPluginManifest("image_filter"),
+			Path:   repoRequestPluginManifest("tool_filter"),
 		},
 		"model_override": {
 			Kind:   config.PluginKindRequestMiddleware,
