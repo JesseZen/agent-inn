@@ -89,6 +89,7 @@ func hostedTestTurnStatusInstallCommands(t *testing.T, settings config.Settings,
 		manager.TmuxTurnStatusOwnerCommandForSettings(settings),
 		manager.TmuxShowHooksCommandForSettings(settings),
 		manager.TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings),
+		manager.TmuxListToggleTodoMouseBindingCommandForSettings(settings),
 		manager.TmuxSetTurnStatusOwnerCommandForSettings(settings, configDir),
 		hostedTestAcknowledgeHookCommand(t, settings, configDir),
 		hostedTestAcknowledgeMouseBindingCommand(t, settings, configDir),
@@ -130,6 +131,12 @@ func hostedTestHasCommand(commands [][]string, want []string) bool {
 func hostedTestLegacyAcknowledgeHookOutput(t *testing.T, settings config.Settings, configDir string) string {
 	t.Helper()
 	command := hostedTestAcknowledgeHookCommand(t, settings, configDir)
+	return command[len(command)-2] + " " + command[len(command)-1] + "\n"
+}
+
+func hostedTestLegacyToggleTodoBindingOutput(t *testing.T, settings config.Settings, configDir string) string {
+	t.Helper()
+	command := hostedTestToggleTodoMouseBindingCommand(t, settings, configDir)
 	return command[len(command)-2] + " " + command[len(command)-1] + "\n"
 }
 
@@ -761,6 +768,51 @@ func TestRunLaunchHostedTerminalRejectsLegacyTurnStatusOwnerMismatch(t *testing.
 	}
 }
 
+func TestRunLaunchHostedTerminalRejectsLegacyTodoBindingOwnerMismatch(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	otherConfigDir := filepath.Join(dir, "other-config")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListAcknowledgeTurnMouseBindingCommandForSettings(tmuxSettings)) {
+					return "", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListToggleTodoMouseBindingCommandForSettings(tmuxSettings)) {
+					return hostedTestLegacyToggleTodoBindingOutput(t, tmuxSettings, otherConfigDir), nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected legacy todo owner conflict to fail")
+	}
+	if !strings.Contains(stderr.String(), otherConfigDir) || !strings.Contains(stderr.String(), configDir) {
+		t.Fatalf("expected legacy todo owner conflict to name both config dirs, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) ||
+		hostedTestHasTmuxSubcommand(got, "set-hook") ||
+		hostedTestHasTmuxSubcommand(got, "bind-key") {
+		t.Fatalf("legacy todo owner conflict should not write turn status hooks: %#v", got)
+	}
+}
+
 func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
@@ -799,6 +851,26 @@ func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testin
 		hostedTestHasTmuxSubcommand(got, "set-hook") ||
 		hostedTestHasTmuxSubcommand(got, "bind-key") {
 		t.Fatalf("unparseable legacy hook should not write turn status hooks: %#v", got)
+	}
+}
+
+func TestManagedTurnStatusConfigDirIgnoresUnrelatedTodoBindings(t *testing.T) {
+	owner, found, err := managedTurnStatusConfigDir("bind-key -T root C-t run-shell -b \"'/tmp/ainn' hosted-session toggle-todo --config-dir '/tmp/other' --window-id #{window_id}\"\n")
+	got := struct {
+		owner string
+		found bool
+		err   string
+	}{owner: owner, found: found}
+	if err != nil {
+		got.err = err.Error()
+	}
+	want := struct {
+		owner string
+		found bool
+		err   string
+	}{}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 

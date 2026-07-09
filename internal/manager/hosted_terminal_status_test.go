@@ -362,6 +362,25 @@ func TestTmuxListAcknowledgeTurnMouseBindingCommandForSettings(t *testing.T) {
 	}
 }
 
+func TestTmuxListToggleTodoMouseBindingCommandForSettings(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxListToggleTodoMouseBindingCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"list-keys", "-T", "root",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestTmuxAcknowledgeTurnCommandsShellQuoteExpandedWindowName(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{

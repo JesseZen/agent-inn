@@ -146,7 +146,7 @@ func TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings config.Setti
 }
 
 func TmuxListToggleTodoMouseBindingCommandForSettings(settings config.Settings) []string {
-	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", tmuxToggleTodoMouseKey)
+	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root")
 }
 
 func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool, userMarker string) []string {

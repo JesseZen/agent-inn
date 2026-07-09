@@ -443,7 +443,11 @@ func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, c
 		if err != nil {
 			return fmt.Errorf("inspect tmux mouse binding: %w", err)
 		}
-		legacyOwner, found, err := managedAcknowledgeConfigDir(hooksOut, mouseBindingOut)
+		todoBindingOut, err := runner.Run(manager.TmuxListToggleTodoMouseBindingCommandForSettings(settings))
+		if err != nil {
+			return fmt.Errorf("inspect tmux todo mouse binding: %w", err)
+		}
+		legacyOwner, found, err := managedTurnStatusConfigDir(hooksOut, mouseBindingOut, todoBindingOut)
 		if err != nil {
 			return err
 		}
@@ -466,12 +470,14 @@ func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, c
 	return nil
 }
 
-func managedAcknowledgeConfigDir(outputs ...string) (string, bool, error) {
+func managedTurnStatusConfigDir(outputs ...string) (string, bool, error) {
 	owner := ""
 	found := false
 	for _, output := range outputs {
 		for _, line := range strings.Split(output, "\n") {
-			if !strings.Contains(line, "hosted-session acknowledge") {
+			matchesAcknowledge := strings.Contains(line, "hosted-session acknowledge")
+			matchesTodo := strings.Contains(line, "DoubleClick1Status") && strings.Contains(line, "hosted-session toggle-todo")
+			if !matchesAcknowledge && !matchesTodo {
 				continue
 			}
 			marker := "--config-dir "

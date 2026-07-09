@@ -472,7 +472,9 @@ func (r *HostedSessionRegistry) AcknowledgeTurnByWindow(windowID string, windowN
 	found := false
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		for sessionID, session := range file.Sessions {
-			if session.TmuxWindowID != windowID && session.TmuxWindowID != windowName {
+			matchesWindowID := session.TmuxWindowID == windowID
+			matchesLegacyName := windowName != "" && session.TmuxWindowID == windowName
+			if !matchesWindowID && !matchesLegacyName {
 				continue
 			}
 			found = true
@@ -493,7 +495,9 @@ func (r *HostedSessionRegistry) ToggleUserMarkerByWindow(windowID string, window
 	found := false
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		for sessionID, session := range file.Sessions {
-			if session.TmuxWindowID != windowID && session.TmuxWindowID != windowName {
+			matchesWindowID := session.TmuxWindowID == windowID
+			matchesLegacyName := windowName != "" && session.TmuxWindowID == windowName
+			if !matchesWindowID && !matchesLegacyName {
 				continue
 			}
 			found = true

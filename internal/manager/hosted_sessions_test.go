@@ -354,6 +354,44 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowNameMarksLegacyCompletedTur
 	}
 }
 
+func TestHostedSessionRegistryAcknowledgeTurnByWindowEmptyNameNoopsForUnknownWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.AcknowledgeTurnByWindow("@99", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || !reflect.DeepEqual(got, HostedSessionRecord{}) {
+		t.Fatalf("got %#v ok=%v, want no match", got, ok)
+	}
+	persisted, found, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := done
+	if !found || !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("got %#v found=%v, want %#v", persisted, found, want)
+	}
+}
+
 func TestHostedSessionRegistryToggleUserMarkerByWindowIDPersistsTodo(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -419,6 +457,36 @@ func TestHostedSessionRegistryToggleUserMarkerByWindowNameMatchesLegacyRecord(t 
 	want.UserMarker = HostedUserMarkerTodo
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryToggleUserMarkerByWindowEmptyNameNoopsForUnknownWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.ToggleUserMarkerByWindow("@99", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || !reflect.DeepEqual(got, HostedSessionRecord{}) {
+		t.Fatalf("got %#v ok=%v, want no match", got, ok)
+	}
+	persisted, found, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !reflect.DeepEqual(persisted, created) {
+		t.Fatalf("got %#v found=%v, want %#v", persisted, found, created)
 	}
 }
 
