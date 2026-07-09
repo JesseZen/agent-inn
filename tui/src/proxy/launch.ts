@@ -3,6 +3,7 @@ import { platform } from "node:os"
 import { createTerminalActivateCommand, createTerminalOpenCommand } from "./terminal-opener"
 
 export type LaunchMode = "external-window" | "hosted-terminal"
+export type HostedTerminalAttachMode = "open" | "setup-only"
 
 export type ProxyLaunchOptions = {
   executable?: string
@@ -18,6 +19,7 @@ export type ProxyLaunchOptions = {
   opener?: string
   tmuxSocketName?: string
   tmuxHostSession?: string
+  hostedTerminalAttachMode?: HostedTerminalAttachMode
 }
 
 const tmuxClientAttachPollIntervalMs = 100
@@ -175,6 +177,7 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
   if (setup.code !== 0) {
     throw new Error(setup.stderr || `ainn launch exited with code ${setup.code}`)
   }
+  if (opts.hostedTerminalAttachMode === "setup-only") return true
 
   if (await hasTmuxClient(tmuxSocket, tmuxHostSession)) {
     const activateCommand = createTerminalActivateCommand({

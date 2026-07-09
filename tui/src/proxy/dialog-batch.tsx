@@ -8,7 +8,7 @@ import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import type { BatchRun, BatchVariant, HostedSessionSummary, WorkerSummary } from "./backend"
-import { launchProxySession, pasteHostedPrompt } from "./launch"
+import { launchProxySession, pasteHostedPrompt, type HostedTerminalAttachMode } from "./launch"
 
 const minBatchVariantCount = 1
 const maxBatchVariantCount = 8
@@ -49,7 +49,7 @@ export function DialogBatch() {
     })),
   ])
 
-  async function launchVariant(batch: BatchRun, variant: BatchVariant, prompt?: string) {
+  async function launchVariant(batch: BatchRun, variant: BatchVariant, hostedTerminalAttachMode: HostedTerminalAttachMode, prompt?: string) {
     const settings = await sdk.client.getSettings()
     await launchProxySession({
       executable: import.meta.env?.AINN_EXECUTABLE || undefined,
@@ -63,6 +63,7 @@ export function DialogBatch() {
       opener: settings.settings.terminal.opener,
       tmuxSocketName: settings.settings.terminal.tmux.socket_name,
       tmuxHostSession: settings.settings.terminal.tmux.host_session,
+      hostedTerminalAttachMode,
     })
 
     if (!prompt) return
@@ -141,8 +142,9 @@ export function DialogBatch() {
       ...(model ? { model } : {}),
     })
     for (const variant of batch.variants) {
-      await launchVariant(batch, variant, batch.prompt)
+      await launchVariant(batch, variant, "setup-only", batch.prompt)
     }
+    if (batch.variants.length > 0) await launchVariant(batch, batch.variants[0], "open")
     dialog.replace(() => <DialogBatchRun batch={batch} />)
   }
 
@@ -205,6 +207,7 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
       opener: settings.settings.terminal.opener,
       tmuxSocketName: settings.settings.terminal.tmux.socket_name,
       tmuxHostSession: settings.settings.terminal.tmux.host_session,
+      hostedTerminalAttachMode: "open",
     })
   }
 

@@ -65,7 +65,7 @@ test("proxy batch command is registered", async () => {
   }
 })
 
-test("proxy batch create flow launches each hosted variant", async () => {
+test("proxy batch create flow sets up variants before opening one hosted terminal", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const app = await mountProxyApp()
@@ -92,7 +92,7 @@ test("proxy batch create flow launches each hosted variant", async () => {
     await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
-    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3 && pasteCalls.length === 3)
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4 && pasteCalls.length === 3)
 
     expect(app.calls.createBatch).toEqual([
       {
@@ -111,6 +111,7 @@ test("proxy batch create flow launches each hosted variant", async () => {
         model: undefined,
         mode: "hosted-terminal",
         sessionID: "batch_1_session_1",
+        hostedTerminalAttachMode: "setup-only",
       }),
       expect.objectContaining({
         workerPort: 11199,
@@ -119,6 +120,7 @@ test("proxy batch create flow launches each hosted variant", async () => {
         model: undefined,
         mode: "hosted-terminal",
         sessionID: "batch_1_session_2",
+        hostedTerminalAttachMode: "setup-only",
       }),
       expect.objectContaining({
         workerPort: 11199,
@@ -127,6 +129,16 @@ test("proxy batch create flow launches each hosted variant", async () => {
         model: undefined,
         mode: "hosted-terminal",
         sessionID: "batch_1_session_3",
+        hostedTerminalAttachMode: "setup-only",
+      }),
+      expect.objectContaining({
+        workerPort: 11199,
+        profile: "cli-openrouter",
+        workspace: `${directory}/.worktrees/fix-scroll-1`,
+        model: undefined,
+        mode: "hosted-terminal",
+        sessionID: "batch_1_session_1",
+        hostedTerminalAttachMode: "open",
       }),
     ])
     expect(app.calls.getHostedSession).toEqual(["batch_1_session_1", "batch_1_session_2", "batch_1_session_3"])
@@ -175,6 +187,12 @@ test("proxy batch create flow waits for tmux window before pasting prompt", asyn
       expect.objectContaining({
         workspace: `${directory}/.worktrees/no-window-1`,
         sessionID: "batch_1_session_1",
+        hostedTerminalAttachMode: "setup-only",
+      }),
+      expect.objectContaining({
+        workspace: `${directory}/.worktrees/no-window-1`,
+        sessionID: "batch_1_session_1",
+        hostedTerminalAttachMode: "open",
       }),
     ])
     expect(app.calls.getHostedSession).toEqual(["batch_1_session_1"])
@@ -210,7 +228,7 @@ test("proxy batch create flow omits blank count so the backend default applies",
     await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
-    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3)
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4)
 
     expect(app.calls.createBatch).toEqual([
       {
@@ -259,7 +277,7 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
     await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
-    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 2)
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3)
     expect(app.calls.createBatch).toEqual([
       {
         title: "invalid count",

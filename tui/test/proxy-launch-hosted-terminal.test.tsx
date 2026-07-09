@@ -190,6 +190,61 @@ test("launchHostedTerminal waits for the opened terminal client before returning
   ])
 })
 
+test("launchHostedTerminal setup-only does not open or wait for a terminal client", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+
+  mock.module("node:os", () => ({
+    platform: () => "darwin",
+  }))
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      let onStdoutData: ((chunk: Buffer) => void) | undefined
+      const child = {
+        stdout: {
+          on(event: string, handler: (data: Buffer) => void) {
+            if (event === "data") onStdoutData = handler
+          },
+        },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") {
+            queueMicrotask(() => {
+              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
+              handler(0)
+            })
+          }
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  const launchModule = await import(`../src/proxy/launch?setup-only=${Date.now()}`)
+  const launched = await launchModule.launchProxySession({
+    executable: "ainn",
+    workerPort: 1234,
+    profile: "cli",
+    configDir: "/tmp/codex-config",
+    mode: "hosted-terminal",
+    sessionID: "hs_1",
+    opener: "default",
+    tmuxSocketName: "ainn",
+    tmuxHostSession: "ainn-host",
+    hostedTerminalAttachMode: "setup-only",
+  })
+
+  expect(launched).toBe(true)
+  expect(spawns).toEqual([
+    {
+      cmd: "ainn",
+      args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "cli", "--config-dir", "/tmp/codex-config", "--session-id", "hs_1"],
+    },
+  ])
+})
+
 test("launch dialog uses hosted terminal default mode", async () => {
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
