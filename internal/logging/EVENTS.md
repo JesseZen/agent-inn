@@ -85,6 +85,13 @@
 - **grep**：`grep worker.restart ~/.ainn/logs/ainn.log`
 - **用途**：看 worker 重启了多少次；配合 health.fail 可以看出是健康检查触发的自动重启
 
+#### `metrics.persist`
+- **触发**：manager 收到 worker 指标事件，但写入累计指标文件失败
+- **字段**：`worker`（worker 名），`port`（监听端口），`err`
+- **LEVEL**：ERROR
+- **grep**：`grep metrics.persist ~/.ainn/logs/ainn.log`
+- **用途**：排查实时指标仍更新但累计指标未持久化的问题；常见原因是 `state_dir` 不可写或路径被文件占用
+
 #### `hosted_turn.poll`
 - **触发**：Hosted terminal turn watcher 轮询 Codex transcript 时发生错误
 - **字段**：`error`

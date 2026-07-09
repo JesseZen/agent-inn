@@ -146,6 +146,101 @@ func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
 	}
 }
 
+func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
+	const model = "gpt-5-mini"
+	wantMetrics := struct {
+		Model string
+		Usage UsageTokens
+	}{
+		Model: model,
+		Usage: UsageTokens{Known: true, InputTokens: 11, OutputTokens: 7, CacheReadTokens: 4, ReasoningTokens: 2, TotalTokens: 18},
+	}
+	tests := []struct {
+		name             string
+		contentType      string
+		responseBody     string
+		requestBody      string
+		translatedMarker string
+		rawObject        string
+	}{
+		{
+			name:             "json",
+			contentType:      "application/json",
+			responseBody:     `{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-5-mini","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}`,
+			requestBody:      `{"model":"gpt-5-mini","input":"hello"}`,
+			translatedMarker: "event: response.completed",
+			rawObject:        `"object":"chat.completion"`,
+		},
+		{
+			name:             "sse",
+			contentType:      "text/event-stream",
+			responseBody:     "data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-mini\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\ndata: [DONE]\n\n",
+			requestBody:      `{"model":"gpt-5-mini","input":"hello","stream":true}`,
+			translatedMarker: "event: response.output_text.delta",
+			rawObject:        `"object":"chat.completion.chunk"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					t.Fatalf("unexpected upstream path %q", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", test.contentType)
+				_, _ = io.WriteString(w, test.responseBody)
+			}))
+			defer upstreamServer.Close()
+
+			var metrics bytes.Buffer
+			workerInstance, err := New(Options{
+				Runtime: appruntime.WorkerRuntime{
+					ID:         "cli-openai",
+					Generation: 1,
+					Upstream: appruntime.UpstreamRuntime{
+						ID:        "openai",
+						BaseURL:   upstreamServer.URL,
+						APIFormat: appruntime.APIFormatChatCompletions,
+					},
+					Modules: map[string]appruntime.ModuleConfig{
+						"api_translate": {Enabled: true},
+					},
+				},
+				MetricsWriter: &metrics,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(test.requestBody))
+			req.Header.Set("Content-Type", "application/json")
+			res := httptest.NewRecorder()
+			workerInstance.ServeHTTP(res, req)
+
+			if res.Code != http.StatusOK {
+				t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+			}
+			if !strings.Contains(res.Header().Get("Content-Type"), "text/event-stream") ||
+				!strings.Contains(res.Body.String(), test.translatedMarker) ||
+				strings.Contains(res.Body.String(), test.rawObject) {
+				t.Fatalf("client response was not translated: headers=%v body=%s", res.Header(), res.Body.String())
+			}
+
+			var event RequestMetricEvent
+			if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+				t.Fatal(err)
+			}
+			gotMetrics := struct {
+				Model string
+				Usage UsageTokens
+			}{event.Model, event.Usage}
+			if gotMetrics != wantMetrics {
+				t.Fatalf("bad metrics event:\ngot  %#v\nwant %#v", gotMetrics, wantMetrics)
+			}
+		})
+	}
+}
+
 func TestWorkerSerializesConcurrentMetricsWrites(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

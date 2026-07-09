@@ -26,6 +26,7 @@ const (
 	EventWorkerSpawn    = "worker.spawn"
 	EventWorkerExit     = "worker.exit"
 	EventWorkerRestart  = "worker.restart"
+	EventMetricsPersist = "metrics.persist"
 	EventHealthFail     = "health.fail"
 	EventConfigPatch    = "config.patch"
 	EventRootStart      = "root.start"

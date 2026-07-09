@@ -340,6 +340,76 @@ func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 	}
 }
 
+func TestManagerLogsMetricsPersistenceFailureAndPublishesUpdate(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "blocked-state")
+	if err := os.WriteFile(stateDir, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	var logBuf bytes.Buffer
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Logger: logging.New(&logBuf, "detail", logging.ComponentManagerSuper),
+	})
+	m.clock = func() time.Time { return now }
+	sub := m.events.Subscribe(0)
+	defer sub.Close()
+
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp: now,
+		Upstream:  "openai",
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+	})
+
+	logOutput := logBuf.String()
+	for _, value := range []string{"ERROR", "metrics.persist", "worker=app", "port=6767", "err="} {
+		if !strings.Contains(logOutput, value) {
+			t.Fatalf("missing %q in metrics persistence log: %s", value, logOutput)
+		}
+	}
+
+	event := nextEventOfType(t, sub, EventMetricsUpdated)
+	workerName, port, metrics, ok := event.AsMetricsUpdated()
+	got := struct {
+		Worker  string
+		Port    int
+		Metrics worker.MetricsSnapshot
+		OK      bool
+	}{workerName, port, metrics, ok}
+	want := struct {
+		Worker  string
+		Port    int
+		Metrics worker.MetricsSnapshot
+		OK      bool
+	}{
+		Worker: "app",
+		Port:   6767,
+		Metrics: worker.MetricsSnapshot{
+			WindowSeconds: worker.MetricsWindowSeconds,
+			Requests:      1,
+			RPM:           1,
+			TPM:           15,
+			TotalTokens:   15,
+		},
+		OK: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics update after persistence failure:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerRecordsWorkerMetricsUsingEventUpstreamAfterRuntimeChange(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)

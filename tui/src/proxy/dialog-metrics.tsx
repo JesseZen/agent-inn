@@ -34,25 +34,27 @@ export function DialogMetrics() {
   let pendingRange: MetricsRangeName | undefined
   let metricsRequestInFlight = false
   let metricsRequestGeneration = 0
+  let disposed = false
 
   async function requestMetrics() {
-    if (metricsRequestInFlight || !pendingRange) return
+    if (disposed || metricsRequestInFlight || !pendingRange) return
     const nextRange = pendingRange
     const requestGeneration = metricsRequestGeneration
     pendingRange = undefined
     metricsRequestInFlight = true
     try {
       const result = await sdk.client.getMetrics(nextRange)
-      if (requestGeneration === metricsRequestGeneration) setMetrics(result)
+      if (!disposed && requestGeneration === metricsRequestGeneration) setMetrics(result)
     } catch (err) {
-      if (requestGeneration === metricsRequestGeneration) toast.error(err)
+      if (!disposed && requestGeneration === metricsRequestGeneration) toast.error(err)
     } finally {
       metricsRequestInFlight = false
-      if (pendingRange) void requestMetrics()
+      if (!disposed && pendingRange) void requestMetrics()
     }
   }
 
   function loadMetrics(nextRange: MetricsRangeName) {
+    if (disposed) return
     if (refreshTimer) {
       clearTimeout(refreshTimer)
       refreshTimer = undefined
@@ -64,10 +66,12 @@ export function DialogMetrics() {
   }
 
   function scheduleMetricsRefresh() {
+    if (disposed) return
     metricsRequestGeneration += 1
     if (refreshTimer) return
     refreshTimer = setTimeout(() => {
       refreshTimer = undefined
+      if (disposed) return
       pendingRange = range()
       void requestMetrics()
     }, METRICS_REFRESH_DELAY_MS)
@@ -88,7 +92,11 @@ export function DialogMetrics() {
   )
 
   onCleanup(() => {
+    disposed = true
+    metricsRequestGeneration += 1
     if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = undefined
+    pendingRange = undefined
   })
 
   const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => [

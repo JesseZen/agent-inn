@@ -288,6 +288,11 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		)
 		return responseCopyResult{}, err
 	}
+	rawObserver := NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type"))
+	upstreamHTTPResp.Body = &usageObservingReadCloser{
+		ReadCloser: upstreamHTTPResp.Body,
+		observer:   rawObserver,
+	}
 	proxyResp := &module.ProxyResponse{
 		StatusCode:  upstreamHTTPResp.StatusCode,
 		Headers:     upstreamHTTPResp.Header.Clone(),
@@ -310,7 +315,14 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		}
 	}
 
-	return copyProxyResponse(ctx, rw, proxyResp)
+	result, err := copyProxyResponse(ctx, rw, proxyResp)
+	if rawUsage := rawObserver.Finish(); rawUsage.Known {
+		result.Usage = rawUsage
+	}
+	if rawModel := rawObserver.Model(); rawModel != "" {
+		result.Model = rawModel
+	}
+	return result, err
 }
 
 func readRequestBody(r *http.Request) ([]byte, string, error) {
@@ -350,6 +362,19 @@ func readRequestBody(r *http.Request) ([]byte, string, error) {
 type responseCopyResult struct {
 	Usage UsageTokens
 	Model string
+}
+
+type usageObservingReadCloser struct {
+	io.ReadCloser
+	observer *UsageObserver
+}
+
+func (r *usageObservingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.observer.Observe(p[:n])
+	}
+	return n, err
 }
 
 func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) (responseCopyResult, error) {

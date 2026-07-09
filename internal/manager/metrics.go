@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/worker"
 )
 
@@ -389,7 +390,7 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 	m.mu.Unlock()
 
 	if store != nil {
-		_ = store.Record(MetricsRecord{
+		if err := store.Record(MetricsRecord{
 			Timestamp:        event.Timestamp,
 			Worker:           source.name,
 			Port:             source.port,
@@ -407,7 +408,13 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 			CacheWriteTokens: event.Usage.CacheWriteTokens,
 			ReasoningTokens:  event.Usage.ReasoningTokens,
 			TotalTokens:      event.Usage.TotalTokens,
-		})
+		}); err != nil {
+			m.logger.Error(logging.EventMetricsPersist,
+				"worker", source.name,
+				"port", source.port,
+				"err", err.Error(),
+			)
+		}
 	}
 	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": source.name, "port": source.port, "metrics": snapshot})
 }

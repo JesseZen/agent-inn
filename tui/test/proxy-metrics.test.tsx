@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import { mountProxyApp, wait } from "./proxy-commands.fixture"
 import type { MetricsRangeName, MetricsResponse } from "../src/proxy/backend"
 
+const METRICS_REFRESH_DELAY_MS = 100
+
 function metricsResponse(range: MetricsRangeName, totalTokens: number): MetricsResponse {
   return {
     range: { name: range, start: "2026-07-10T00:00:00+08:00", end: "2026-07-11T00:00:00+08:00" },
@@ -135,6 +137,42 @@ test("proxy status ignores stale metric responses and coalesces update bursts", 
     })
 
     expect(app.calls.getMetrics).toEqual(["today", "last_24h", "last_24h"])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy status cancels queued refreshes when the dialog closes", async () => {
+  let resolveInitial!: (value: MetricsResponse) => void
+  let initialPending = true
+  const app = await mountProxyApp({
+    metricsResponder: (range) => {
+      if (initialPending) {
+        initialPending = false
+        return new Promise<MetricsResponse>((resolve) => {
+          resolveInitial = resolve
+        })
+      }
+      return metricsResponse(range, 40)
+    },
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics") && app.calls.getMetrics.length === 1
+    })
+
+    app.emitManagerEvent("metrics.updated", { worker: "app", port: 6767, metrics: {} })
+    await Bun.sleep(METRICS_REFRESH_DELAY_MS + 50)
+    app.api.ui.dialog.clear()
+    await app.render()
+
+    resolveInitial(metricsResponse("today", 20))
+    await Bun.sleep(METRICS_REFRESH_DELAY_MS)
+    await app.render()
+
+    expect(app.calls.getMetrics).toEqual(["today"])
   } finally {
     await app.cleanup()
   }
