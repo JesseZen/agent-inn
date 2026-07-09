@@ -94,9 +94,8 @@ type metricsStore struct {
 }
 
 type workerMetricSource struct {
-	name     string
-	port     int
-	upstream string
+	name string
+	port int
 }
 
 func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
@@ -310,10 +309,7 @@ func recordMatchesQuery(record MetricsRecord, query MetricsQuery) bool {
 }
 
 func liveMetricsForQuery(summary WorkerSummary, query MetricsQuery) worker.MetricsSnapshot {
-	if query.Model != "" || query.Path != "" || query.Status != 0 {
-		return worker.MetricsSnapshot{}
-	}
-	if query.Upstream != "" && summary.Upstream.Name != query.Upstream {
+	if query.Upstream != "" || query.Model != "" || query.Path != "" || query.Status != 0 {
 		return worker.MetricsSnapshot{}
 	}
 	return summary.Metrics
@@ -354,7 +350,7 @@ func (m *Manager) readWorkerMetrics(name string, r io.Reader) {
 	if !ok {
 		return
 	}
-	m.readWorkerMetricsFrom(workerMetricSource{name: name, port: workerConfig.Port, upstream: workerConfig.Upstream}, r)
+	m.readWorkerMetricsFrom(workerMetricSource{name: name, port: workerConfig.Port}, r)
 }
 
 func (m *Manager) readWorkerMetricsFrom(source workerMetricSource, r io.Reader) {
@@ -374,7 +370,7 @@ func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetri
 		m.mu.Unlock()
 		return
 	}
-	source := workerMetricSource{name: name, port: workerConfig.Port, upstream: workerConfig.Upstream}
+	source := workerMetricSource{name: name, port: workerConfig.Port}
 	m.mu.Unlock()
 	m.handleWorkerMetricEventFrom(source, event)
 }
@@ -397,7 +393,7 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 			Timestamp:        event.Timestamp,
 			Worker:           source.name,
 			Port:             source.port,
-			Upstream:         source.upstream,
+			Upstream:         event.Upstream,
 			Model:            event.Model,
 			Method:           event.Method,
 			Path:             event.Path,

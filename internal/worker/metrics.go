@@ -10,6 +10,7 @@ const errorStatusFloor = 400
 
 type RequestMetricEvent struct {
 	Timestamp     time.Time   `json:"timestamp"`
+	Upstream      string      `json:"upstream"`
 	Model         string      `json:"model,omitempty"`
 	Method        string      `json:"method"`
 	Path          string      `json:"path"`

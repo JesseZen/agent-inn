@@ -71,6 +71,18 @@ func TestUsageObserverCapturesChatCompletionStreamModelWithoutUsage(t *testing.T
 	}
 }
 
+func TestUsageObserverExtractsChatCompletionStreamCachedTokens(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"prompt_tokens_details\":{\"cached_tokens\":4}}}\n\n"))
+	wantUsage := UsageTokens{Known: true, InputTokens: 11, OutputTokens: 7, CacheReadTokens: 4, TotalTokens: 18}
+	if got := observer.Finish(); got != wantUsage {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, wantUsage)
+	}
+	if got := observer.Model(); got != "gpt-4o-mini" {
+		t.Fatalf("bad model: got %q want %q", got, "gpt-4o-mini")
+	}
+}
+
 func TestUsageObserverExtractsSSECompletionModel(t *testing.T) {
 	observer := NewUsageObserver("text/event-stream")
 	observer.Observe([]byte("event: response.completed\n"))

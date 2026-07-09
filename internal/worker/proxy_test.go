@@ -499,6 +499,85 @@ func TestWorkerUsesOneSnapshotForWholeRequest(t *testing.T) {
 	}
 }
 
+func TestWorkerMetricsEventsKeepRequestSnapshotUpstream(t *testing.T) {
+	firstReady := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(firstReady)
+		<-releaseFirst
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer second.Close()
+
+	var metrics bytes.Buffer
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: first.URL},
+		},
+		MetricsWriter: &metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone := make(chan struct{})
+	go func() {
+		res := httptest.NewRecorder()
+		w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil))
+		close(firstDone)
+	}()
+
+	select {
+	case <-firstReady:
+	case <-time.After(time.Second):
+		t.Fatal("first server did not receive request")
+	}
+
+	if err := w.UpdateSnapshot(RuntimeConfigSnapshot{
+		Generation: 2,
+		Upstream:   upstream.RuntimeUpstream{Name: "anthropic", BaseURL: second.URL},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirst)
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not finish")
+	}
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(metrics.Bytes()), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("bad metrics line count: got %d want 2", len(lines))
+	}
+	var got [2]string
+	for i, line := range lines {
+		var event struct {
+			Upstream string `json:"upstream"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		got[i] = event.Upstream
+	}
+	want := [2]string{"openai", "anthropic"}
+	if got != want {
+		t.Fatalf("bad metrics upstreams: got %#v want %#v", got, want)
+	}
+}
+
 func TestWorkerRunsModuleChain(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)

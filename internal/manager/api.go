@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
@@ -49,8 +50,30 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 	}
 	m.mu.RLock()
 	store := m.metricsStore
+	client := m.workerClient
 	m.mu.RUnlock()
-	response, err := store.Query(query, m.workerSummaries())
+	summaries := m.workerSummaries()
+	if query.Upstream == "" && query.Model == "" && query.Path == "" && query.Status == 0 {
+		if client == nil {
+			client = defaultWorkerClient()
+		}
+		var wg sync.WaitGroup
+		for i := range summaries {
+			if summaries[i].Status != string(WorkerStateRunning) || query.Worker != "" && summaries[i].Name != query.Worker {
+				continue
+			}
+			wg.Add(1)
+			go func(summary *WorkerSummary) {
+				defer wg.Done()
+				status, err := client.GetStatus(summary.Port)
+				if err == nil {
+					summary.Metrics = status.Metrics
+				}
+			}(&summaries[i])
+		}
+		wg.Wait()
+	}
+	response, err := store.Query(query, summaries)
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 		return

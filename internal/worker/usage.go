@@ -146,6 +146,11 @@ func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
 			result.CacheReadTokens = value
 		}
 	}
+	if details, ok := mapField(usage, "prompt_tokens_details"); ok {
+		if value, valueOK := int64Field(details, "cached_tokens"); valueOK {
+			result.CacheReadTokens = value
+		}
+	}
 	if details, ok := mapField(usage, "output_tokens_details"); ok {
 		if value, valueOK := int64Field(details, "reasoning_tokens"); valueOK {
 			result.ReasoningTokens = value
@@ -158,7 +163,7 @@ func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
 	}
 
 	totalTokens, hasTotalTokens := int64Field(usage, "total_tokens")
-	hasNestedDetails := result.ReasoningTokens > 0 || mapHasField(usage, "input_tokens_details") || mapHasField(usage, "output_tokens_details") || mapHasField(usage, "completion_tokens_details")
+	hasNestedDetails := result.ReasoningTokens > 0 || mapHasField(usage, "input_tokens_details") || mapHasField(usage, "prompt_tokens_details") || mapHasField(usage, "output_tokens_details") || mapHasField(usage, "completion_tokens_details")
 	if !hasTotalTokens && hasNestedDetails {
 		totalTokens = result.InputTokens + result.OutputTokens
 		hasTotalTokens = true

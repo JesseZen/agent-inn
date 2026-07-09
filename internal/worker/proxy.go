@@ -136,6 +136,7 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 	event := RequestMetricEvent{
 		Timestamp:     time.Now(),
+		Upstream:      snapshot.Upstream.Name,
 		Method:        r.Method,
 		Path:          r.URL.Path,
 		Status:        rec.status,

@@ -15,6 +15,7 @@ func TestMetricsTrackerRecordsWindowSnapshot(t *testing.T) {
 	tracker.Start()
 	tracker.Finish(RequestMetricEvent{
 		Timestamp:     now,
+		Upstream:      "openai",
 		Method:        http.MethodPost,
 		Path:          "/v1/responses",
 		Status:        http.StatusOK,
@@ -33,6 +34,7 @@ func TestMetricsTrackerRecordsWindowSnapshot(t *testing.T) {
 	tracker.Start()
 	tracker.Finish(RequestMetricEvent{
 		Timestamp:  now,
+		Upstream:   "openai",
 		Method:     http.MethodPost,
 		Path:       "/v1/responses",
 		Status:     http.StatusTooManyRequests,
@@ -69,6 +71,7 @@ func TestMetricsTrackerExpiresOldBuckets(t *testing.T) {
 	tracker.Start()
 	tracker.Finish(RequestMetricEvent{
 		Timestamp:  now,
+		Upstream:   "openai",
 		Method:     http.MethodPost,
 		Path:       "/v1/responses",
 		Status:     http.StatusTooManyRequests,
@@ -98,6 +101,7 @@ func TestWorkerMetricsJSONContract(t *testing.T) {
 	now := time.Date(2026, 7, 10, 3, 0, 0, 0, time.UTC)
 	event := RequestMetricEvent{
 		Timestamp:     now,
+		Upstream:      "openai",
 		Model:         "gpt-5",
 		Method:        http.MethodPost,
 		Path:          "/v1/responses",
@@ -118,7 +122,7 @@ func TestWorkerMetricsJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEvent := `{"timestamp":"2026-07-10T03:00:00Z","model":"gpt-5","method":"POST","path":"/v1/responses","status":200,"duration_ms":250,"response_bytes":512,"usage":{"usage_known":true,"input_tokens":100,"output_tokens":40,"cache_read_tokens":30,"cache_write_tokens":20,"reasoning_tokens":10,"total_tokens":200}}`
+	wantEvent := `{"timestamp":"2026-07-10T03:00:00Z","upstream":"openai","model":"gpt-5","method":"POST","path":"/v1/responses","status":200,"duration_ms":250,"response_bytes":512,"usage":{"usage_known":true,"input_tokens":100,"output_tokens":40,"cache_read_tokens":30,"cache_write_tokens":20,"reasoning_tokens":10,"total_tokens":200}}`
 	if string(gotEvent) != wantEvent {
 		t.Fatalf("bad request metric JSON:\ngot  %s\nwant %s", gotEvent, wantEvent)
 	}

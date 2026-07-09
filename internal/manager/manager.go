@@ -275,7 +275,6 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		providerFound bool
 		status        string
 		generation    int
-		metrics       worker.MetricsSnapshot
 	}
 
 	m.mu.RLock()
@@ -294,7 +293,6 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		}
 		profile, ok := m.config.Upstreams[upstreamID]
 		status := string(m.workerStatusLocked(name))
-		metrics := worker.MetricsSnapshot{}
 		seeds = append(seeds, summarySeed{
 			name:          name,
 			worker:        cloneWorkerConfig(workerConfig),
@@ -303,7 +301,6 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			providerFound: ok,
 			status:        status,
 			generation:    m.workerGenerationLocked(name),
-			metrics:       metrics,
 		})
 	}
 	m.mu.RUnlock()
@@ -341,23 +338,6 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			LogLevel:           workerLogLevel(seed.worker),
 			Modules:            cloneModules(seed.worker.RequestModules),
 			Hooks:              cloneModules(seed.worker.Hooks),
-			Metrics:            seed.metrics,
-		}
-		if summary.Status == string(WorkerStateRunning) {
-			client := m.workerClient
-			if client == nil {
-				client = defaultWorkerClient()
-			}
-			status, err := client.GetStatus(seed.worker.Port)
-			if err == nil {
-				if status.Protocol != "" {
-					summary.Protocol = status.Protocol
-				}
-				if status.ModuleSupport != nil {
-					overlayModuleSupport(summary.ModuleSupport, status.ModuleSupport)
-				}
-				summary.Metrics = status.Metrics
-			}
 		}
 		out = append(out, summary)
 	}
@@ -764,7 +744,7 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 		return err
 	}
 	spawn.LogWriter = m.LogSink(name)
-	metricSource := workerMetricSource{name: name, port: spawn.Port, upstream: spawn.Upstream}
+	metricSource := workerMetricSource{name: name, port: spawn.Port}
 	spawn.MetricsHandler = func(r io.Reader) {
 		m.readWorkerMetricsFrom(metricSource, r)
 	}

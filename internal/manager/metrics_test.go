@@ -312,7 +312,7 @@ func TestMetricsStoreQueryDimensionedFiltersZeroLiveMetrics(t *testing.T) {
 	}
 }
 
-func TestMetricsStoreQueryUpstreamFilterUsesLiveMetricsOnlyForCurrentUpstream(t *testing.T) {
+func TestMetricsStoreQueryUpstreamFilterAlwaysZeroesLiveMetrics(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
 	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
@@ -359,7 +359,7 @@ func TestMetricsStoreQueryUpstreamFilterUsesLiveMetricsOnlyForCurrentUpstream(t 
 	want = MetricsQueryResponse{
 		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
 		Workers: []WorkerMetricsAggregate{
-			{Worker: "app", Port: 6767, Status: "running", Upstream: "anthropic", Live: live},
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "anthropic"},
 		},
 		SkippedRecords: 0,
 	}
