@@ -4,8 +4,10 @@ import { Flag } from "@agent-inn/core/flag/flag"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
 import type {
+  BatchRun,
   HostedSessionRecord,
   HostedSessionSummary,
+  CreateBatchRequest,
   ProxyConfig,
   ProxyConfigResponse,
   ProxyConfigStatus,
@@ -22,6 +24,8 @@ export type EventSource = {
 }
 
 export type {
+  BatchRun,
+  CreateBatchRequest,
   ProxyConfig,
   ProxyConfigStatus,
   ProxySettings,
@@ -222,6 +226,29 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
         async deleteHostedSession(sessionID: string) {
           return request<{ session_id: string }>(`/api/hosted-sessions/${sessionID}`, {
+            method: "DELETE",
+          })
+        },
+        async listBatches() {
+          return request<{ batches: BatchRun[] }>("/api/batches").then((result) => result.batches)
+        },
+        async createBatch(input: CreateBatchRequest) {
+          return request<BatchRun>("/api/batches", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          })
+        },
+        async getBatch(id: string) {
+          return request<BatchRun>(`/api/batches/${id}`)
+        },
+        async selectBatchWinner(batchID: string, variantID: string) {
+          return request<BatchRun>(`/api/batches/${batchID}/variants/${variantID}/select`, {
+            method: "POST",
+          })
+        },
+        async deleteBatch(batchID: string) {
+          return request<{ batch_id: string }>(`/api/batches/${batchID}`, {
             method: "DELETE",
           })
         },

@@ -142,6 +142,36 @@ export type HostedSessionSummary = HostedSessionRecord & {
   status: "active" | "stale"
 }
 
+export type BatchVariant = {
+  id: string
+  index: number
+  hosted_session_id: string
+  session_label: string
+  worktree_dir: string
+}
+
+export type BatchRun = {
+  id: string
+  title: string
+  prompt?: string
+  worker_name: string
+  worker_port: number
+  model?: string
+  source_directory: string
+  created_at: string
+  winner_variant_id?: string
+  variants: BatchVariant[]
+}
+
+export type CreateBatchRequest = {
+  title: string
+  prompt?: string
+  worker_name: string
+  count: number
+  source_directory: string
+  model?: string
+}
+
 function json(value: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(value), {
     ...init,

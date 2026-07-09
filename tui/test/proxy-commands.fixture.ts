@@ -11,6 +11,8 @@ import { createEventSource, createFetch, directory, json } from "./fixture/tui-s
 import { registerProxyCommands } from "../src/proxy/commands"
 import {
   toAinnUpstreams,
+  type BatchRun,
+  type CreateBatchRequest,
   type HostedSessionSummary,
   type ProxyConfigStatus,
   type ProxySettings,
@@ -44,6 +46,7 @@ function frameLines(frame: string) {
 type ProxyHarnessInput = {
   workers?: WorkerSummary[]
   upstreams?: RedactedUpstream[]
+  batches?: BatchRun[]
   patchWorkerDelayMs?: number
   settings?: ProxySettingsPatch
 }
@@ -116,6 +119,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
 
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions: HostedSessionSummary[] = []
+  const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
   const config: {
     status: ProxyConfigStatus
     settings: ProxySettings
@@ -174,6 +178,11 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     saveConfig: 0,
     getLogs: 0,
     listHostedSessions: 0,
+    listBatches: 0,
+    createBatch: [] as CreateBatchRequest[],
+    getBatch: [] as string[],
+    deleteBatch: [] as string[],
+    selectBatchWinner: [] as Array<{ batchID: string; variantID: string }>,
     testUpstream: [] as string[],
     testAllUpstreams: 0,
   }
@@ -447,6 +456,53 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       }
       config.status = { ...config.status, dirty: false, generation: config.status.generation + 1 }
       return json({ settings: config.settings, status: config.status })
+    }
+
+    if (url.pathname === "/api/batches" && method === "GET") {
+      calls.listBatches += 1
+      return json({ batches: [...batches.values()] })
+    }
+
+    if (url.pathname === "/api/batches" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "null")) as CreateBatchRequest
+      calls.createBatch.push(body)
+      const workerPort = [...workers.values()].find((worker) => worker.name === body.worker_name)?.port ?? 0
+      const batchRun: BatchRun = {
+        id: `batch_${batches.size + 1}`,
+        title: body.title,
+        prompt: body.prompt,
+        worker_name: body.worker_name,
+        worker_port: workerPort,
+        model: body.model,
+        source_directory: body.source_directory,
+        created_at: "2026-07-09T00:00:00Z",
+        variants: [],
+      }
+      batches.set(batchRun.id, batchRun)
+      return json(batchRun)
+    }
+
+    if (url.pathname.startsWith("/api/batches/")) {
+      const parts = url.pathname.split("/")
+      const batchID = parts[3]
+      if (parts.length === 4 && method === "GET") {
+        calls.getBatch.push(batchID)
+        return json(batches.get(batchID) ?? { error: "batch not found" }, batches.has(batchID) ? undefined : { status: 404 })
+      }
+      if (parts.length === 4 && method === "DELETE") {
+        calls.deleteBatch.push(batchID)
+        batches.delete(batchID)
+        return json({ batch_id: batchID })
+      }
+      if (parts.length === 7 && parts[4] === "variants" && parts[6] === "select" && method === "POST") {
+        const variantID = parts[5]
+        calls.selectBatchWinner.push({ batchID, variantID })
+        const batchRun = batches.get(batchID)
+        if (!batchRun) return json({ error: "batch not found" }, { status: 404 })
+        const selected = { ...batchRun, winner_variant_id: variantID }
+        batches.set(batchID, selected)
+        return json(selected)
+      }
     }
 
     if (url.pathname === "/api/events") {

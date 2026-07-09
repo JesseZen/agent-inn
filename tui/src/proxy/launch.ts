@@ -72,6 +72,18 @@ async function hasTmuxClient(socketName: string, hostSession: string) {
   return result.stdout.trim() !== ""
 }
 
+export async function pasteHostedPrompt(opts: {
+  prompt: string
+  tmuxSocketName?: string
+  tmuxWindowID: string
+}) {
+  if (!opts.prompt) return false
+  const tmuxSocket = opts.tmuxSocketName || "ainn"
+  const result = await runProcess("tmux", ["-L", tmuxSocket, "send-keys", "-l", "-t", opts.tmuxWindowID, opts.prompt])
+  if (result.code !== 0) throw new Error(result.stderr || `tmux send-keys exited with code ${result.code}`)
+  return true
+}
+
 export async function launchProxySession(opts: ProxyLaunchOptions) {
   if (opts.mode === "hosted-terminal") {
     return launchHostedTerminal(opts)
