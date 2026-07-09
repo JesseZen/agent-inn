@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,9 +141,83 @@ func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusOK || event.Usage.TotalTokens != 20 {
+	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusOK || event.Model != "gpt-5" || event.Usage.TotalTokens != 20 {
 		t.Fatalf("bad metrics event: %#v", event)
 	}
+}
+
+func TestWorkerSerializesConcurrentMetricsWrites(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstreamServer.Close()
+
+	metrics := &concurrencyDetectingWriter{}
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const requestCount = 64
+	var wg sync.WaitGroup
+	wg.Add(requestCount)
+	for range requestCount {
+		go func() {
+			defer wg.Done()
+			res := httptest.NewRecorder()
+			w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)))
+			if res.Code != http.StatusOK {
+				t.Errorf("unexpected status %d: %s", res.Code, res.Body.String())
+			}
+		}()
+	}
+	wg.Wait()
+
+	if atomic.LoadInt32(&metrics.concurrent) != 0 {
+		t.Fatal("metrics writer was entered concurrently")
+	}
+	lines := bytes.Split(bytes.TrimSpace(metrics.Bytes()), []byte("\n"))
+	if len(lines) != requestCount {
+		t.Fatalf("bad metrics line count: got %d want %d", len(lines), requestCount)
+	}
+	for _, line := range lines {
+		var event RequestMetricEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("corrupt metrics line %q: %v", line, err)
+		}
+	}
+}
+
+type concurrencyDetectingWriter struct {
+	active     int32
+	concurrent int32
+	mu         sync.Mutex
+	buf        bytes.Buffer
+}
+
+func (w *concurrencyDetectingWriter) Write(p []byte) (int, error) {
+	if atomic.AddInt32(&w.active, 1) > 1 {
+		atomic.StoreInt32(&w.concurrent, 1)
+	}
+	time.Sleep(time.Millisecond)
+	defer atomic.AddInt32(&w.active, -1)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *concurrencyDetectingWriter) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf.Bytes()...)
 }
 
 func TestWorkerRecordsFailedUpstreamMetricsAndUnknownUsage(t *testing.T) {

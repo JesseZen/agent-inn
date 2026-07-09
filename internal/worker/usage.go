@@ -20,6 +20,12 @@ type UsageObserver struct {
 	contentType string
 	buffer      []byte
 	usage       UsageTokens
+	model       string
+}
+
+type responseUsageMetadata struct {
+	Usage UsageTokens
+	Model string
 }
 
 func NewUsageObserver(contentType string) *UsageObserver {
@@ -27,7 +33,7 @@ func NewUsageObserver(contentType string) *UsageObserver {
 }
 
 func (u *UsageObserver) Observe(chunk []byte) {
-	if u.usage.Known {
+	if u.usage.Known && u.model != "" {
 		return
 	}
 	if strings.Contains(u.contentType, "text/event-stream") {
@@ -39,7 +45,7 @@ func (u *UsageObserver) Observe(chunk []byte) {
 			}
 			u.processSSEEvent(string(u.buffer[:end]))
 			u.buffer = u.buffer[end+2:]
-			if u.usage.Known {
+			if u.usage.Known && u.model != "" {
 				return
 			}
 		}
@@ -50,16 +56,22 @@ func (u *UsageObserver) Observe(chunk []byte) {
 }
 
 func (u *UsageObserver) Finish() UsageTokens {
-	if u.usage.Known {
+	if u.usage.Known && u.model != "" {
 		return u.usage
 	}
 	if strings.Contains(u.contentType, "text/event-stream") && len(u.buffer) > 0 {
 		u.processSSEEvent(string(u.buffer))
 	}
 	if strings.Contains(u.contentType, "json") {
-		u.usage = ExtractUsageFromJSON(u.buffer)
+		metadata := extractUsageMetadataFromJSON(u.buffer)
+		u.usage = metadata.Usage
+		u.model = metadata.Model
 	}
 	return u.usage
+}
+
+func (u *UsageObserver) Model() string {
+	return u.model
 }
 
 func (u *UsageObserver) processSSEEvent(event string) {
@@ -77,25 +89,39 @@ func (u *UsageObserver) processSSEEvent(event string) {
 	if eventName != "response.completed" && !strings.Contains(payload, `"usage"`) {
 		return
 	}
-	u.usage = ExtractUsageFromJSON([]byte(payload))
+	metadata := extractUsageMetadataFromJSON([]byte(payload))
+	if metadata.Usage.Known {
+		u.usage = metadata.Usage
+	}
+	if metadata.Model != "" {
+		u.model = metadata.Model
+	}
 }
 
 func ExtractUsageFromJSON(data []byte) UsageTokens {
+	return extractUsageMetadataFromJSON(data).Usage
+}
+
+func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
 	var root map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	if err := decoder.Decode(&root); err != nil {
-		return UsageTokens{Known: false}
+		return responseUsageMetadata{Usage: UsageTokens{Known: false}}
 	}
 
+	model, _ := stringField(root, "model")
 	usage, ok := mapField(root, "usage")
 	if !ok {
 		if response, responseOK := mapField(root, "response"); responseOK {
 			usage, ok = mapField(response, "usage")
+			if model == "" {
+				model, _ = stringField(response, "model")
+			}
 		}
 	}
 	if !ok {
-		return UsageTokens{Known: false}
+		return responseUsageMetadata{Usage: UsageTokens{Known: false}, Model: model}
 	}
 
 	result := UsageTokens{Known: true}
@@ -139,7 +165,7 @@ func ExtractUsageFromJSON(data []byte) UsageTokens {
 		totalTokens = result.InputTokens + result.OutputTokens
 		hasTotalTokens = true
 	}
-	return finalizeUsageTotal(result, totalTokens, hasTotalTokens)
+	return responseUsageMetadata{Usage: finalizeUsageTotal(result, totalTokens, hasTotalTokens), Model: model}
 }
 
 func int64Field(values map[string]any, name string) (int64, bool) {
@@ -170,6 +196,15 @@ func mapField(values map[string]any, name string) (map[string]any, bool) {
 		return nil, false
 	}
 	typed, ok := value.(map[string]any)
+	return typed, ok
+}
+
+func stringField(values map[string]any, name string) (string, bool) {
+	value, ok := values[name]
+	if !ok {
+		return "", false
+	}
+	typed, ok := value.(string)
 	return typed, ok
 }
 

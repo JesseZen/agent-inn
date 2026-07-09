@@ -241,6 +241,61 @@ func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 	}
 }
 
+func TestManagerRecordsWorkerMetricsWithCapturedSource(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai":    {BaseURL: "https://api.openai.com/v1"},
+				"anthropic": {BaseURL: "https://api.anthropic.com"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	source := workerMetricSource{name: "app", port: 6767, upstream: "openai"}
+	m.config.Workers["app"] = config.WorkerConfig{Port: 7777, Upstream: "anthropic"}
+
+	event := worker.RequestMetricEvent{
+		Timestamp: now,
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.readWorkerMetricsFrom(source, bytes.NewReader(append(data, '\n')))
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today&upstream=openai", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "configured", Upstream: "openai", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerAPIMetricsIncludesStoppedWorkerWithZeroLiveMetrics(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)

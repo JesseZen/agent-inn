@@ -92,6 +92,12 @@ type metricsStore struct {
 	clock    func() time.Time
 }
 
+type workerMetricSource struct {
+	name     string
+	port     int
+	upstream string
+}
+
 func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
 	cfg := config.Config{Settings: settings}
 	cfg.ApplyDefaults()
@@ -127,7 +133,9 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 	resolved := s.resolveRange(query.Range)
 	response := MetricsQueryResponse{Range: resolved}
 	aggregates := map[string]*WorkerMetricsAggregate{}
+	summaries := map[string]WorkerSummary{}
 	for _, summary := range workers {
+		summaries[summary.Name] = summary
 		if query.Worker != "" && summary.Name != query.Worker {
 			continue
 		}
@@ -167,7 +175,18 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			}
 			aggregate := aggregates[record.Worker]
 			if aggregate == nil {
-				continue
+				summary, ok := summaries[record.Worker]
+				if !ok {
+					continue
+				}
+				aggregate = &WorkerMetricsAggregate{
+					Worker:   record.Worker,
+					Port:     record.Port,
+					Status:   summary.Status,
+					Upstream: record.Upstream,
+					Live:     summary.Metrics,
+				}
+				aggregates[record.Worker] = aggregate
 			}
 			aggregate.Totals.Requests++
 			if record.Status >= 400 {
@@ -253,7 +272,7 @@ func (s *metricsStore) resolveRange(name MetricsRangeName) MetricsRange {
 		return MetricsRange{Name: name, Start: now.Add(-24 * time.Hour), End: now}
 	default:
 		start := startOfLocalDay(now)
-		return MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)}
+		return MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)}
 	}
 }
 
@@ -261,12 +280,12 @@ func (s *metricsStore) filesForRange(r MetricsRange) []string {
 	day := startOfLocalDay(r.Start)
 	endDay := startOfLocalDay(r.End)
 	if r.End.Equal(endDay) {
-		endDay = endDay.Add(-24 * time.Hour)
+		endDay = endDay.AddDate(0, 0, -1)
 	}
 	var paths []string
 	for !day.After(endDay) {
 		paths = append(paths, filepath.Join(s.metricsDir(), metricsFileName(day)))
-		day = day.Add(24 * time.Hour)
+		day = day.AddDate(0, 0, 1)
 	}
 	return paths
 }
@@ -319,13 +338,23 @@ func metricsStatusFromQuery(value string) (int, error) {
 }
 
 func (m *Manager) readWorkerMetrics(name string, r io.Reader) {
+	m.mu.RLock()
+	workerConfig, ok := m.config.Workers[name]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	m.readWorkerMetricsFrom(workerMetricSource{name: name, port: workerConfig.Port, upstream: workerConfig.Upstream}, r)
+}
+
+func (m *Manager) readWorkerMetricsFrom(source workerMetricSource, r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		var event worker.RequestMetricEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			continue
 		}
-		m.handleWorkerMetricEvent(name, event)
+		m.handleWorkerMetricEventFrom(source, event)
 	}
 }
 
@@ -336,26 +365,31 @@ func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetri
 		m.mu.Unlock()
 		return
 	}
-	tracker := m.metricsTrackers[name]
+	source := workerMetricSource{name: name, port: workerConfig.Port, upstream: workerConfig.Upstream}
+	m.mu.Unlock()
+	m.handleWorkerMetricEventFrom(source, event)
+}
+
+func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event worker.RequestMetricEvent) {
+	m.mu.Lock()
+	tracker := m.metricsTrackers[source.name]
 	if tracker == nil {
 		tracker = worker.NewMetricsTracker(m.clock)
-		m.metricsTrackers[name] = tracker
+		m.metricsTrackers[source.name] = tracker
 	}
 	tracker.Start()
 	tracker.Finish(event)
 	snapshot := tracker.Snapshot()
-	m.metricsSnapshots[name] = snapshot
-	port := workerConfig.Port
-	upstreamName := workerConfig.Upstream
+	m.metricsSnapshots[source.name] = snapshot
 	store := m.metricsStore
 	m.mu.Unlock()
 
 	if store != nil {
 		_ = store.Record(MetricsRecord{
 			Timestamp:        event.Timestamp,
-			Worker:           name,
-			Port:             port,
-			Upstream:         upstreamName,
+			Worker:           source.name,
+			Port:             source.port,
+			Upstream:         source.upstream,
 			Model:            event.Model,
 			Method:           event.Method,
 			Path:             event.Path,
@@ -371,7 +405,7 @@ func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetri
 			TotalTokens:      event.Usage.TotalTokens,
 		})
 	}
-	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": name, "port": port, "metrics": snapshot})
+	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": source.name, "port": source.port, "metrics": snapshot})
 }
 
 func (m *Manager) metricsSnapshot(name string) worker.MetricsSnapshot {

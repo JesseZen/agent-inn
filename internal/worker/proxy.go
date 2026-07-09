@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -24,11 +25,12 @@ import (
 const headerRequestID = "X-Request-Id"
 
 type Worker struct {
-	snapshots     *snapshotHolder
-	client        *http.Client
-	logger        *slog.Logger
-	metrics       *MetricsTracker
-	metricsWriter io.Writer
+	snapshots      *snapshotHolder
+	client         *http.Client
+	logger         *slog.Logger
+	metrics        *MetricsTracker
+	metricsWriter  io.Writer
+	metricsWriteMu sync.Mutex
 }
 
 type Options struct {
@@ -139,11 +141,14 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		Status:        rec.status,
 		DurationMS:    dur.Milliseconds(),
 		ResponseBytes: rec.written,
+		Model:         result.Model,
 		Usage:         result.Usage,
 	}
 	w.metrics.Finish(event)
 	if w.metricsWriter != nil {
+		w.metricsWriteMu.Lock()
 		_ = json.NewEncoder(w.metricsWriter).Encode(event)
+		w.metricsWriteMu.Unlock()
 	}
 	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventRequestDone,
@@ -343,6 +348,7 @@ func readRequestBody(r *http.Request) ([]byte, string, error) {
 
 type responseCopyResult struct {
 	Usage UsageTokens
+	Model string
 }
 
 func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) (responseCopyResult, error) {
@@ -366,7 +372,8 @@ func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module
 	for {
 		select {
 		case <-ctx.Done():
-			return responseCopyResult{Usage: observer.Finish()}, ctx.Err()
+			usage := observer.Finish()
+			return responseCopyResult{Usage: usage, Model: observer.Model()}, ctx.Err()
 		default:
 		}
 
@@ -374,17 +381,20 @@ func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module
 		if n > 0 {
 			observer.Observe(buf[:n])
 			if _, writeErr := rw.Write(buf[:n]); writeErr != nil {
-				return responseCopyResult{Usage: observer.Finish()}, writeErr
+				usage := observer.Finish()
+				return responseCopyResult{Usage: usage, Model: observer.Model()}, writeErr
 			}
 			if flusher != nil {
 				flusher.Flush()
 			}
 		}
 		if err == io.EOF {
-			return responseCopyResult{Usage: observer.Finish()}, nil
+			usage := observer.Finish()
+			return responseCopyResult{Usage: usage, Model: observer.Model()}, nil
 		}
 		if err != nil {
-			return responseCopyResult{Usage: observer.Finish()}, err
+			usage := observer.Finish()
+			return responseCopyResult{Usage: usage, Model: observer.Model()}, err
 		}
 	}
 }

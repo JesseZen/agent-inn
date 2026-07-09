@@ -295,9 +295,6 @@ export const {
           }
           if (event.type === "metrics.updated") {
             setStore("metrics_generation", (generation) => generation + 1)
-            void refreshManagerData().catch((error) => {
-              setStore("error", error instanceof Error ? error.message : String(error))
-            })
             return
           }
           const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined

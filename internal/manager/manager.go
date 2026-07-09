@@ -766,8 +766,9 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 		return err
 	}
 	spawn.LogWriter = m.LogSink(name)
+	metricSource := workerMetricSource{name: name, port: spawn.Port, upstream: spawn.Upstream}
 	spawn.MetricsHandler = func(r io.Reader) {
-		m.readWorkerMetrics(name, r)
+		m.readWorkerMetricsFrom(metricSource, r)
 	}
 	if m.starter == nil {
 		m.mu.Lock()

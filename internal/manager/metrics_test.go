@@ -120,6 +120,45 @@ func TestMetricsStoreQueryTodayUsesLocalDay(t *testing.T) {
 	}
 }
 
+func TestMetricsStoreQueryTodayUsesDSTLocalDay(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousLocal := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = previousLocal })
+
+	dir := t.TempDir()
+	start := time.Date(2026, 3, 8, 0, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time {
+		return time.Date(2026, 3, 8, 12, 0, 0, 0, time.Local)
+	})
+	for _, record := range []MetricsRecord{
+		{Timestamp: time.Date(2026, 3, 8, 23, 30, 0, 0, time.Local), Worker: "app", Port: 6767, Status: 200, UsageKnown: true, TotalTokens: 15},
+		{Timestamp: time.Date(2026, 3, 9, 0, 30, 0, 0, time.Local), Worker: "app", Port: 6767, Status: 200, UsageKnown: true, TotalTokens: 150},
+	} {
+		if err := store.Record(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767, Status: "running"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestMetricsStoreQueryLast24HUsesRollingWindow(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
