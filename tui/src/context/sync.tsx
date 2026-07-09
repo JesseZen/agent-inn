@@ -89,6 +89,8 @@ export const {
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
+    const exit = useExit()
+    const args = useArgs()
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
@@ -134,24 +136,34 @@ export const {
       return { workers, upstreams, config }
     }
 
-    const syncEventHandler = createSyncEventHandler({
-      store,
-      setStore,
-      sdk,
-      project,
-      touchMessage,
-      touchPart,
-      onServerDisposed: () => void bootstrap(),
-    })
-    event.subscribe((incoming, metadata) => {
-      syncEventHandler(incoming, metadata as { workspace: string })
-    })
-
-    const exit = useExit()
-    const args = useArgs()
+    if (!args.hostedTerminalPopup) {
+      const syncEventHandler = createSyncEventHandler({
+        store,
+        setStore,
+        sdk,
+        project,
+        touchMessage,
+        touchPart,
+        onServerDisposed: () => void bootstrap(),
+      })
+      event.subscribe((incoming, metadata) => {
+        syncEventHandler(incoming, metadata as { workspace: string })
+      })
+    }
 
     async function bootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
+      if (args.hostedTerminalPopup) {
+        try {
+          await refreshManagerData()
+          setStore("status", "complete")
+        } catch (e) {
+          setStore("error", e instanceof Error ? e.message : String(e))
+          setStore("status", "complete")
+          if (fatal) exit(e)
+        }
+        return
+      }
       const workspace = project.workspace.current()
       const projectPromise = project.sync()
       const sessionListPromise = projectPromise.then(() => listSessions())
@@ -267,6 +279,7 @@ export const {
     onMount(() => {
       if (args.hostedTerminalPopup) {
         void bootstrap({ fatal: false }).catch(() => undefined)
+        return
       } else {
         void bootstrap()
       }

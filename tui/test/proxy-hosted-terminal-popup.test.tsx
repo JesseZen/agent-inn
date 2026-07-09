@@ -70,7 +70,7 @@ test("popup mode renders hosted terminal picker without home route", async () =>
   }
 })
 
-test("popup mode ignores normal command palette command", async () => {
+test("popup mode does not start plugin host or render command palette", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -90,10 +90,10 @@ test("popup mode ignores normal command palette command", async () => {
       return frame.includes("Hosted Terminal") && frame.includes("Create new session")
     })
 
-    app.api().keymap.dispatchCommand("command.palette.show")
     await app.setup.renderOnce()
 
     const frame = app.setup.captureCharFrame()
+    expect(app.pluginStarts()).toBe(0)
     expect(frame).toContain("Hosted Terminal")
     expect(frame).not.toContain("Commands")
   } finally {
@@ -102,7 +102,12 @@ test("popup mode ignores normal command palette command", async () => {
 })
 
 test("popup mode does not render provider setup with empty providers", async () => {
-  const app = await mountHostedTerminalPopupApp()
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (["/config/providers", "/provider", "/agent", "/session"].includes(url.pathname)) {
+      throw new Error(`popup mode should not fetch ${url.pathname}`)
+    }
+    return undefined
+  })
 
   try {
     await wait(async () => {
@@ -155,15 +160,78 @@ test("popup mode opens existing hosted session with setup only then exits", asyn
       await app.setup.renderOnce()
       return app.setup.captureCharFrame().includes("solve problem A")
     })
-    app.api().keymap.dispatchCommand("dialog.select.next")
-    app.api().keymap.dispatchCommand("dialog.select.next")
-    app.api().keymap.dispatchCommand("dialog.select.submit")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressEnter()
     await wait(() => app.setup.renderer.isDestroyed)
 
     expect(spawns).toEqual([
       {
         cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_1"],
+      },
+    ])
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode duplicates hosted session with setup only then exits", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      const child = {
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") queueMicrotask(() => handler(0))
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  let duplicateCalls = 0
+  const app = await mountHostedTerminalPopupApp((url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
+      return json({
+        sessions: [activeHostedSession],
+      })
+    if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
+      duplicateCalls += 1
+      return json({
+        ...activeHostedSession,
+        session_id: "hs_dup",
+        session_label: "solve problem A copy",
+      }, { status: 201 })
+    }
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("solve problem A")
+    })
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressKey("y", { ctrl: true })
+    await wait(() => app.setup.renderer.isDestroyed)
+
+    expect(duplicateCalls).toBe(1)
+    expect(spawns).toEqual([
+      {
+        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_dup"],
       },
     ])
   } finally {
@@ -208,12 +276,12 @@ test("popup mode creates hosted session with setup only then exits", async () =>
       await app.setup.renderOnce()
       return app.setup.captureCharFrame().includes("Create new session")
     })
-    app.api().keymap.dispatchCommand("dialog.select.submit")
+    app.setup.mockInput.pressEnter()
     await wait(async () => {
       await app.setup.renderOnce()
       return app.setup.captureCharFrame().includes("Choose worker")
     })
-    app.api().keymap.dispatchCommand("dialog.select.submit")
+    app.setup.mockInput.pressEnter()
     await wait(async () => {
       await app.setup.renderOnce()
       return app.setup.captureCharFrame().includes("Launch Worker")

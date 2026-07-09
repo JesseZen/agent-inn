@@ -109,6 +109,9 @@ func (p *hostedSessionPopupProgram) Env() map[string]string {
 		"AINN_FAST_BOOT":             "1",
 		"AINN_HOSTED_TERMINAL_POPUP": "1",
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		env["AINN_PROJECT_DIR"] = cwd
+	}
 	return env
 }
 

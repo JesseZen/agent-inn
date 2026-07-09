@@ -75,7 +75,8 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
 
   const events = createEventSource()
   const calls = createFetch(override)
-  let api!: TuiPluginApi
+  let api: TuiPluginApi | undefined
+  let pluginStarts = 0
   let started!: () => void
   const ready = new Promise<void>((resolve) => {
     started = resolve
@@ -92,6 +93,7 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
       args,
       pluginHost: {
         async start(input) {
+          pluginStarts += 1
           api = input.api
           registerProxyCommands(input.api)
           started()
@@ -102,7 +104,7 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
   )
 
   async function renderReady() {
-    await ready
+    if (!args.hostedTerminalPopup) await ready
     await setup.renderOnce()
     await setup.renderOnce()
   }
@@ -127,7 +129,12 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
     mock.restore()
   }
 
-  return { setup, api: () => api, calls, openLaunchDialog, openHostedTerminalPicker, cleanup }
+  function currentApi() {
+    if (!api) throw new Error("plugin API is not available")
+    return api
+  }
+
+  return { setup, api: currentApi, pluginStarts: () => pluginStarts, calls, openLaunchDialog, openHostedTerminalPicker, cleanup }
 }
 
 export { directory, json }

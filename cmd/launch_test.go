@@ -1266,6 +1266,52 @@ func TestRunLaunchHostedTerminalHostedPopupDifferentOwnerFails(t *testing.T) {
 	}
 }
 
+func TestRunLaunchHostedTerminalHostedPopupSameOwnerNonAinnBindingFails(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+					return "bind-key -T prefix H display-message user-binding\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected same-owner non-AINN popup binding to fail")
+	}
+	if !strings.Contains(stderr.String(), "hosted popup") || !strings.Contains(stderr.String(), "H") {
+		t.Fatalf("expected popup binding conflict, got %q", stderr.String())
+	}
+	if hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
+		t.Fatalf("same-owner non-AINN binding should not install popup binding: %#v", got)
+	}
+}
+
 func TestManagedTurnStatusConfigDirIgnoresUnrelatedTodoBindings(t *testing.T) {
 	owner, found, err := managedTurnStatusConfigDir("", "", "bind-key -T root C-t run-shell -b \"'/tmp/ainn' hosted-session toggle-todo --config-dir '/tmp/other' --window-id #{window_id}\"\n")
 	got := struct {

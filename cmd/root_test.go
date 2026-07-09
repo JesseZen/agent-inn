@@ -1062,6 +1062,7 @@ printf 'argv=%s\n' "$*"
 printf 'AINN_URL=%s\n' "$AINN_URL"
 printf 'AINN_CONFIG_DIR=%s\n' "$AINN_CONFIG_DIR"
 printf 'AINN_EXECUTABLE=%s\n' "$AINN_EXECUTABLE"
+printf 'AINN_PROJECT_DIR=%s\n' "$AINN_PROJECT_DIR"
 printf 'AINN_FAST_BOOT=%s\n' "$AINN_FAST_BOOT"
 printf 'AINN_HOSTED_TERMINAL_POPUP=%s\n' "$AINN_HOSTED_TERMINAL_POPUP"
 } > "$AINN_POPUP_CAPTURE"
@@ -1091,6 +1092,7 @@ printf 'AINN_HOSTED_TERMINAL_POPUP=%s\n' "$AINN_HOSTED_TERMINAL_POPUP"
 		"AINN_URL=http://127.0.0.1:19090\n" +
 		"AINN_CONFIG_DIR=" + resolvedConfigDir + "\n" +
 		"AINN_EXECUTABLE=" + exe + "\n" +
+		"AINN_PROJECT_DIR=" + wd + "\n" +
 		"AINN_FAST_BOOT=1\n" +
 		"AINN_HOSTED_TERMINAL_POPUP=1\n"
 	data, err := os.ReadFile(capturePath)

@@ -355,11 +355,28 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
 })
 
 function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPluginHost }) {
+  const args = useArgs()
   const startup = useTuiStartup()
   const tuiConfig = useTuiConfig()
   const route = useRoute()
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
+  const themeState = useTheme()
+  const { theme, mode, setMode, locked, lock, unlock } = themeState
+
+  if (args.hostedTerminalPopup) {
+    return (
+      <box
+        width={dimensions().width}
+        height={dimensions().height}
+        flexDirection="column"
+        backgroundColor={theme.background}
+      >
+        <HostedTerminalPopupApp />
+      </box>
+    )
+  }
+
   const dialog = useDialog()
   const local = useLocal()
   const kv = useKV()
@@ -367,8 +384,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const event = useEvent()
   const sdk = useSDK()
   const toast = useToast()
-  const themeState = useTheme()
-  const { theme, mode, setMode, locked, lock, unlock } = themeState
   const sync = useSync()
   const project = useProject()
   const exit = useExit()
@@ -414,20 +429,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   onCleanup(() => {
     attention.dispose()
   })
-
-  const args = useArgs()
-  if (args.hostedTerminalPopup) {
-    return (
-      <box
-        width={dimensions().width}
-        height={dimensions().height}
-        flexDirection="column"
-        backgroundColor={theme.background}
-      >
-        <HostedTerminalPopupApp />
-      </box>
-    )
-  }
 
   // Let selection copy/dismiss win ahead of normal bindings when explicit copy is required.
   const offSelectionKeys = keymap.intercept(
