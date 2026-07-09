@@ -124,16 +124,8 @@ async function launchExternalWindow(opts: ProxyLaunchOptions) {
   return true
 }
 
-// launchHostedTerminal ensures the tmux window is set up (non-interactive) and
-// then attaches only when no client is already attached. This keeps a single
-// Terminal.app window for all hosted sessions: the first launch opens it, later
-// launches just switch the tmux window and focus the existing terminal.
-async function launchHostedTerminal(opts: ProxyLaunchOptions) {
+export async function setupHostedTerminalSession(opts: ProxyLaunchOptions) {
   const executable = opts.executable || "ainn"
-  const tmuxSocket = opts.tmuxSocketName || "ainn"
-  const tmuxHostSession = opts.tmuxHostSession || "ainn-host"
-
-  // Phase 1: set up tmux host + window without attaching.
   const setupArgs = ["launch", "--worker", String(opts.workerPort), "--mode", "hosted-terminal", "--no-attach"]
   if (opts.profile) {
     setupArgs.push("--profile", opts.profile)
@@ -160,6 +152,18 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
   if (setup.code !== 0) {
     throw new Error(setup.stderr || `ainn launch exited with code ${setup.code}`)
   }
+  return true
+}
+
+// launchHostedTerminal ensures the tmux window is set up (non-interactive) and
+// then attaches only when no client is already attached. This keeps a single
+// Terminal.app window for all hosted sessions: the first launch opens it, later
+// launches just switch the tmux window and focus the existing terminal.
+async function launchHostedTerminal(opts: ProxyLaunchOptions) {
+  const tmuxSocket = opts.tmuxSocketName || "ainn"
+  const tmuxHostSession = opts.tmuxHostSession || "ainn-host"
+
+  await setupHostedTerminalSession(opts)
   if (opts.hostedTerminalAttachMode === "setup-only") return true
 
   if (await hasTmuxClient(tmuxSocket, tmuxHostSession)) {

@@ -85,6 +85,7 @@ import * as TuiAudio from "./audio"
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-win32"
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
+import { DialogHostedTerminal } from "./proxy/dialog-hosted-terminal"
 
 const appGlobalBindingCommands = [
   "session.list",
@@ -1104,6 +1105,19 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     return render({ params: route.data.data })
   })
 
+  if (args.hostedTerminalPopup) {
+    return (
+      <box
+        width={dimensions().width}
+        height={dimensions().height}
+        flexDirection="column"
+        backgroundColor={theme.background}
+      >
+        <HostedTerminalPopupApp />
+      </box>
+    )
+  }
+
   return (
     <box
       width={dimensions().width}
@@ -1150,5 +1164,65 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         <StartupLoading ready={ready} />
       </Show>
     </box>
+  )
+}
+
+function HostedTerminalPopupApp() {
+  const dialog = useDialog()
+  const sync = useSync()
+  const exit = useExit()
+  const dimensions = useTerminalDimensions()
+  const { theme } = useTheme()
+  let opened = false
+
+  createEffect(() => {
+    if (opened) return
+    if (sync.status === "loading") return
+    if (sync.data.error) return
+    opened = true
+    dialog.replace(() => <DialogHostedTerminal mode="popup" />, () => exit())
+  })
+
+  useBindings(() => ({
+    enabled: !!sync.data.error,
+    bindings: [
+      {
+        key: "escape",
+        desc: "Exit",
+        group: "Popup",
+        cmd: () => exit(),
+      },
+      {
+        key: "ctrl+c",
+        desc: "Exit",
+        group: "Popup",
+        cmd: () => exit(),
+      },
+    ],
+  }))
+
+  return (
+    <Show when={sync.data.error}>
+      <box
+        width={dimensions().width}
+        height={dimensions().height}
+        alignItems="center"
+        justifyContent="center"
+      >
+        <box
+          width={60}
+          maxWidth={dimensions().width - 2}
+          flexDirection="column"
+          borderStyle="single"
+          borderColor={theme.border}
+          paddingX={2}
+          paddingY={1}
+          backgroundColor={theme.backgroundPanel}
+        >
+          <text fg={theme.text}>Hosted Terminal</text>
+          <text fg={theme.textMuted}>{sync.data.error}</text>
+        </box>
+      </box>
+    </Show>
   )
 }

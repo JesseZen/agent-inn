@@ -61,6 +61,14 @@ export const staleHostedSessionB = {
 } as const
 
 export async function mountHostedTerminalApp(override?: FetchHandler) {
+  return mountHostedTerminalAppWithArgs({}, override)
+}
+
+export async function mountHostedTerminalPopupApp(override?: FetchHandler) {
+  return mountHostedTerminalAppWithArgs({ hostedTerminalPopup: true }, override)
+}
+
+async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: boolean }, override?: FetchHandler) {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -81,7 +89,7 @@ export async function mountHostedTerminalApp(override?: FetchHandler) {
       config: createTuiResolvedConfig({ plugin_enabled: {} }),
       fetch: calls.fetch,
       events: events.source,
-      args: {},
+      args,
       pluginHost: {
         async start(input) {
           api = input.api

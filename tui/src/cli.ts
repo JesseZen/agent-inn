@@ -24,7 +24,7 @@ await Effect.runPromise(
     directory,
     fetch: proxyFetch as typeof fetch,
     events: emptyEventSource(),
-    args: {},
+    args: { hostedTerminalPopup: process.env.AINN_HOSTED_TERMINAL_POPUP === "1" },
     config: TuiConfig.resolve({}, { terminalSuspend: false }),
     pluginHost: host,
   }).pipe(Effect.provide(Global.defaultLayer)),

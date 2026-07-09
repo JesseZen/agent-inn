@@ -5,14 +5,17 @@ import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogAlert } from "../ui/dialog-alert"
-import { launchProxySession } from "./launch"
+import { launchProxySession, setupHostedTerminalSession, type ProxyLaunchOptions } from "./launch"
 import { rebindHostedSession } from "./hosted-session-rebind"
 import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
+import { useExit } from "../context/exit"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
 import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
 import { Global } from "@agent-inn/core/global"
 import { useWorkerFrecency } from "./worker-frecency-context"
+
+type HostedTerminalSurface = "dialog" | "popup"
 
 type HostedTerminalOption =
   | {
@@ -30,14 +33,25 @@ function sessionWorkerID(session: HostedSessionRecord) {
   return session.worker_id ?? session.worker_name
 }
 
-export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[] } = {}) {
+export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[]; mode?: HostedTerminalSurface } = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
   const project = useProject()
+  const exit = useExit()
   const workerFrecency = useWorkerFrecency()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
+  const mode = props.mode ?? "dialog"
   const workerSections = createMemo(() => workerFrecency.sections(sync.data.workers))
+
+  async function openHostedTerminal(opts: ProxyLaunchOptions) {
+    if (mode === "popup") return setupHostedTerminalSession(opts)
+    return launchProxySession(opts)
+  }
+
+  function finishPopup() {
+    if (mode === "popup") exit()
+  }
 
   async function refreshSessions() {
     setSessions(await sdk.client.listHostedSessions())
@@ -113,7 +127,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           }
           try {
             const settings = await sdk.client.getSettings()
-            const launched = await launchProxySession({
+            const launched = await openHostedTerminal({
               executable: import.meta.env?.AINN_EXECUTABLE || undefined,
               workerPort: worker.port,
               profile: worker.id,
@@ -126,6 +140,11 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             if (launched) workerFrecency.record(worker.id)
+            if (launched) workerFrecency.record(worker.id)
+            if (mode === "popup") {
+              finishPopup()
+              return
+            }
             await refreshSessions()
             dialog.pop()
           } catch (err) {
@@ -176,7 +195,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     try {
       await sdk.client.patchHostedSession(session.session_id, { session_label: label })
       const nextSessions = await sdk.client.listHostedSessions()
-      dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} />)
+      dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
     } catch (err) {
       await DialogAlert.show(dialog, "Rename hosted session failed", String(err instanceof Error ? err.message : err))
     }
@@ -187,7 +206,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       const duplicated = await sdk.client.duplicateHostedSession(session.session_id)
       const duplicatedWorkerID = sessionWorkerID(duplicated)
       const settings = await sdk.client.getSettings()
-      const launched = await launchProxySession({
+      const launched = await openHostedTerminal({
         executable: import.meta.env?.AINN_EXECUTABLE || undefined,
         workerPort: duplicated.worker_port,
         profile: duplicatedWorkerID,
@@ -199,6 +218,11 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         tmuxHostSession: settings.settings.terminal.tmux.host_session,
       })
       if (launched) workerFrecency.record(duplicatedWorkerID)
+      if (launched) workerFrecency.record(duplicatedWorkerID)
+      if (mode === "popup") {
+        finishPopup()
+        return
+      }
       await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, "Duplicate hosted session failed", String(err instanceof Error ? err.message : err))
@@ -282,7 +306,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               refreshSessions,
               onDeleted: (session) => {
                 const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
-                dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} />)
+                dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
               },
             })
           },
@@ -306,7 +330,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         const currentWorkerID = sessionWorkerID(session)
         void sdk.client.getSettings().then(async (settings) => {
           try {
-            const launched = await launchProxySession({
+            const launched = await openHostedTerminal({
               executable: import.meta.env?.AINN_EXECUTABLE || undefined,
               workerPort: session.worker_port,
               profile: currentWorkerID,
@@ -318,6 +342,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             if (launched) workerFrecency.record(currentWorkerID)
+            if (launched) workerFrecency.record(currentWorkerID)
+            finishPopup()
           } catch (err) {
             await DialogAlert.show(dialog, "Open hosted session failed", String(err instanceof Error ? err.message : err))
           }

@@ -265,7 +265,11 @@ export const {
     }
 
     onMount(() => {
-      void bootstrap()
+      if (args.hostedTerminalPopup) {
+        void bootstrap({ fatal: false }).catch(() => undefined)
+      } else {
+        void bootstrap()
+      }
       let unsubscribe = () => {}
       onCleanup(() => unsubscribe())
       void sdk.client
@@ -311,6 +315,7 @@ export const {
       },
       get ready() {
         if (startup.skipInitialLoading) return true
+        if (args.hostedTerminalPopup && store.error) return true
         return store.status !== "loading"
       },
       get path() {
