@@ -1327,7 +1327,7 @@ func TestRunLaunchHostedTerminalHostedPopupDifferentOwnerFails(t *testing.T) {
 	}
 }
 
-func TestRunLaunchHostedTerminalHostedPopupSameOwnerNonAinnBindingFails(t *testing.T) {
+func TestRunLaunchHostedTerminalHostedPopupSameOwnerSameKeyNonAinnBindingFails(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
@@ -1350,6 +1350,9 @@ func TestRunLaunchHostedTerminalHostedPopupSameOwnerNonAinnBindingFails(t *testi
 				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
 					return configDir + "\n", nil
 				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
+					return "H\n", nil
+				}
 				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
 					return "bind-key -T prefix H display-message user-binding\n", nil
 				}
@@ -1363,13 +1366,13 @@ func TestRunLaunchHostedTerminalHostedPopupSameOwnerNonAinnBindingFails(t *testi
 	var stderr bytes.Buffer
 	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
 	if code == 0 {
-		t.Fatal("expected same-owner non-AINN popup binding to fail")
+		t.Fatal("expected same-owner same-key non-AINN popup binding to fail")
 	}
 	if !strings.Contains(stderr.String(), "hosted popup") || !strings.Contains(stderr.String(), "H") {
 		t.Fatalf("expected popup binding conflict, got %q", stderr.String())
 	}
 	if hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
-		t.Fatalf("same-owner non-AINN binding should not install popup binding: %#v", got)
+		t.Fatalf("same-owner same-key non-AINN binding should not install popup binding: %#v", got)
 	}
 }
 

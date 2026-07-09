@@ -21,6 +21,9 @@ const (
 	hostedSessionAcknowledgeCommand = "hosted-session acknowledge"
 	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
 	defaultManagerURL               = "http://127.0.0.1:9090"
+	hostedPopupTitle                = "Hosted Terminal"
+	hostedPopupWidth                = "80%"
+	hostedPopupHeight               = "70%"
 )
 
 type launchRunner interface {
@@ -553,6 +556,22 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 	}
 	if binding != "" && ownedKey != key {
 		return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+	}
+	if binding != "" {
+		ownedBinding := strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
+			strings.Contains(binding, "display-popup") &&
+			strings.Contains(binding, "-E") &&
+			strings.Contains(binding, "-x R") &&
+			strings.Contains(binding, "-y 0") &&
+			strings.Contains(binding, hostedPopupWidth) &&
+			strings.Contains(binding, hostedPopupHeight) &&
+			strings.Contains(binding, hostedPopupTitle) &&
+			strings.Contains(binding, "hosted-session popup") &&
+			strings.Contains(binding, "--config-dir") &&
+			strings.Contains(binding, configDir)
+		if !ownedBinding {
+			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+		}
 	}
 	if owner == "" {
 		if _, err := runner.Run(manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir)); err != nil {
