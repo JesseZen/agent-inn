@@ -183,6 +183,47 @@ test("proxy batch create flow waits for tmux window before pasting prompt", asyn
   }
 })
 
+test("proxy batch create flow omits blank count so the backend default applies", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+    await app.mockInput.typeText("cli-openrouter")
+    await runCommand(app, "dialog.select.submit")
+
+    await submitPrompt(app)
+    await submitPrompt(app, "default count")
+    await submitPrompt(app)
+    await submitPrompt(app, "Fix scroll")
+    await submitPrompt(app)
+
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3)
+
+    expect(app.calls.createBatch).toEqual([
+      {
+        title: "default count",
+        prompt: "Fix scroll",
+        worker_name: "cli-openrouter",
+        source_directory: directory,
+      },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("batch winner action selects the highlighted variant", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
@@ -242,7 +283,7 @@ type BatchClient = ReturnType<typeof useSDK>["client"] & {
     title: string
     prompt?: string
     worker_name: string
-    count: number
+    count?: number
     source_directory: string
     model?: string
   }): Promise<unknown>

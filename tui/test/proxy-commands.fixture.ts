@@ -42,6 +42,8 @@ function frameLines(frame: string) {
     .filter(Boolean)
 }
 
+const defaultBatchVariantCount = 3
+
 type ProxyHarnessInput = {
   workers?: WorkerSummary[]
   upstreams?: RedactedUpstream[]
@@ -476,7 +478,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       calls.createBatch.push(body)
       const workerPort = [...workers.values()].find((worker) => worker.name === body.worker_name)?.port ?? 0
       const batchID = `batch_${batches.size + 1}`
-      const variants = Array.from({ length: body.count }, (_, index) => {
+      const variantCount = body.count ?? defaultBatchVariantCount
+      const variants = Array.from({ length: variantCount }, (_, index) => {
         const number = index + 1
         const hostedSessionID = `${batchID}_session_${number}`
         hostedSessions.push({

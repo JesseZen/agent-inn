@@ -113,11 +113,12 @@ export function DialogBatch() {
     })
     if (model === null) return
 
+    const count = countText.trim()
     const batch = await sdk.client.createBatch({
       title,
       ...(prompt ? { prompt } : {}),
       worker_name: worker.name,
-      count: Number(countText),
+      ...(count ? { count: Number(count) } : {}),
       source_directory: sourceDirectory,
       ...(model ? { model } : {}),
     })

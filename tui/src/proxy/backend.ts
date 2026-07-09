@@ -168,7 +168,7 @@ export type CreateBatchRequest = {
   title: string
   prompt?: string
   worker_name: string
-  count: number
+  count?: number
   source_directory: string
   model?: string
 }
