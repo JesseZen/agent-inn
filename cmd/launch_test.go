@@ -74,6 +74,15 @@ func hostedTestAcknowledgeMouseBindingCommand(t *testing.T, settings config.Sett
 	return manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, exe)
 }
 
+func hostedTestToggleTodoMouseBindingCommand(t *testing.T, settings config.Settings, configDir string) []string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager.TmuxToggleTodoMouseBindingCommandForSettings(settings, configDir, exe)
+}
+
 func hostedTestTurnStatusInstallCommands(t *testing.T, settings config.Settings, configDir string) [][]string {
 	t.Helper()
 	return [][]string{
@@ -83,6 +92,7 @@ func hostedTestTurnStatusInstallCommands(t *testing.T, settings config.Settings,
 		manager.TmuxSetTurnStatusOwnerCommandForSettings(settings, configDir),
 		hostedTestAcknowledgeHookCommand(t, settings, configDir),
 		hostedTestAcknowledgeMouseBindingCommand(t, settings, configDir),
+		hostedTestToggleTodoMouseBindingCommand(t, settings, configDir),
 	}
 }
 
@@ -651,7 +661,10 @@ func TestRunLaunchHostedTerminalKeepsExistingTurnStatusOwner(t *testing.T) {
 	if hostedTestHasCommand(got, manager.TmuxSetTurnStatusOwnerCommandForSettings(tmuxSettings, configDir)) {
 		t.Fatalf("same owner should not rewrite owner option: %#v", got)
 	}
-	if !hostedTestHasTmuxSubcommand(got, "set-hook") || !hostedTestHasTmuxSubcommand(got, "bind-key") {
+	if !hostedTestHasTmuxSubcommand(got, "set-hook") ||
+		!hostedTestHasTmuxSubcommand(got, "bind-key") ||
+		!hostedTestHasArg(got, "MouseDown1Status") ||
+		!hostedTestHasArg(got, "DoubleClick1Status") {
 		t.Fatalf("same owner should install hook and mouse binding: %#v", got)
 	}
 }

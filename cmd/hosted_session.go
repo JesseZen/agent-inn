@@ -26,6 +26,8 @@ func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedSessionMark(args[1:], stdout, stderr)
 	case "acknowledge":
 		return runHostedSessionAcknowledge(args[1:], stdout, stderr)
+	case "toggle-todo":
+		return runHostedSessionToggleTodo(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown hosted-session subcommand %q\n", args[0])
 		return 2
@@ -143,6 +145,44 @@ func runHostedSessionAcknowledge(args []string, stdout io.Writer, stderr io.Writ
 	session, ok, err := registry.AcknowledgeTurnByWindow(*windowID, *windowName)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to acknowledge hosted session: %v\n", err)
+		return 1
+	}
+	if !ok {
+		return 0
+	}
+	runner := launchRunnerFactory(io.Discard, stderr)
+	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runHostedSessionToggleTodo(args []string, stdout io.Writer, stderr io.Writer) int {
+	flags := flag.NewFlagSet("hosted-session toggle-todo", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configDir := flags.String("config-dir", expandHome(config.DefaultConfigDir), "config directory")
+	windowID := flags.String("window-id", "", "tmux window id")
+	windowName := flags.String("window-name", "", "tmux window name")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	*windowID = strings.TrimSpace(*windowID)
+	*windowName = strings.TrimSpace(*windowName)
+	if *windowID == "" {
+		fmt.Fprintln(stderr, "hosted-session toggle-todo requires --window-id")
+		return 2
+	}
+
+	cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
+		return 1
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, ok, err := registry.ToggleUserMarkerByWindow(*windowID, *windowName)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to toggle hosted session todo: %v\n", err)
 		return 1
 	}
 	if !ok {

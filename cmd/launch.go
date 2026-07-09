@@ -460,6 +460,9 @@ func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, c
 	if _, err := runner.Run(manager.TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings, configDir, executable)); err != nil {
 		return fmt.Errorf("install tmux turn acknowledgement mouse binding: %w", err)
 	}
+	if _, err := runner.Run(manager.TmuxToggleTodoMouseBindingCommandForSettings(settings, configDir, executable)); err != nil {
+		return fmt.Errorf("install tmux hosted todo mouse binding: %w", err)
+	}
 	return nil
 }
 

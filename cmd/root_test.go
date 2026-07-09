@@ -572,6 +572,61 @@ func TestRunHostedSessionAcknowledgeUpdatesRegistryAndTmux(t *testing.T) {
 	}
 }
 
+func TestRunHostedSessionToggleTodoUpdatesRegistryAndTmux(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "worker",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  manager.HostedTurnStateDone,
+		TurnGeneration:             2,
+		TurnAcknowledgedGeneration: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "toggle-todo", "--config-dir", configDir, "--window-id", "@12", "--window-name", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := session
+	wantSession.UserMarker = manager.HostedUserMarkerTodo
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
+	if !reflect.DeepEqual(got, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
+	}
+}
+
 func TestRunHostedSessionMarkPersistsLauncherSessionID(t *testing.T) {
 	dir := t.TempDir()
 	configDir := filepath.Join(dir, "config")
