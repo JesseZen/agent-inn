@@ -1282,50 +1282,63 @@ func TestRunLaunchHostedTerminalHostedPopupExistingAinnBindingWithOldGeometryRef
 }
 
 func TestRunLaunchHostedTerminalHostedPopupSameOwnerSameKeyCustomGeometryFails(t *testing.T) {
-	dir := hostedTestTempDir(t)
-	configDir := filepath.Join(dir, "config")
-	stateDir := filepath.Join(dir, "state")
-	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
-	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
-	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
-
-	var got [][]string
-	restore := func() func() {
-		previous := launchRunnerFactory
-		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
-			return launchRunnerFunc(func(args []string) (string, error) {
-				got = append(got, append([]string{}, args...))
-				if len(args) > 3 && args[3] == "show" {
-					return "on\n", nil
-				}
-				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
-					return configDir + "\n", nil
-				}
-				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
-					return configDir + "\n", nil
-				}
-				if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
-					return "H\n", nil
-				}
-				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
-					return "bind-key -T prefix H display-popup -E -T \"Hosted Terminal\" -h \"100%\" -w \"60%\" -x R -y 0 '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n", nil
-				}
-				return "", nil
-			})
-		}
-		return func() { launchRunnerFactory = previous }
-	}()
-	defer restore()
-
-	var stderr bytes.Buffer
-	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A", "--no-attach"}, &bytes.Buffer{}, &stderr)
-	if code == 0 {
-		t.Fatal("expected custom popup geometry to fail")
+	cases := []struct {
+		name   string
+		width  string
+		height string
+	}{
+		{name: "custom width", width: "60%", height: "100%"},
+		{name: "current width legacy height", width: "40%", height: "70%"},
+		{name: "legacy width current height", width: "80%", height: "100%"},
 	}
-	if !strings.Contains(stderr.String(), "non-AINN binding") || !strings.Contains(stderr.String(), "H") {
-		t.Fatalf("expected popup binding conflict, got %q", stderr.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := hostedTestTempDir(t)
+			configDir := filepath.Join(dir, "config")
+			stateDir := filepath.Join(dir, "state")
+			writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+			appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+			tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+			var got [][]string
+			restore := func() func() {
+				previous := launchRunnerFactory
+				launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+					return launchRunnerFunc(func(args []string) (string, error) {
+						got = append(got, append([]string{}, args...))
+						if len(args) > 3 && args[3] == "show" {
+							return "on\n", nil
+						}
+						if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+							return configDir + "\n", nil
+						}
+						if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+							return configDir + "\n", nil
+						}
+						if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
+							return "H\n", nil
+						}
+						if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+							return "bind-key -T prefix H display-popup -E -T \"Hosted Terminal\" -h \"" + tc.height + "\" -w \"" + tc.width + "\" -x R -y 0 '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n", nil
+						}
+						return "", nil
+					})
+				}
+				return func() { launchRunnerFactory = previous }
+			}()
+			defer restore()
+
+			var stderr bytes.Buffer
+			code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A", "--no-attach"}, &bytes.Buffer{}, &stderr)
+			if code == 0 {
+				t.Fatal("expected custom popup geometry to fail")
+			}
+			if !strings.Contains(stderr.String(), "non-AINN binding") || !strings.Contains(stderr.String(), "H") {
+				t.Fatalf("expected popup binding conflict, got %q", stderr.String())
+			}
+			hostedTestAssertNoPopupWritesOrTheme(t, got, tmuxSettings, configDir, "H")
+		})
 	}
-	hostedTestAssertNoPopupWritesOrTheme(t, got, tmuxSettings, configDir, "H")
 }
 
 func TestRunLaunchHostedTerminalHostedPopupUsesResolvedConfigDir(t *testing.T) {
