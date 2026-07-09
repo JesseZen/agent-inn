@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -15,12 +14,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/workers/")
 	parts := strings.Split(rest, "/")
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, worker, ok := m.workerByPort(port)
+		workerName, worker, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -29,12 +23,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodDelete {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, _, ok := m.workerByPort(port)
+		workerName, _, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -47,12 +36,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "config" && r.Method == http.MethodDelete {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, _, ok := m.workerByPort(port)
+		workerName, _, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -68,12 +52,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodPatch {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, current, ok := m.workerByPort(port)
+		workerName, current, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -83,8 +62,18 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
 		}
-		var next config.WorkerConfig
-		if err := json.Unmarshal(body, &next); err != nil {
+		var patch struct {
+			Name           string                         `json:"name"`
+			Port           int                            `json:"port"`
+			Launcher       string                         `json:"launcher"`
+			Upstream       string                         `json:"upstream"`
+			UpstreamID     string                         `json:"upstream_id"`
+			ProxyURL       string                         `json:"proxy_url"`
+			LogLevel       string                         `json:"log_level"`
+			RequestModules map[string]config.ModuleConfig `json:"request_modules"`
+			Hooks          map[string]config.ModuleConfig `json:"hooks"`
+		}
+		if err := json.Unmarshal(body, &patch); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
 		}
@@ -93,17 +82,44 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
 		}
+		next := current
+		if _, ok := fields["name"]; ok {
+			next.Name = strings.TrimSpace(patch.Name)
+		}
+		if next.Name == "" {
+			next.Name = workerName
+		}
+		if _, ok := fields["port"]; ok {
+			next.Port = patch.Port
+		}
+		if _, ok := fields["launcher"]; ok {
+			next.Launcher = strings.TrimSpace(patch.Launcher)
+		}
 		if _, ok := fields["proxy_url"]; ok {
-			next.ProxyURL = strings.TrimSpace(next.ProxyURL)
-		} else {
-			next.ProxyURL = current.ProxyURL
+			next.ProxyURL = strings.TrimSpace(patch.ProxyURL)
+		}
+		if _, ok := fields["log_level"]; ok {
+			next.LogLevel = patch.LogLevel
+		}
+		if _, ok := fields["request_modules"]; ok {
+			next.RequestModules = patch.RequestModules
+		}
+		if _, ok := fields["hooks"]; ok {
+			next.Hooks = patch.Hooks
 		}
 		if next.Port <= 0 {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker port is required"})
 			return
 		}
-		next.Upstream = strings.TrimSpace(next.Upstream)
-		if next.Upstream == "" {
+		next.UpstreamID = strings.TrimSpace(patch.UpstreamID)
+		if next.UpstreamID == "" {
+			next.UpstreamID = strings.TrimSpace(patch.Upstream)
+		}
+		if next.UpstreamID == "" {
+			next.UpstreamID = workerUpstreamID(current)
+		}
+		next.Upstream = next.UpstreamID
+		if next.UpstreamID == "" {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker provider is required"})
 			return
 		}
@@ -123,9 +139,20 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker log_level must be simple or detail"})
 			return
 		}
-		if _, err := m.resolveUpstream(next.Upstream); err != nil {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-			return
+		profiles := m.upstreamProfileSnapshot()
+		_, upstreamExists := profiles[next.UpstreamID]
+		upstreamChanged := workerUpstreamID(current) != next.UpstreamID
+		if upstreamChanged || upstreamExists {
+			if _, err := m.resolveUpstream(next.UpstreamID); err != nil {
+				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+		}
+		if upstreamExists {
+			if err := m.validateWorkerRuntime(workerName, next); err != nil {
+				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
 		}
 		if next.Port != current.Port {
 			cfg, _ := m.syncConfigFromStore()
@@ -145,16 +172,12 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := m.validateWorkerRuntime(workerName, next); err != nil {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-			return
-		}
 		if err := m.UpdateWorker(workerName, current, next); err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
 		for _, summary := range m.workerSummaries() {
-			if summary.Name == workerName {
+			if summary.ID == workerName {
 				writeJSON(rw, http.StatusOK, summary)
 				return
 			}
@@ -163,12 +186,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "restart" && r.Method == http.MethodPost {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, _, ok := m.workerByPort(port)
+		workerName, _, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -181,12 +199,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "stream" && r.Method == http.MethodGet {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, _, ok := m.workerByPort(port)
+		workerName, _, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -195,12 +208,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "logs" && r.Method == http.MethodGet {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		workerName, _, ok := m.workerByPort(port)
+		workerName, _, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -209,17 +217,13 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 && parts[1] == "modules" && r.Method == http.MethodPatch {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
 		moduleName := parts[2]
-		workerName, worker, ok := m.workerByPort(port)
+		workerName, worker, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
 		}
+		port := worker.Port
 		var cfg config.ModuleConfig
 		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
@@ -330,17 +334,13 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		http.NotFound(rw, r)
 		return
 	}
-	port, err := strconv.Atoi(parts[0])
-	if err != nil {
-		http.NotFound(rw, r)
-		return
-	}
 	moduleName := parts[2]
-	workerName, worker, ok := m.workerByPort(port)
+	workerName, worker, ok := m.workerByRouteKey(parts[0])
 	if !ok {
 		http.NotFound(rw, r)
 		return
 	}
+	port := worker.Port
 	if worker.RequestModules == nil {
 		worker.RequestModules = map[string]config.ModuleConfig{}
 	}

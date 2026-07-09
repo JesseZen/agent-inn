@@ -1945,6 +1945,23 @@ func TestManagerAPIPreservesWorkerProxyURLWhenPatchOmitsField(t *testing.T) {
 	}
 }
 
+func TestManagerPatchWorkerRenamesDisplayNameWithoutChangingID(t *testing.T) {
+	m := New(Config{Config: testManagerConfig()})
+	body := strings.NewReader(`{"name":"Codex Main","port":6767,"upstream_id":"openai","log_level":"simple"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/app", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	worker, ok := m.workerConfig("app")
+	if !ok {
+		t.Fatal("expected worker app to remain")
+	}
+	if worker.Name != "Codex Main" || worker.UpstreamID != "openai" {
+		t.Fatalf("bad worker config: %#v", worker)
+	}
+}
+
 func TestManagerUpdateWorkerRestartsRunningWorkerWhenHooksChange(t *testing.T) {
 	starter := &recordingStarter{}
 	client := &recordingWorkerClient{}
@@ -2789,7 +2806,7 @@ func TestManagerAPIDeleteWorkerConfigStopsAndRemovesWorker(t *testing.T) {
 	}
 }
 
-func TestManagerAPIDeleteUpstreamRejectsReferencedProvider(t *testing.T) {
+func TestManagerAPIDeleteUpstreamLeavesReferencedWorkerConfigured(t *testing.T) {
 	m := New(Config{
 		Config: config.Config{
 			Plugins: testPluginDefinitions(),
@@ -2804,11 +2821,62 @@ func TestManagerAPIDeleteUpstreamRejectsReferencedProvider(t *testing.T) {
 
 	res := httptest.NewRecorder()
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/upstreams/openai", nil))
-	if res.Code != http.StatusConflict {
-		t.Fatalf("expected upstream conflict, got %d: %s", res.Code, res.Body.String())
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected delete status %d: %s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), "used by worker") {
-		t.Fatalf("expected conflict response to name worker usage, got %s", res.Body.String())
+	worker, ok := m.workerConfig("codex-app")
+	if !ok {
+		t.Fatal("expected worker config to remain")
+	}
+	if worker.UpstreamID != "openai" {
+		t.Fatalf("expected worker to keep upstream id, got %#v", worker)
+	}
+	if _, ok := m.upstreamProfileSnapshot()["openai"]; ok {
+		t.Fatal("expected upstream profile to be removed")
+	}
+}
+
+func TestManagerPatchUpstreamRenamesDisplayNameWithoutChangingID(t *testing.T) {
+	m := New(Config{Config: testManagerConfig()})
+	body := strings.NewReader(`{"name":"OpenAI Main","base_url":"https://api.openai.com/v1","api_key":"sk-test","api_format":"chat_completions"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/openai", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	profiles := m.upstreamProfileSnapshot()
+	if _, ok := profiles["openai"]; !ok {
+		t.Fatal("expected upstream id openai to remain")
+	}
+	if profiles["openai"].Name != "OpenAI Main" {
+		t.Fatalf("bad upstream profile: %#v", profiles["openai"])
+	}
+}
+
+func TestManagerDeleteUpstreamStopsWorkersAndLeavesMissingReference(t *testing.T) {
+	starter := &recordingStarter{}
+	cfg := testManagerConfig()
+	m := New(Config{Config: cfg, Starter: starter, HealthChecker: &recordingHealthChecker{results: map[int]bool{6767: true}}})
+	if err := m.StartWorker("app"); err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/upstreams/openai", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if len(starter.processes) != 1 || starter.processes[0].stops != 1 {
+		t.Fatalf("expected linked running worker to stop once, got %#v", starter.processes)
+	}
+	worker, ok := m.workerConfig("app")
+	if !ok {
+		t.Fatal("expected worker config to remain")
+	}
+	if worker.UpstreamID != "openai" {
+		t.Fatalf("expected worker to keep upstream id, got %#v", worker)
+	}
+	if _, ok := m.upstreamProfileSnapshot()["openai"]; ok {
+		t.Fatal("expected upstream profile to be removed")
 	}
 }
 

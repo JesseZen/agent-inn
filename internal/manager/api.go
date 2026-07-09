@@ -440,15 +440,20 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method == http.MethodDelete {
-		for workerName, worker := range m.workerConfigSnapshot() {
-			if worker.Upstream == name {
-				writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("upstream %q is used by worker %q", name, workerName)})
-				return
-			}
-		}
 		if _, ok := m.upstreamProfileSnapshot()[name]; !ok {
 			http.NotFound(rw, r)
 			return
+		}
+		for workerName, worker := range m.workerConfigSnapshot() {
+			if workerUpstreamID(worker) != name {
+				continue
+			}
+			if m.workerStatus(workerName) == WorkerStateRunning {
+				if err := m.StopWorker(workerName); err != nil {
+					writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+			}
 		}
 		m.updateConfig(func(cfgRoot *config.Config) {
 			delete(cfgRoot.Upstreams, name)
@@ -461,6 +466,7 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	type upstreamPatch struct {
+		Name      *string `json:"name,omitempty"`
 		BaseURL   *string `json:"base_url,omitempty"`
 		APIKey    *string `json:"api_key,omitempty"`
 		APIFormat *string `json:"api_format,omitempty"`
@@ -470,8 +476,18 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 		return
 	}
-	current, _ := m.upstreamProfileSnapshot()[name]
+	current, ok := m.upstreamProfileSnapshot()[name]
+	if !ok {
+		http.NotFound(rw, r)
+		return
+	}
 	profile := current
+	if patch.Name != nil {
+		profile.Name = strings.TrimSpace(*patch.Name)
+		if profile.Name == "" {
+			profile.Name = name
+		}
+	}
 	if patch.BaseURL != nil {
 		profile.BaseURL = *patch.BaseURL
 	}
@@ -486,14 +502,15 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 	})
 	m.bumpLiveWorkersUsingUpstream(name)
 	applyErrors := m.applyRuntimeToLiveWorkersUsingUpstream(name)
-	runtime, err := upstream.Resolve(name, profile)
+	runtime, err := upstream.ResolveWithDisplayName(name, profile.Name, profile)
 	if err != nil {
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
 		return
 	}
 	m.publishEvent(EventUpstreamUpdated, map[string]any{"upstream": name})
 	body := map[string]any{
-		"name":        name,
+		"id":          name,
+		"name":        runtime.Name,
 		"base_url":    profile.BaseURL,
 		"has_api_key": runtime.APIKey != "",
 		"api_format":  profile.APIFormat,
@@ -536,7 +553,7 @@ func (m *Manager) bumpLiveWorkersUsingUpstream(upstreamName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for workerName, worker := range m.config.Workers {
-		if worker.Upstream == upstreamName && m.workerStatusLocked(workerName) == WorkerStateRunning {
+		if workerUpstreamID(worker) == upstreamName && m.workerStatusLocked(workerName) == WorkerStateRunning {
 			next := m.workerGenerationLocked(workerName) + 1
 			m.generations[workerName] = next
 			m.supervisorFor(workerName).setAppliedGeneration(next)

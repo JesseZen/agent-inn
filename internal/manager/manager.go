@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -479,6 +480,13 @@ func workerLogLevel(worker config.WorkerConfig) string {
 	return worker.LogLevel
 }
 
+func workerUpstreamID(worker config.WorkerConfig) string {
+	if worker.UpstreamID != "" {
+		return worker.UpstreamID
+	}
+	return worker.Upstream
+}
+
 func (m *Manager) resolveUpstream(name string) (upstream.RuntimeUpstream, error) {
 	m.mu.RLock()
 	profile, ok := m.config.Upstreams[name]
@@ -526,6 +534,14 @@ func (m *Manager) workerByPort(port int) (string, config.WorkerConfig, bool) {
 		return "", config.WorkerConfig{}, false
 	}
 	return workerName, cloneWorkerConfig(worker), true
+}
+
+func (m *Manager) workerByRouteKey(key string) (string, config.WorkerConfig, bool) {
+	if port, err := strconv.Atoi(key); err == nil {
+		return m.workerByPort(port)
+	}
+	worker, ok := m.workerConfig(key)
+	return key, worker, ok
 }
 
 func (m *Manager) updateConfig(fn func(*config.Config)) {
@@ -1267,11 +1283,7 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 	targets := []liveWorkerTarget{}
 	for workerName, worker := range m.config.Workers {
-		upstreamID := worker.UpstreamID
-		if upstreamID == "" {
-			upstreamID = worker.Upstream
-		}
-		if upstreamID != upstreamName || m.workerStatusLocked(workerName) != WorkerStateRunning {
+		if workerUpstreamID(worker) != upstreamName || m.workerStatusLocked(workerName) != WorkerStateRunning {
 			continue
 		}
 		targets = append(targets, liveWorkerTarget{name: workerName, port: worker.Port})
