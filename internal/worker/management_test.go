@@ -67,6 +67,7 @@ func TestWorkerManagementStatusIncludesProxyURL(t *testing.T) {
 	var got struct {
 		SnapshotGeneration int    `json:"snapshot_generation"`
 		ProxyURL           string `json:"proxy_url"`
+		ProxyURLRedacted   bool   `json:"proxy_url_redacted"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -77,9 +78,11 @@ func TestWorkerManagementStatusIncludesProxyURL(t *testing.T) {
 	want := struct {
 		SnapshotGeneration int    `json:"snapshot_generation"`
 		ProxyURL           string `json:"proxy_url"`
+		ProxyURLRedacted   bool   `json:"proxy_url_redacted"`
 	}{
 		SnapshotGeneration: 1,
 		ProxyURL:           "http://127.0.0.1:7890",
+		ProxyURLRedacted:   true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("bad status proxy URL:\ngot  %#v\nwant %#v", got, want)

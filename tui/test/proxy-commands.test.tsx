@@ -596,9 +596,9 @@ test("proxy workers launcher selection returns to worker detail before patch fin
 })
 
 test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
-  const app = await mountProxyApp()
+	const app = await mountProxyApp()
 
-  try {
+	try {
     await openWorkerDetail(app)
     expect(app.frame()).toContain("proxy: direct")
 
@@ -629,11 +629,54 @@ test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
     expect(app.frame()).toContain("proxy: http://127.0.0.1:7890")
   } finally {
     await app.cleanup()
-  }
+	}
+})
+
+test("proxy workers proxy URL prompt does not prefill redacted credential URL", async () => {
+	const app = await mountProxyApp({
+		workers: [
+			{
+				name: "app",
+				port: 6767,
+				role: "app",
+				protocol: "chat_completions",
+				upstream: { name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+				status: "running",
+				snapshot_generation: 3,
+				log_level: "simple",
+				proxy_url: "http://127.0.0.1:7890",
+				proxy_url_redacted: true,
+			},
+		],
+	})
+
+	try {
+		await openWorkerDetail(app)
+		expect(app.frame()).toContain("proxy: http://127.0.0.1:7890")
+
+		for (let i = 0; i < 6; i++) {
+			await runCommand(app, "dialog.select.next")
+		}
+		expect(app.frame()).toContain("Proxy URL")
+		await runCommand(app, "dialog.select.submit")
+		await wait(async () => {
+			await app.render()
+			return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+		})
+		const editor = app.setup.renderer.currentFocusedEditor
+		if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused proxy URL prompt")
+
+		expect(editor.plainText).toBe("******")
+		app.api.keymap.dispatchCommand("dialog.prompt.submit")
+		await app.render()
+		expect(app.calls.patchWorker).toEqual([])
+	} finally {
+		await app.cleanup()
+	}
 })
 
 test("proxy workers create claudecode worker payload", async () => {
-  const app = await mountProxyApp()
+	const app = await mountProxyApp()
 
   try {
     await runCommand(app, "proxy.workers")

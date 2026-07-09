@@ -49,3 +49,7 @@ func RedactProxyURL(raw string) string {
 	proxyURL.User = nil
 	return proxyURL.String()
 }
+
+func ProxyURLRedacted(raw string) bool {
+	return RedactProxyURL(raw) != raw
+}

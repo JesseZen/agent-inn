@@ -47,6 +47,7 @@ func (w *Worker) writeStatus(rw http.ResponseWriter) {
 		"snapshot_generation": snapshot.Generation,
 		"upstream":            snapshot.Upstream.Redacted(),
 		"proxy_url":           appruntime.RedactProxyURL(snapshot.ProxyURL),
+		"proxy_url_redacted":  appruntime.ProxyURLRedacted(snapshot.ProxyURL),
 		"protocol":            snapshot.Protocol,
 		"module_support":      snapshot.ModuleSupport,
 		"modules":             snapshot.requestModuleStates(),
@@ -76,6 +77,7 @@ func (w *Worker) handleRuntime(rw http.ResponseWriter, r *http.Request) {
 		"snapshot_generation": snapshot.Generation,
 		"upstream":            snapshot.Upstream.Redacted(),
 		"proxy_url":           appruntime.RedactProxyURL(snapshot.ProxyURL),
+		"proxy_url_redacted":  appruntime.ProxyURLRedacted(snapshot.ProxyURL),
 	})
 }
 

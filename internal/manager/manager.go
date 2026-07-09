@@ -75,6 +75,7 @@ type WorkerSummary struct {
 	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
+	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Status             string                                      `json:"status"`
@@ -117,6 +118,7 @@ type WorkerStatus struct {
 	SnapshotGeneration int                                         `json:"snapshot_generation"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
+	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Modules            map[string]config.ModuleConfig              `json:"modules"`
@@ -131,6 +133,7 @@ type WorkerDetail struct {
 	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
+	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Status             string                                      `json:"status"`
@@ -295,6 +298,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Launcher:           seed.worker.Launcher,
 			Upstream:           runtimeUpstream.Redacted(),
 			ProxyURL:           appruntime.RedactProxyURL(seed.worker.ProxyURL),
+			ProxyURLRedacted:   appruntime.ProxyURLRedacted(seed.worker.ProxyURL),
 			Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 			ModuleSupport:      supportForPluginDefinitions(seed.plugins),
 			Status:             seed.status,
@@ -332,6 +336,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Launcher:           worker.Launcher,
 		Upstream:           runtimeUpstream.Redacted(),
 		ProxyURL:           appruntime.RedactProxyURL(worker.ProxyURL),
+		ProxyURLRedacted:   appruntime.ProxyURLRedacted(worker.ProxyURL),
 		Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 		ModuleSupport:      supportForPluginDefinitions(m.pluginDefinitionsSnapshot()),
 		Status:             string(m.workerStatus(name)),
@@ -361,6 +366,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		detail.Upstream = status.Upstream
 	}
 	detail.ProxyURL = status.ProxyURL
+	detail.ProxyURLRedacted = status.ProxyURLRedacted
 	if status.Protocol != "" {
 		detail.Protocol = status.Protocol
 	}
@@ -887,15 +893,16 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 
 func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) {
 	m.publishEvent(EventWorkerUpdated, map[string]any{
-		"worker":    name,
-		"port":      worker.Port,
-		"role":      worker.Role,
-		"launcher":  worker.Launcher,
-		"upstream":  worker.Upstream,
-		"proxy_url": appruntime.RedactProxyURL(worker.ProxyURL),
-		"log_level": workerLogLevel(worker),
-		"modules":   cloneModules(worker.RequestModules),
-		"hooks":     cloneModules(worker.Hooks),
+		"worker":             name,
+		"port":               worker.Port,
+		"role":               worker.Role,
+		"launcher":           worker.Launcher,
+		"upstream":           worker.Upstream,
+		"proxy_url":          appruntime.RedactProxyURL(worker.ProxyURL),
+		"proxy_url_redacted": appruntime.ProxyURLRedacted(worker.ProxyURL),
+		"log_level":          workerLogLevel(worker),
+		"modules":            cloneModules(worker.RequestModules),
+		"hooks":              cloneModules(worker.Hooks),
 	})
 }
 

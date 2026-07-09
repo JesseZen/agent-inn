@@ -16,6 +16,7 @@ const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
 const LAUNCHERS = ["codex", "claudecode"] as const
 type Launcher = (typeof LAUNCHERS)[number]
+const REDACTED_PROXY_URL_VALUE = "******"
 
 export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: boolean }) {
   const { theme } = useTheme()
@@ -224,12 +225,19 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     value: "proxy_url",
     description: props.worker.proxy_url || "direct",
     onSelect: async () => {
+      const current = props.worker.proxy_url ?? ""
+      const redacted = props.worker.proxy_url_redacted === true
+      let dirty = false
       const value = await DialogPrompt.show(dialog, `Proxy URL: ${props.worker.name}`, {
         placeholder: "http://127.0.0.1:7890",
-        value: props.worker.proxy_url ?? "",
+        value: redacted ? REDACTED_PROXY_URL_VALUE : current,
+        onInputChange() {
+          dirty = true
+        },
       })
       if (value === null) return
-      if (value === (props.worker.proxy_url ?? "")) return
+      if (redacted && (!dirty || value === REDACTED_PROXY_URL_VALUE)) return
+      if (!redacted && value === current) return
       try {
         await sdk.client.patchWorker(props.worker.port, { proxy_url: value })
         await sync.bootstrap({ fatal: false })

@@ -71,6 +71,7 @@ export type WorkerSummary = {
   role?: string
   launcher?: string
   proxy_url?: string
+  proxy_url_redacted?: boolean
   protocol?: ProtocolKind
   upstream: RedactedUpstream
   status: string

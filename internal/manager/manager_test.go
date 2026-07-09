@@ -397,6 +397,12 @@ func TestManagerAPIMarksHostedSessionUnread(t *testing.T) {
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
 			gotCalls = append(gotCalls, append([]string{}, args...))
+			if reflect.DeepEqual(args, TmuxHasSessionCommandForSettings(settings)) {
+				return "", nil
+			}
+			if reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(settings)) {
+				return "@12\tsolve problem A\n", nil
+			}
 			return "", nil
 		})
 	}
@@ -426,7 +432,11 @@ func TestManagerAPIMarksHostedSessionUnread(t *testing.T) {
 	if !reflect.DeepEqual(persisted, want) {
 		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
 	}
-	wantCalls := [][]string{TmuxHostedTurnStatusCommandForRecord(settings, want)}
+	wantCalls := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+		TmuxHostedTurnStatusCommandForRecord(settings, want),
+	}
 	if !reflect.DeepEqual(gotCalls, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
 	}
@@ -520,6 +530,78 @@ func TestManagerAPIMarksWindowlessHostedSessionUnreadWithoutTmux(t *testing.T) {
 	want.TurnAcknowledgedGeneration = 0
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerAPIMarksStaleHostedSessionUnreadWithoutTmuxUpdate(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	m := New(Config{Config: config.Config{Settings: settings}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "cli-openai",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			gotCalls = append(gotCalls, append([]string{}, args...))
+			if reflect.DeepEqual(args, TmuxHasSessionCommandForSettings(settings)) {
+				return "", nil
+			}
+			if reflect.DeepEqual(args, TmuxListWindowDetailsCommandForSettings(settings)) {
+				return "@99\tother\n", nil
+			}
+			return "", errors.New("can't find window")
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions/"+created.SessionID+"/mark-unread", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.TurnAcknowledgedGeneration = 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+	persisted, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("unexpected persisted session:\n got %#v ok=%v\nwant %#v", persisted, ok, want)
+	}
+	wantCalls := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+	}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
 	}
 }
 
@@ -1510,6 +1592,7 @@ func TestManagerAPIWorkerSummaryAndDetailIncludeProxyURL(t *testing.T) {
 				Launcher:           "codex",
 				Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
 				ProxyURL:           "http://127.0.0.1:7890",
+				ProxyURLRedacted:   true,
 				Protocol:           appruntime.ProtocolResponses,
 				ModuleSupport:      supportForPluginDefinitions(testPluginDefinitions()),
 				Status:             "configured",
@@ -1541,6 +1624,7 @@ func TestManagerAPIWorkerSummaryAndDetailIncludeProxyURL(t *testing.T) {
 		Launcher:           "codex",
 		Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
 		ProxyURL:           "http://127.0.0.1:7890",
+		ProxyURLRedacted:   true,
 		Protocol:           appruntime.ProtocolResponses,
 		ModuleSupport:      supportForPluginDefinitions(testPluginDefinitions()),
 		Status:             "configured",
