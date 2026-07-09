@@ -20,6 +20,9 @@ export type ProxyLaunchOptions = {
   tmuxHostSession?: string
 }
 
+const tmuxClientAttachPollIntervalMs = 100
+const tmuxClientAttachPollAttempts = 50
+
 function shellQuote(value: string) {
   if (value === "") return "''"
   return "'" + value.replace(/'/g, `'\\''`) + "'"
@@ -72,8 +75,17 @@ async function hasTmuxClient(socketName: string, hostSession: string) {
   return result.stdout.trim() !== ""
 }
 
+async function waitForTmuxClient(socketName: string, hostSession: string) {
+  for (let attempt = 0; attempt < tmuxClientAttachPollAttempts; attempt++) {
+    if (await hasTmuxClient(socketName, hostSession)) return true
+    await new Promise((resolve) => setTimeout(resolve, tmuxClientAttachPollIntervalMs))
+  }
+  return false
+}
+
 export async function pasteHostedPrompt(opts: {
   prompt: string
+  submit?: boolean
   tmuxSocketName?: string
   tmuxWindowID: string
 }) {
@@ -81,6 +93,10 @@ export async function pasteHostedPrompt(opts: {
   const tmuxSocket = opts.tmuxSocketName || "ainn"
   const result = await runProcess("tmux", ["-L", tmuxSocket, "send-keys", "-l", "-t", opts.tmuxWindowID, opts.prompt])
   if (result.code !== 0) throw new Error(result.stderr || `tmux send-keys exited with code ${result.code}`)
+  if (opts.submit) {
+    const submit = await runProcess("tmux", ["-L", tmuxSocket, "send-keys", "-t", opts.tmuxWindowID, "Enter"])
+    if (submit.code !== 0) throw new Error(submit.stderr || `tmux send-keys exited with code ${submit.code}`)
+  }
   return true
 }
 
@@ -185,5 +201,8 @@ async function launchHostedTerminal(opts: ProxyLaunchOptions) {
     stdio: "ignore",
   })
   child.unref()
+  if (!(await waitForTmuxClient(tmuxSocket, tmuxHostSession))) {
+    throw new Error(`tmux client did not attach to ${tmuxHostSession}`)
+  }
   return true
 }

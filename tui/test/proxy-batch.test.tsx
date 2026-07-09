@@ -131,9 +131,9 @@ test("proxy batch create flow launches each hosted variant", async () => {
     ])
     expect(app.calls.getHostedSession).toEqual(["batch_1_session_1", "batch_1_session_2", "batch_1_session_3"])
     expect(pasteCalls).toEqual([
-      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@1" },
-      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@2" },
-      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@3" },
+      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@1" },
+      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@2" },
+      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@3" },
     ])
   } finally {
     await app.cleanup()
@@ -485,6 +485,45 @@ test("pasteHostedPrompt sends literal prompt text without Enter", async () => {
     {
       cmd: "tmux",
       args: ["-L", "ainn", "send-keys", "-l", "-t", "@12", "prompt"],
+    },
+  ])
+})
+
+test("pasteHostedPrompt can submit after literal prompt", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      const child = {
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") queueMicrotask(() => handler(0))
+          return child
+        },
+      }
+      return child
+    },
+  }))
+
+  const launchModule = await import(`../src/proxy/launch?paste-hosted-submit=${Date.now()}`)
+  const pasted = await launchModule.pasteHostedPrompt({
+    prompt: "prompt",
+    submit: true,
+    tmuxSocketName: "ainn",
+    tmuxWindowID: "@12",
+  })
+
+  expect(pasted).toBe(true)
+  expect(spawns).toEqual([
+    {
+      cmd: "tmux",
+      args: ["-L", "ainn", "send-keys", "-l", "-t", "@12", "prompt"],
+    },
+    {
+      cmd: "tmux",
+      args: ["-L", "ainn", "send-keys", "-t", "@12", "Enter"],
     },
   ])
 })

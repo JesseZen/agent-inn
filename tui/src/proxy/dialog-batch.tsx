@@ -70,6 +70,7 @@ export function DialogBatch() {
     if (!session.tmux_window_id) return
     await pasteHostedPrompt({
       prompt,
+      submit: true,
       tmuxSocketName: settings.settings.terminal.tmux.socket_name,
       tmuxWindowID: session.tmux_window_id,
     })

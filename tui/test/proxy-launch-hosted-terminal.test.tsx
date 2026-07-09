@@ -120,6 +120,76 @@ test("launchHostedTerminal reuses existing macOS terminal window when tmux alrea
   ])
 })
 
+test("launchHostedTerminal waits for the opened terminal client before returning", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  let listClientsCalls = 0
+
+  mock.module("node:os", () => ({
+    platform: () => "darwin",
+  }))
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      let onStdoutData: ((chunk: Buffer) => void) | undefined
+      const child = {
+        stdout: {
+          on(event: string, handler: (data: Buffer) => void) {
+            if (event === "data") onStdoutData = handler
+          },
+        },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") {
+            queueMicrotask(() => {
+              if (cmd === "tmux" && args[2] === "list-clients") {
+                listClientsCalls += 1
+                if (listClientsCalls > 1) onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
+              }
+              handler(0)
+            })
+          }
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  const launchModule = await import(`../src/proxy/launch?wait-opened-client=${Date.now()}`)
+  const launched = await launchModule.launchProxySession({
+    executable: "ainn",
+    workerPort: 1234,
+    profile: "cli",
+    configDir: "/tmp/codex-config",
+    mode: "hosted-terminal",
+    sessionID: "hs_1",
+    opener: "default",
+    tmuxSocketName: "ainn",
+    tmuxHostSession: "ainn-host",
+  })
+
+  expect(launched).toBe(true)
+  expect(spawns).toEqual([
+    {
+      cmd: "ainn",
+      args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "cli", "--config-dir", "/tmp/codex-config", "--session-id", "hs_1"],
+    },
+    {
+      cmd: "tmux",
+      args: ["-L", "ainn", "list-clients", "-t", "ainn-host"],
+    },
+    {
+      cmd: "osascript",
+      args: ["-e", 'tell application "Terminal" to do script "tmux -L ainn attach-session -t ainn-host"'],
+    },
+    {
+      cmd: "tmux",
+      args: ["-L", "ainn", "list-clients", "-t", "ainn-host"],
+    },
+  ])
+})
+
 test("launch dialog uses hosted terminal default mode", async () => {
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers")
