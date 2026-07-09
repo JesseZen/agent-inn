@@ -68,6 +68,43 @@ export type ProxyConfig = {
   upstreams?: Record<string, UpstreamProfile>
 }
 
+export type MetricsRangeName = "today" | "last_24h"
+
+export type MetricsTotals = {
+  requests: number
+  errors: number
+  avg_latency_ms: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens: number
+  total_tokens: number
+  unknown_usage_requests: number
+}
+
+export type WorkerLiveMetrics = MetricsTotals & {
+  window_seconds: number
+  in_flight: number
+  rpm: number
+  tpm: number
+}
+
+export type WorkerMetricsAggregate = {
+  worker: string
+  port: number
+  status: string
+  upstream?: string
+  live: WorkerLiveMetrics
+  totals: MetricsTotals
+}
+
+export type MetricsResponse = {
+  range: { name: MetricsRangeName; start: string; end: string }
+  workers: WorkerMetricsAggregate[]
+  skipped_records: number
+}
+
 export type WorkerSummary = {
   id: string
   name: string
@@ -86,6 +123,7 @@ export type WorkerSummary = {
   hooks?: Record<string, ModuleConfig>
   hook_statuses?: Record<string, HookStatus>
   module_support?: Record<string, ModuleProtocolSupport>
+  metrics?: WorkerLiveMetrics
 }
 
 export type WorkerDetail = WorkerSummary
@@ -116,6 +154,10 @@ export type ProxySettings = {
       host_start_mode: string
       turn_status_hooks: boolean
     }
+  }
+  metrics: {
+    persist_enabled: boolean
+    retention_days: number
   }
 }
 

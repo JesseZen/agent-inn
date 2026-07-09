@@ -1,17 +1,5 @@
-import { useDialog } from "../ui/dialog"
-import { DialogWorkerPicker } from "./dialog-worker-picker"
-import { DialogWorkerStatus } from "./dialog-worker-status"
+import { DialogMetrics } from "./dialog-metrics"
 
 export function DialogStatus() {
-  const dialog = useDialog()
-
-  return (
-    <DialogWorkerPicker
-      title="Worker Status"
-      placeholder="Search workers..."
-      onSelect={(worker) => {
-        dialog.replace(() => <DialogWorkerStatus worker={worker} />)
-      }}
-    />
-  )
+  return <DialogMetrics />
 }

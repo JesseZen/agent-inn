@@ -8,6 +8,8 @@ import type {
   HostedSessionRecord,
   HostedSessionSummary,
   CreateBatchRequest,
+  MetricsRangeName,
+  MetricsResponse,
   ProxyConfig,
   ProxyConfigResponse,
   ProxyConfigStatus,
@@ -26,6 +28,8 @@ export type EventSource = {
 export type {
   BatchRun,
   CreateBatchRequest,
+  MetricsRangeName,
+  MetricsResponse,
   ProxyConfig,
   ProxyConfigStatus,
   ProxySettings,
@@ -192,6 +196,9 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
         async getSettings() {
           return request<ProxySettingsResponse>("/api/settings")
+        },
+        async getMetrics(range: MetricsRangeName = "today") {
+          return request<MetricsResponse>(`/api/metrics?range=${encodeURIComponent(range)}`)
         },
         async patchSettings(patch: Partial<ProxySettings>) {
           return request<ProxySettingsResponse>("/api/settings", {

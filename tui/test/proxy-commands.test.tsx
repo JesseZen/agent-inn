@@ -156,6 +156,34 @@ test("proxy settings editor patches settings through manager API", async () => {
   }
 })
 
+test("proxy settings shows metrics persistence rows", async () => {
+  const app = await mountProxyApp()
+  const metricsPersistRowOffset = 8
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Settings") && frame.includes("State Dir")
+    })
+    for (let i = 0; i < metricsPersistRowOffset; i++) {
+      app.api.keymap.dispatchCommand("dialog.select.next")
+      await app.render()
+    }
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("Metrics Persist enabled") && frame.includes("Metrics Retention 30")
+    })
+
+    expect(app.frame()).toContain("Metrics Persist enabled")
+    expect(app.frame()).toContain("Metrics Retention 30")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy settings field save keeps settings dialog open with updated value", async () => {
   const app = await mountProxyApp()
 
@@ -401,7 +429,7 @@ test("proxy settings command is registered and config command is removed", async
   }
 })
 
-test("proxy worker status commands are folded into workers", async () => {
+test("proxy status command opens worker metrics", async () => {
   const app = await mountProxyApp()
 
   try {
@@ -409,14 +437,18 @@ test("proxy worker status commands are folded into workers", async () => {
       namespace: "palette",
       visibility: "registered",
     })
-    expect(commands.map((entry) => entry.command.name).includes("proxy.status")).toBe(false)
+    const status = commands.find((entry) => entry.command.name === "proxy.status")
+    expect(status?.command.title).toBe("View worker metrics")
     expect(commands.map((entry) => entry.command.name).includes("proxy.modules")).toBe(false)
+    expect(resolveSlashCommand(app.api.keymap, "/status")).toBe("proxy.status")
 
-    await openWorkerDetail(app)
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics")
+    })
 
-    expect(app.frame()).toContain("Switch Upstream")
-    expect(app.frame()).toContain("View Logs")
-    expect(app.frame()).toContain("Manage Modules")
+    expect(app.frame()).toContain("Worker Metrics")
   } finally {
     await app.cleanup()
   }

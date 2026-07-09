@@ -110,6 +110,7 @@ cd tui && AINN_URL=http://localhost:9090 bun run dev
 | 命令 | 别名 | 描述 |
 |------|------|------|
 | `/help` | | 显示所有命令 |
+| `/status` | | 查看 Worker 指标（RPM、TPM、token 总量、错误、延迟） |
 | `/settings` | `/config` | 编辑运行时设置并查看配置保存状态 |
 | `/workers` | | 管理 Worker（创建、查看详情、编辑字段/模块、查看日志、restart/stop） |
 | `/upstream` | | 管理 Upstream（创建、编辑 base_url/api_key/api_format） |
@@ -134,6 +135,9 @@ cd tui && AINN_URL=http://localhost:9090 bun run dev
 settings:
   state_dir: ~/.ainn
   log_dir: ~/.ainn/logs
+  metrics:
+    persist_enabled: true
+    retention_days: 30
   launch:
     default_mode: hosted-terminal
   terminal:
@@ -187,6 +191,8 @@ upstreams:
 
 `settings.state_dir` 用于存放 AINN 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
 
+`settings.metrics.persist_enabled` 控制是否持久化每日 Worker 指标。`settings.metrics.retention_days` 控制持久化指标保留天数。
+
 `settings.terminal.tmux.host_start_mode` 默认是 `new-window`。
 
 - `new-window`：保持当前行为
@@ -224,7 +230,7 @@ cd tui && bun run typecheck
 
 ## 待办事项
 
-- [ ] `/status`：在 `/workers` 承接主要 Worker 管理流程后，重新加入独立 Worker 状态视图
+- [x] `/status`：查看 Worker 指标
 - [ ] hosted-terminal: 使用 `tmux` 或类似多路复用器作为外部终端主机；AINN 处理 `create` / `list` / `attach` / `switch`
 - [ ] embedded-terminal: 在 AINN 内部内置 PTY 会话，支持直接会话切换
 

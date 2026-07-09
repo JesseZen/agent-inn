@@ -13,6 +13,7 @@ import {
   type BatchRun,
   type CreateBatchRequest,
   type HostedSessionSummary,
+  type MetricsRangeName,
   type ProxyConfigStatus,
   type ProxySettings,
   type PluginDefinition,
@@ -20,11 +21,12 @@ import {
   type WorkerSummary,
 } from "../src/proxy/backend"
 
-type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal"> & {
+type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal" | "metrics"> & {
   launch?: Partial<ProxySettings["launch"]>
   terminal?: Partial<Omit<ProxySettings["terminal"], "tmux">> & {
     tmux?: Partial<ProxySettings["terminal"]["tmux"]>
   }
+  metrics?: Partial<ProxySettings["metrics"]>
 }
 
 type HarnessUpstream = Omit<RedactedUpstream, "id"> & { id?: string }
@@ -173,6 +175,10 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           turn_status_hooks: false,
         },
       },
+      metrics: {
+        persist_enabled: true,
+        retention_days: 30,
+      },
     },
     plugins: {
       api_translate: { kind: "request_middleware", source: "builtin" },
@@ -192,6 +198,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         ...input.settings.terminal,
         tmux: { ...config.settings.terminal.tmux, ...input.settings.terminal?.tmux },
       },
+      metrics: { ...config.settings.metrics, ...input.settings.metrics },
     }
   }
   const calls = {
@@ -220,6 +227,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     patchHostedSession: [] as Array<{ session_id: string; worker_id: string }>,
     testUpstream: [] as string[],
     testAllUpstreams: 0,
+    getMetrics: [] as string[],
   }
 
   const fetch = createFetch((url) => {
@@ -249,6 +257,22 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       return json({
         workers: [...workers.values()],
       })
+    if (url.pathname === "/api/metrics") {
+      const range = (url.searchParams.get("range") ?? "today") as MetricsRangeName
+      calls.getMetrics.push(range)
+      return json({
+        range: { name: range, start: "2026-07-10T00:00:00+08:00", end: "2026-07-11T00:00:00+08:00" },
+        workers: [{
+          worker: "app",
+          port: 6767,
+          status: "running",
+          upstream: "openai",
+          live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: 20, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 20, unknown_usage_requests: 0 },
+          totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 20, unknown_usage_requests: 0 },
+        }],
+        skipped_records: 0,
+      })
+    }
     if (url.pathname.startsWith("/api/workers/") && url.search === "" && !url.pathname.includes("/modules/")) {
       const workerKey = url.pathname.slice("/api/workers/".length)
       calls.getWorkerRoute.push(decodeURIComponent(workerKey))
@@ -553,6 +577,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           ...body.terminal,
           tmux: { ...config.settings.terminal.tmux, ...body.terminal?.tmux },
         },
+        metrics: { ...config.settings.metrics, ...body.metrics },
       }
       config.status = { ...config.status, dirty: false, generation: config.status.generation + 1 }
       return json({ settings: config.settings, status: config.status })

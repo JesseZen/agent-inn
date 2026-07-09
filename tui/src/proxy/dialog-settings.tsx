@@ -46,6 +46,11 @@ const TMUX_TURN_STATUS_HOOK_CHOICES: SettingsChoice[] = [
   { title: "Disabled", value: "disabled", description: "Remove AINN-managed turn hooks" },
 ]
 
+const METRICS_PERSIST_CHOICES: SettingsChoice[] = [
+  { title: "Enabled", value: "enabled" },
+  { title: "Disabled", value: "disabled" },
+]
+
 const FIELDS: SettingsField[] = [
   {
     key: "state_dir",
@@ -106,6 +111,21 @@ const FIELDS: SettingsField[] = [
     value: (settings) => (settings.terminal.tmux.turn_status_hooks ? "enabled" : "disabled"),
     patch: (value) => ({ terminal: { tmux: { turn_status_hooks: value === "enabled" } } } as Partial<ProxySettings>),
     choices: TMUX_TURN_STATUS_HOOK_CHOICES,
+  },
+  {
+    key: "metrics.persist_enabled",
+    title: "Metrics Persist",
+    category: "Metrics",
+    value: (settings) => (settings.metrics.persist_enabled ? "enabled" : "disabled"),
+    patch: (value) => ({ metrics: { persist_enabled: value === "enabled" } } as Partial<ProxySettings>),
+    choices: METRICS_PERSIST_CHOICES,
+  },
+  {
+    key: "metrics.retention_days",
+    title: "Metrics Retention",
+    category: "Metrics",
+    value: (settings) => String(settings.metrics.retention_days),
+    patch: (value) => ({ metrics: { retention_days: Number(value) } } as Partial<ProxySettings>),
   },
 ]
 

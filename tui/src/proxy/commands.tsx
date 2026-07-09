@@ -7,6 +7,7 @@ import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogWorkers } from "./dialog-workers"
 import { DialogLaunch } from "./dialog-launch"
 import { DialogBatch } from "./dialog-batch"
+import { DialogStatus } from "./dialog-status"
 
 export function registerProxyCommands(api: TuiPluginApi) {
   return api.keymap.registerLayer({
@@ -50,6 +51,16 @@ export function registerProxyCommands(api: TuiPluginApi) {
               }}
             />
           ))
+        },
+      },
+      {
+        namespace: "palette",
+        name: "proxy.status",
+        title: "View worker metrics",
+        category: "Proxy",
+        slashName: "status",
+        run() {
+          api.ui.dialog.replace(() => <DialogStatus />)
         },
       },
       {

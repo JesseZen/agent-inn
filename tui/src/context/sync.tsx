@@ -292,6 +292,12 @@ export const {
             setStore("upstreamProbes", probe.upstream, reconcile(probe))
             return
           }
+          if (event.type === "metrics.updated") {
+            void refreshManagerData().catch((error) => {
+              setStore("error", error instanceof Error ? error.message : String(error))
+            })
+            return
+          }
           const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
           if (event.type === "worker.health.changed") {
             const workerName = event.payload.worker

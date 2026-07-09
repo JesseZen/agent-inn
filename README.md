@@ -110,6 +110,7 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `/help` | | Show all commands |
+| `/status` | | View worker metrics (RPM, TPM, token totals, errors, latency) |
 | `/settings` | `/config` | Edit runtime settings and view config save status |
 | `/workers` | | Manage workers (create, inspect, edit fields/modules, view logs, restart/stop) |
 | `/upstream` | | Manage upstreams (create, edit base_url/api_key/api_format) |
@@ -134,6 +135,9 @@ After launching, you'll see an empty screen with an input bar at the bottom. Typ
 settings:
   state_dir: ~/.ainn
   log_dir: ~/.ainn/logs
+  metrics:
+    persist_enabled: true
+    retention_days: 30
   launch:
     default_mode: hosted-terminal
   terminal:
@@ -193,6 +197,8 @@ Leaving `api_format` empty or unset = native Responses API passthrough, no trans
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
 
+`settings.metrics.persist_enabled` controls daily worker metrics persistence. `settings.metrics.retention_days` controls how long persisted metrics are retained.
+
 `settings.terminal.tmux.host_start_mode` defaults to `new-window`.
 
 - `new-window`: keep the current behavior
@@ -230,7 +236,7 @@ cd tui && bun run typecheck
 
 ## TODO
 
-- [ ] `/status`: reintroduce a dedicated worker status view after `/workers` owns the main worker management flow
+- [x] `/status`: view worker metrics
 - [x] hosted-terminal (experimental): `/launch` can run Codex CLI inside a AINN-owned `tmux -L ainn` host; AINN handles `create` / `switch` / `attach`
 - [ ] embedded-terminal: built-in PTY sessions inside AINN with direct session switching
 
