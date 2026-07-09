@@ -21,6 +21,8 @@ const (
 	hostedSessionAcknowledgeCommand = "hosted-session acknowledge"
 	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
 	defaultManagerURL               = "http://127.0.0.1:9090"
+	legacyHostedPopupWidth          = "80%"
+	legacyHostedPopupHeight         = "70%"
 )
 
 type launchRunner interface {
@@ -546,11 +548,28 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
 		}
 		if binding != "" {
+			popupWidth := ""
+			popupHeight := ""
+			bindingFields := strings.Fields(binding)
+			for i, field := range bindingFields {
+				if i+1 == len(bindingFields) {
+					break
+				}
+				switch field {
+				case "-w":
+					popupWidth = strings.Trim(bindingFields[i+1], "\"'")
+				case "-h":
+					popupHeight = strings.Trim(bindingFields[i+1], "\"'")
+				}
+			}
+			recognizedGeometry := popupWidth == manager.TmuxHostedPopupWidth && popupHeight == manager.TmuxHostedPopupHeight ||
+				popupWidth == legacyHostedPopupWidth && popupHeight == legacyHostedPopupHeight
 			ownedBinding := strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
 				strings.Contains(binding, "display-popup") &&
 				strings.Contains(binding, "-E") &&
 				strings.Contains(binding, "-x R") &&
 				strings.Contains(binding, "-y 0") &&
+				recognizedGeometry &&
 				strings.Contains(binding, manager.TmuxHostedPopupTitle) &&
 				strings.Contains(binding, "hosted-session popup") &&
 				strings.Contains(binding, "--config-dir") &&
