@@ -20,6 +20,8 @@ func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workers/", m.handleWorkerByPort)
 	mux.HandleFunc("/api/hosted-sessions", m.handleHostedSessions)
 	mux.HandleFunc("/api/hosted-sessions/", m.handleHostedSessionByID)
+	mux.HandleFunc("/api/batches", m.handleBatches)
+	mux.HandleFunc("/api/batches/", m.handleBatchByID)
 	mux.HandleFunc("/api/upstreams", m.handleUpstreams)
 	mux.HandleFunc("/api/upstreams/", m.handleUpstreamByName)
 	mux.HandleFunc("/api/settings", m.handleSettings)

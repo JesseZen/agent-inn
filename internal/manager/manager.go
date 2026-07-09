@@ -65,6 +65,7 @@ type Manager struct {
 	logs               map[string]*logging.WorkerLogSink
 	hookStatuses       map[string]map[string]modulehook.Status
 	hostedSessions     *HostedSessionRegistry
+	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
 }
 
@@ -182,6 +183,7 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		hookStatuses:       map[string]map[string]modulehook.Status{},
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
+		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
 	if cfg.ConfigPath != "" {
