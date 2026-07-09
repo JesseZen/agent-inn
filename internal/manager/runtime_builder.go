@@ -40,14 +40,18 @@ func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation app
 	if !ok {
 		return appruntime.WorkerRuntime{}, fmt.Errorf("worker %q not found", workerName)
 	}
-	profile, ok := cfg.Upstreams[worker.Upstream]
+	upstreamID := worker.UpstreamID
+	if upstreamID == "" {
+		upstreamID = worker.Upstream
+	}
+	profile, ok := cfg.Upstreams[upstreamID]
 	if !ok {
-		return appruntime.WorkerRuntime{}, fmt.Errorf("upstream %q not found", worker.Upstream)
+		return appruntime.WorkerRuntime{}, fmt.Errorf("upstream %q not found", upstreamID)
 	}
 	if _, err := appruntime.ParseProxyURL(worker.ProxyURL); err != nil {
 		return appruntime.WorkerRuntime{}, err
 	}
-	resolved, err := upstream.ResolveRuntime(worker.Upstream, profile)
+	resolved, err := upstream.ResolveRuntime(upstreamID, profile)
 	if err != nil {
 		return appruntime.WorkerRuntime{}, err
 	}

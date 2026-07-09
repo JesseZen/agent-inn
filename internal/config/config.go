@@ -60,10 +60,12 @@ type TmuxSettings struct {
 }
 
 type WorkerConfig struct {
+	Name           string                  `yaml:"name,omitempty" json:"name,omitempty"`
 	Role           string                  `yaml:"role,omitempty" json:"role,omitempty"`
 	Launcher       string                  `yaml:"launcher,omitempty" json:"launcher,omitempty"`
 	Port           int                     `yaml:"port"`
-	Upstream       string                  `yaml:"upstream"`
+	Upstream       string                  `yaml:"upstream,omitempty" json:"upstream,omitempty"`
+	UpstreamID     string                  `yaml:"upstream_id,omitempty" json:"upstream_id,omitempty"`
 	ProxyURL       string                  `yaml:"proxy_url,omitempty" json:"proxy_url,omitempty"`
 	LogLevel       string                  `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	RequestModules map[string]ModuleConfig `yaml:"request_modules" json:"request_modules,omitempty"`
@@ -76,6 +78,7 @@ type ModuleConfig struct {
 }
 
 type UpstreamProfile struct {
+	Name      string `yaml:"name,omitempty" json:"name,omitempty"`
 	BaseURL   string `yaml:"base_url" json:"base_url"`
 	APIKey    string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	APIFormat string `yaml:"api_format,omitempty" json:"api_format,omitempty"`
@@ -116,6 +119,9 @@ func (c *Config) ApplyDefaults() {
 		c.Upstreams = map[string]UpstreamProfile{}
 	}
 	for name, worker := range c.Workers {
+		if worker.Name == "" {
+			worker.Name = name
+		}
 		if worker.Role == "" {
 			worker.Role = "cli"
 		}
@@ -131,7 +137,19 @@ func (c *Config) ApplyDefaults() {
 		if worker.Hooks == nil {
 			worker.Hooks = map[string]ModuleConfig{}
 		}
+		if worker.UpstreamID == "" {
+			worker.UpstreamID = worker.Upstream
+		}
+		if worker.Upstream == "" {
+			worker.Upstream = worker.UpstreamID
+		}
 		c.Workers[name] = worker
+	}
+	for name, profile := range c.Upstreams {
+		if profile.Name == "" {
+			profile.Name = name
+		}
+		c.Upstreams[name] = profile
 	}
 }
 

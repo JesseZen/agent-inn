@@ -10,6 +10,7 @@ import (
 )
 
 type RuntimeUpstream struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	BaseURL   string `json:"base_url"`
 	APIKey    string `json:"api_key,omitempty"`
@@ -17,23 +18,38 @@ type RuntimeUpstream struct {
 }
 
 type RedactedUpstream struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
-	BaseURL   string `json:"base_url"`
+	BaseURL   string `json:"base_url,omitempty"`
 	APIKey    string `json:"api_key,omitempty"`
 	HasAPIKey bool   `json:"has_api_key"`
 	APIFormat string `json:"api_format,omitempty"`
+	Missing   bool   `json:"missing,omitempty"`
 }
 
 func Resolve(name string, profile config.UpstreamProfile) (RuntimeUpstream, error) {
 	if apiKey := runtimeAPIKey(name, profile); apiKey != "" {
-		return RuntimeUpstream{Name: name, BaseURL: profile.BaseURL, APIKey: apiKey, APIFormat: profile.APIFormat}, nil
+		return RuntimeUpstream{ID: name, Name: name, BaseURL: profile.BaseURL, APIKey: apiKey, APIFormat: profile.APIFormat}, nil
 	}
 	return RuntimeUpstream{
+		ID:        name,
 		Name:      name,
 		BaseURL:   profile.BaseURL,
 		APIKey:    strings.TrimSpace(profile.APIKey),
 		APIFormat: profile.APIFormat,
 	}, nil
+}
+
+func ResolveWithDisplayName(id string, displayName string, profile config.UpstreamProfile) (RuntimeUpstream, error) {
+	resolved, err := Resolve(id, profile)
+	if err != nil {
+		return RuntimeUpstream{}, err
+	}
+	resolved.Name = strings.TrimSpace(displayName)
+	if resolved.Name == "" {
+		resolved.Name = id
+	}
+	return resolved, nil
 }
 
 func ResolveRuntime(name string, profile config.UpstreamProfile) (appruntime.UpstreamRuntime, error) {
@@ -59,11 +75,17 @@ func ResolveRuntime(name string, profile config.UpstreamProfile) (appruntime.Ups
 
 func (p RuntimeUpstream) Redacted() RedactedUpstream {
 	return RedactedUpstream{
+		ID:        p.ID,
 		Name:      p.Name,
 		BaseURL:   p.BaseURL,
 		HasAPIKey: p.APIKey != "",
 		APIFormat: p.APIFormat,
 	}
+}
+
+func MissingRedacted(id string) RedactedUpstream {
+	id = strings.TrimSpace(id)
+	return RedactedUpstream{ID: id, Name: id, Missing: true}
 }
 
 func runtimeAPIKey(upstreamName string, profile config.UpstreamProfile) string {

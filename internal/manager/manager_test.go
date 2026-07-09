@@ -1139,6 +1139,90 @@ func TestManagerWorkerSummariesExposeRole(t *testing.T) {
 	}
 }
 
+func TestManagerWorkerSummaryUsesStableIDsAndDisplayNames(t *testing.T) {
+	cfg := testManagerConfig()
+	worker := cfg.Workers["app"]
+	worker.Name = "Codex Main"
+	worker.UpstreamID = "openai"
+	worker.Upstream = ""
+	cfg.Workers["app"] = worker
+	profile := cfg.Upstreams["openai"]
+	profile.Name = "OpenAI Display"
+	cfg.Upstreams["openai"] = profile
+
+	m := New(Config{Config: cfg})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Workers) != 1 {
+		t.Fatalf("expected one worker, got %#v", body.Workers)
+	}
+	got := struct {
+		ID         string
+		Name       string
+		UpstreamID string
+		Upstream   upstream.RedactedUpstream
+	}{body.Workers[0].ID, body.Workers[0].Name, body.Workers[0].UpstreamID, body.Workers[0].Upstream}
+	want := struct {
+		ID         string
+		Name       string
+		UpstreamID string
+		Upstream   upstream.RedactedUpstream
+	}{"app", "Codex Main", "openai", upstream.RedactedUpstream{ID: "openai", Name: "OpenAI Display", BaseURL: cfg.Upstreams["openai"].BaseURL, HasAPIKey: true}}
+	if got != want {
+		t.Fatalf("bad worker summary:\nwant %#v\ngot  %#v", want, got)
+	}
+}
+
+func TestManagerWorkerSummaryReportsMissingUpstream(t *testing.T) {
+	cfg := testManagerConfig()
+	worker := cfg.Workers["app"]
+	worker.UpstreamID = "missing-upstream"
+	worker.Upstream = ""
+	cfg.Workers["app"] = worker
+	delete(cfg.Upstreams, "openai")
+
+	m := New(Config{Config: cfg})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Workers) != 1 {
+		t.Fatalf("expected one worker, got %#v", body.Workers)
+	}
+	want := upstream.RedactedUpstream{ID: "missing-upstream", Name: "missing-upstream", Missing: true}
+	if body.Workers[0].Upstream != want {
+		t.Fatalf("bad missing upstream:\nwant %#v\ngot  %#v", want, body.Workers[0].Upstream)
+	}
+}
+
+func testManagerConfig() config.Config {
+	return config.Config{
+		Plugins: testPluginDefinitions(),
+		Workers: map[string]config.WorkerConfig{
+			"app": {Port: 6767, Upstream: "openai"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "sk-file"},
+		},
+	}
+}
+
 func TestManagerAPITogglesConfiguredWorkerModule(t *testing.T) {
 	client := &recordingWorkerClient{}
 	m := New(Config{
@@ -1586,11 +1670,13 @@ func TestManagerAPIWorkerSummaryAndDetailIncludeProxyURL(t *testing.T) {
 	}{
 		Workers: []WorkerSummary{
 			{
+				ID:                 "app",
 				Name:               "app",
 				Port:               6767,
 				Role:               "cli",
 				Launcher:           "codex",
-				Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
+				UpstreamID:         "openai",
+				Upstream:           upstream.RedactedUpstream{ID: "openai", Name: "openai", BaseURL: "https://api.openai.com/v1"},
 				ProxyURL:           "http://127.0.0.1:7890",
 				ProxyURLRedacted:   true,
 				Protocol:           appruntime.ProtocolResponses,
@@ -1618,11 +1704,13 @@ func TestManagerAPIWorkerSummaryAndDetailIncludeProxyURL(t *testing.T) {
 		t.Fatalf("worker detail leaked proxy credentials: %s", res.Body.String())
 	}
 	wantDetail := WorkerDetail{
+		ID:                 "app",
 		Name:               "app",
 		Port:               6767,
 		Role:               "cli",
 		Launcher:           "codex",
-		Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
+		UpstreamID:         "openai",
+		Upstream:           upstream.RedactedUpstream{ID: "openai", Name: "openai", BaseURL: "https://api.openai.com/v1"},
 		ProxyURL:           "http://127.0.0.1:7890",
 		ProxyURLRedacted:   true,
 		Protocol:           appruntime.ProtocolResponses,
@@ -1710,10 +1798,12 @@ func TestManagerAPIPatchesRunningWorkerProxyURL(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	wantConfig := config.WorkerConfig{
+		Name:           "cli",
 		Role:           "cli",
 		Launcher:       "codex",
 		Port:           11199,
 		Upstream:       "openai",
+		UpstreamID:     "openai",
 		ProxyURL:       "http://127.0.0.1:7890",
 		LogLevel:       "simple",
 		RequestModules: map[string]config.ModuleConfig{},
@@ -1772,10 +1862,12 @@ func TestManagerAPIRejectsInvalidWorkerProxyURL(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	wantConfig := config.WorkerConfig{
+		Name:           "cli",
 		Role:           "cli",
 		Launcher:       "codex",
 		Port:           11199,
 		Upstream:       "openai",
+		UpstreamID:     "openai",
 		ProxyURL:       "http://127.0.0.1:7890",
 		LogLevel:       "simple",
 		RequestModules: map[string]config.ModuleConfig{},
@@ -1820,10 +1912,12 @@ func TestManagerAPIPreservesWorkerProxyURLWhenPatchOmitsField(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	wantConfig := config.WorkerConfig{
+		Name:           "cli",
 		Role:           "cli",
 		Launcher:       "codex",
 		Port:           11199,
 		Upstream:       "openai",
+		UpstreamID:     "openai",
 		ProxyURL:       "http://127.0.0.1:7890",
 		LogLevel:       "detail",
 		RequestModules: map[string]config.ModuleConfig{},
@@ -1972,11 +2066,13 @@ func TestManagerAPIPatchesRunningWorkerLogLevelWithoutRecheckingCurrentPort(t *t
 		t.Fatal("worker config missing")
 	}
 	want := config.WorkerConfig{
-		Role:     "cli",
-		Launcher: "codex",
-		Port:     port,
-		Upstream: "openai",
-		LogLevel: "detail",
+		Name:       "cli",
+		Role:       "cli",
+		Launcher:   "codex",
+		Port:       port,
+		Upstream:   "openai",
+		UpstreamID: "openai",
+		LogLevel:   "detail",
 		RequestModules: map[string]config.ModuleConfig{
 			"api_translate": {Enabled: true},
 		},
@@ -2020,11 +2116,13 @@ func TestManagerAPIPatchWorkerRejectsUndefinedPluginBeforePersisting(t *testing.
 		t.Fatal("worker config missing")
 	}
 	want := config.WorkerConfig{
-		Role:     "cli",
-		Launcher: "codex",
-		Port:     11199,
-		Upstream: "openai",
-		LogLevel: "simple",
+		Name:       "cli",
+		Role:       "cli",
+		Launcher:   "codex",
+		Port:       11199,
+		Upstream:   "openai",
+		UpstreamID: "openai",
+		LogLevel:   "simple",
 		RequestModules: map[string]config.ModuleConfig{
 			"api_translate": {Enabled: true},
 		},
@@ -2106,11 +2204,13 @@ func TestManagerAPIPatchesUnconfiguredWorkerModuleWithRuntimeApply(t *testing.T)
 	}
 
 	wantWorker := config.WorkerConfig{
-		Role:     "cli",
-		Launcher: "codex",
-		Port:     6767,
-		Upstream: "openai",
-		LogLevel: "simple",
+		Name:       "app",
+		Role:       "cli",
+		Launcher:   "codex",
+		Port:       6767,
+		Upstream:   "openai",
+		UpstreamID: "openai",
+		LogLevel:   "simple",
 		RequestModules: map[string]config.ModuleConfig{
 			"model_override": {Enabled: true, Params: map[string]any{"model": "gpt-live"}},
 		},
@@ -2368,10 +2468,12 @@ func TestManagerAPICreatesClaudeCodeWorker(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	want := config.WorkerConfig{
+		Name:           "claude-main",
 		Role:           "cli",
 		Launcher:       "claudecode",
 		Port:           11201,
 		Upstream:       "anthropic",
+		UpstreamID:     "anthropic",
 		LogLevel:       "simple",
 		RequestModules: map[string]config.ModuleConfig{},
 		Hooks:          map[string]config.ModuleConfig{},
@@ -2415,10 +2517,12 @@ func TestManagerAPICreatesWorkerWithAllocatedPort(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	want := config.WorkerConfig{
+		Name:           "cli-openai",
 		Role:           "cli",
 		Launcher:       "codex",
 		Port:           summary.Port,
 		Upstream:       "openai",
+		UpstreamID:     "openai",
 		LogLevel:       "simple",
 		RequestModules: map[string]config.ModuleConfig{},
 		Hooks:          map[string]config.ModuleConfig{},
@@ -2599,10 +2703,12 @@ func TestManagerAPIWorkerPortUpdateRejectsActiveHostedSession(t *testing.T) {
 		t.Fatal("worker config missing")
 	}
 	want := config.WorkerConfig{
+		Name:           "cli-openai",
 		Role:           "cli",
 		Launcher:       "codex",
 		Port:           11199,
 		Upstream:       "openai",
+		UpstreamID:     "openai",
 		LogLevel:       "simple",
 		RequestModules: map[string]config.ModuleConfig{},
 		Hooks:          map[string]config.ModuleConfig{},

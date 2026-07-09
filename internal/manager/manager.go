@@ -70,10 +70,12 @@ type Manager struct {
 }
 
 type WorkerSummary struct {
+	ID                 string                                      `json:"id"`
 	Name               string                                      `json:"name"`
 	Port               int                                         `json:"port"`
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
+	UpstreamID         string                                      `json:"upstream_id"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -128,10 +130,12 @@ type WorkerStatus struct {
 }
 
 type WorkerDetail struct {
+	ID                 string                                      `json:"id"`
 	Name               string                                      `json:"name"`
 	Port               int                                         `json:"port"`
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
+	UpstreamID         string                                      `json:"upstream_id"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -274,7 +278,11 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 	seeds := make([]summarySeed, 0, len(names))
 	for _, name := range names {
 		worker := m.config.Workers[name]
-		profile, ok := m.config.Upstreams[worker.Upstream]
+		upstreamID := worker.UpstreamID
+		if upstreamID == "" {
+			upstreamID = worker.Upstream
+		}
+		profile, ok := m.config.Upstreams[upstreamID]
 		seeds = append(seeds, summarySeed{
 			name:          name,
 			worker:        cloneWorkerConfig(worker),
@@ -289,16 +297,28 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 
 	out := make([]WorkerSummary, 0, len(seeds))
 	for _, seed := range seeds {
-		runtimeUpstream := upstream.RuntimeUpstream{Name: seed.worker.Upstream}
+		upstreamID := seed.worker.UpstreamID
+		if upstreamID == "" {
+			upstreamID = seed.worker.Upstream
+		}
+		displayName := seed.worker.Name
+		if displayName == "" {
+			displayName = seed.name
+		}
+		redactedUpstream := upstream.MissingRedacted(upstreamID)
+		runtimeUpstream := upstream.RuntimeUpstream{ID: upstreamID, Name: upstreamID}
 		if seed.providerFound {
-			runtimeUpstream, _ = upstream.Resolve(seed.worker.Upstream, seed.profile)
+			runtimeUpstream, _ = upstream.ResolveWithDisplayName(upstreamID, seed.profile.Name, seed.profile)
+			redactedUpstream = runtimeUpstream.Redacted()
 		}
 		summary := WorkerSummary{
-			Name:               seed.name,
+			ID:                 seed.name,
+			Name:               displayName,
 			Port:               seed.worker.Port,
 			Role:               seed.worker.Role,
 			Launcher:           seed.worker.Launcher,
-			Upstream:           runtimeUpstream.Redacted(),
+			UpstreamID:         upstreamID,
+			Upstream:           redactedUpstream,
 			ProxyURL:           appruntime.RedactProxyURL(seed.worker.ProxyURL),
 			ProxyURLRedacted:   appruntime.ProxyURLRedacted(seed.worker.ProxyURL),
 			Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
@@ -326,17 +346,29 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 }
 
 func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDetail {
-	runtimeUpstream := upstream.RuntimeUpstream{Name: worker.Upstream}
-	if profile, ok := m.upstreamProfileSnapshot()[worker.Upstream]; ok {
-		runtimeUpstream, _ = upstream.Resolve(worker.Upstream, profile)
+	upstreamID := worker.UpstreamID
+	if upstreamID == "" {
+		upstreamID = worker.Upstream
+	}
+	displayName := worker.Name
+	if displayName == "" {
+		displayName = name
+	}
+	redactedUpstream := upstream.MissingRedacted(upstreamID)
+	runtimeUpstream := upstream.RuntimeUpstream{ID: upstreamID, Name: upstreamID}
+	if profile, ok := m.upstreamProfileSnapshot()[upstreamID]; ok {
+		runtimeUpstream, _ = upstream.ResolveWithDisplayName(upstreamID, profile.Name, profile)
+		redactedUpstream = runtimeUpstream.Redacted()
 	}
 
 	detail := WorkerDetail{
-		Name:               name,
+		ID:                 name,
+		Name:               displayName,
 		Port:               worker.Port,
 		Role:               worker.Role,
 		Launcher:           worker.Launcher,
-		Upstream:           runtimeUpstream.Redacted(),
+		UpstreamID:         upstreamID,
+		Upstream:           redactedUpstream,
 		ProxyURL:           appruntime.RedactProxyURL(worker.ProxyURL),
 		ProxyURLRedacted:   appruntime.ProxyURLRedacted(worker.ProxyURL),
 		Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
@@ -365,6 +397,9 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		detail.SnapshotGeneration = status.SnapshotGeneration
 	}
 	if status.Upstream.Name != "" {
+		if status.Upstream.ID == "" {
+			status.Upstream.ID = upstreamID
+		}
 		detail.Upstream = status.Upstream
 	}
 	detail.ProxyURL = status.ProxyURL
@@ -449,9 +484,9 @@ func (m *Manager) resolveUpstream(name string) (upstream.RuntimeUpstream, error)
 	profile, ok := m.config.Upstreams[name]
 	m.mu.RUnlock()
 	if !ok {
-		return upstream.RuntimeUpstream{Name: name}, fmt.Errorf("upstream %q not found", name)
+		return upstream.RuntimeUpstream{ID: name, Name: name}, fmt.Errorf("upstream %q not found", name)
 	}
-	return upstream.Resolve(name, profile)
+	return upstream.ResolveWithDisplayName(name, profile.Name, profile)
 }
 
 func (m *Manager) pluginDefinitionsSnapshot() map[string]config.PluginDefinition {
@@ -1232,7 +1267,11 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 	targets := []liveWorkerTarget{}
 	for workerName, worker := range m.config.Workers {
-		if worker.Upstream != upstreamName || m.workerStatusLocked(workerName) != WorkerStateRunning {
+		upstreamID := worker.UpstreamID
+		if upstreamID == "" {
+			upstreamID = worker.Upstream
+		}
+		if upstreamID != upstreamName || m.workerStatusLocked(workerName) != WorkerStateRunning {
 			continue
 		}
 		targets = append(targets, liveWorkerTarget{name: workerName, port: worker.Port})
@@ -1274,10 +1313,12 @@ func buildPortIndex(workers map[string]config.WorkerConfig) map[int]string {
 
 func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
 	return config.WorkerConfig{
+		Name:           worker.Name,
 		Role:           worker.Role,
 		Launcher:       worker.Launcher,
 		Port:           worker.Port,
 		Upstream:       worker.Upstream,
+		UpstreamID:     worker.UpstreamID,
 		ProxyURL:       worker.ProxyURL,
 		LogLevel:       workerLogLevel(worker),
 		RequestModules: cloneModules(worker.RequestModules),
