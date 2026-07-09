@@ -158,7 +158,6 @@ test("proxy settings editor patches settings through manager API", async () => {
 
 test("proxy settings shows metrics persistence rows", async () => {
   const app = await mountProxyApp()
-  const metricsPersistRowOffset = 8
 
   try {
     app.api.keymap.dispatchCommand("proxy.settings")
@@ -167,7 +166,7 @@ test("proxy settings shows metrics persistence rows", async () => {
       const frame = app.frame()
       return frame.includes("Settings") && frame.includes("State Dir")
     })
-    for (let i = 0; i < metricsPersistRowOffset; i++) {
+    for (let i = 0; i < 20 && !app.frame().includes("Metrics Persist enabled"); i++) {
       app.api.keymap.dispatchCommand("dialog.select.next")
       await app.render()
     }

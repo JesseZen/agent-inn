@@ -71,6 +71,7 @@ export type SyncStore = {
   workers: WorkerSummary[]
   upstreams: RedactedUpstream[]
   upstreamProbes: Record<string, UpstreamProbeResult>
+  metrics_generation: number
   manager_config: ProxyConfig
   config_status: ProxyConfigStatus | undefined
   error?: string

@@ -1,7 +1,8 @@
-import { createMemo, createSignal, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onMount } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useSDK, type MetricsRangeName, type MetricsResponse } from "../context/sdk"
+import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import { DialogWorkerStatus } from "./dialog-worker-status"
 
@@ -22,6 +23,7 @@ function formatTokens(value: number) {
 
 export function DialogMetrics() {
   const sdk = useSDK()
+  const sync = useSync()
   const dialog = useDialog()
   const toast = useToast()
   const [range, setRange] = createSignal<MetricsRangeName>("today")
@@ -39,6 +41,16 @@ export function DialogMetrics() {
   onMount(() => {
     void loadMetrics("today")
   })
+
+  createEffect(
+    on(
+      () => sync.data.metrics_generation,
+      () => {
+        void loadMetrics(range())
+      },
+      { defer: true },
+    ),
+  )
 
   const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => [
     ...RANGES.map((item) => ({

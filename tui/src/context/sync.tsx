@@ -81,6 +81,7 @@ export const {
       workers: [],
       upstreams: [],
       upstreamProbes: {},
+      metrics_generation: 0,
       manager_config: {},
       config_status: undefined,
       error: undefined,
@@ -293,6 +294,7 @@ export const {
             return
           }
           if (event.type === "metrics.updated") {
+            setStore("metrics_generation", (generation) => generation + 1)
             void refreshManagerData().catch((error) => {
               setStore("error", error instanceof Error ? error.message : String(error))
             })

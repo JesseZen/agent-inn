@@ -151,6 +151,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       upstream: { ...worker.upstream, id: worker.upstream.id ?? upstreamID },
     })
   }
+  const metrics = { tpm: 20, total_tokens: 20 }
   const config: {
     status: ProxyConfigStatus
     settings: ProxySettings
@@ -267,8 +268,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           port: 6767,
           status: "running",
           upstream: "openai",
-          live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: 20, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 20, unknown_usage_requests: 0 },
-          totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: 20, unknown_usage_requests: 0 },
+          live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: metrics.tpm, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: metrics.total_tokens, unknown_usage_requests: 0 },
+          totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: metrics.total_tokens, unknown_usage_requests: 0 },
         }],
         skipped_records: 0,
       })
@@ -330,6 +331,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     return undefined
   })
 
+  let managerEvents: ReadableStreamDefaultController<Uint8Array> | undefined
+  const managerEventEncoder = new TextEncoder()
   const override = (async (requestInput: RequestInfo | URL, init?: RequestInit) => {
     const request = requestInput instanceof Request ? requestInput : undefined
     const url = new URL(request ? request.url : String(requestInput))
@@ -646,7 +649,11 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
 
     if (url.pathname === "/api/events") {
-      return new Response("", {
+      return new Response(new ReadableStream({
+        start(controller) {
+          managerEvents = controller
+        },
+      }), {
         headers: { "content-type": "text/event-stream" },
       })
     }
@@ -654,7 +661,16 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     return fetch.fetch(requestInput, init)
   }) as typeof fetch.fetch
 
-  return { calls, fetch: override, hostedSessions }
+  return {
+    calls,
+    fetch: override,
+    hostedSessions,
+    metrics,
+    emitManagerEvent(type: string, payload: Record<string, unknown> = {}) {
+      if (!managerEvents) throw new Error("manager event source not ready")
+      managerEvents.enqueue(managerEventEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`))
+    },
+  }
 }
 
 export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Record<string, string> } = {}) {
@@ -724,7 +740,9 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
   return {
     api,
     calls: proxy.calls,
+    emitManagerEvent: proxy.emitManagerEvent,
     hostedSessions: proxy.hostedSessions,
+    metrics: proxy.metrics,
     setup,
     frame() {
       return setup.captureCharFrame()
