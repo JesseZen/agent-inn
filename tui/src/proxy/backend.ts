@@ -129,8 +129,14 @@ export type HostedTurnState = "idle" | "running" | "done" | "failed" | "interrup
 export type HostedSessionRecord = {
   session_id: string
   session_label: string
+  worker_id?: string
   worker_name: string
   worker_port: number
+  worker?: {
+    id: string
+    name: string
+    missing?: boolean
+  }
   workspace?: string
   model?: string
   add_dirs?: string[]

@@ -9,7 +9,7 @@ import { launchProxySession } from "./launch"
 import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
-import type { HostedSessionSummary } from "./backend"
+import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
 import { Global } from "@agent-inn/core/global"
 import { useWorkerFrecency } from "./worker-frecency-context"
 
@@ -24,6 +24,10 @@ type HostedTerminalOption =
       type: "session"
       session: HostedSessionSummary
     }
+
+function sessionWorkerID(session: HostedSessionRecord) {
+  return session.worker_id ?? session.worker_name
+}
 
 export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[] } = {}) {
   const sdk = useSDK()
@@ -55,12 +59,15 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       description: "Delete a hosted terminal session",
       category: "Action",
     },
-    ...sessions().map((session) => ({
-      title: session.session_label,
-      value: { type: "session" as const, session },
-      description: `${session.worker_name} • ${session.status}`,
-      category: "Existing sessions",
-    })),
+    ...sessions().map((session) => {
+      const worker = session.worker?.missing ? `missing worker: ${session.worker_id}` : session.worker?.name ?? session.worker_name
+      return {
+        title: session.session_label,
+        value: { type: "session" as const, session },
+        description: `${worker} • ${session.status}`,
+        category: "Existing sessions",
+      }
+    }),
   ])
 
   async function createSession() {
@@ -108,7 +115,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
             const launched = await launchProxySession({
               executable: import.meta.env?.AINN_EXECUTABLE || undefined,
               workerPort: worker.port,
-              profile: worker.name,
+              profile: worker.id,
               configDir: Global.Path.config,
               workspace: workspace || undefined,
               mode: "hosted-terminal",
@@ -117,7 +124,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxSocketName: settings.settings.terminal.tmux.socket_name,
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
-            if (launched) workerFrecency.record(worker.name)
+            if (launched) workerFrecency.record(worker.id)
             await refreshSessions()
             dialog.pop()
           } catch (err) {
@@ -129,7 +136,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   }
 
   function changeSessionWorker(session: HostedSessionSummary) {
-    const currentWorker = sync.data.workers.find((worker) => worker.name === session.worker_name)
+    const currentWorkerID = sessionWorkerID(session)
+    const currentWorker = sync.data.workers.find((worker) => worker.id === currentWorkerID)
     const currentLauncher = currentWorker?.launcher ?? "codex"
     const workers = sync.data.workers.filter((worker) => (worker.launcher ?? "codex") === currentLauncher)
     dialog.push(() => (
@@ -139,7 +147,22 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         workers={workers}
         onSelect={async (worker) => {
           try {
-            await sdk.client.patchHostedSession(session.session_id, { worker_name: worker.name })
+            const updated = await sdk.client.patchHostedSession(session.session_id, { worker_id: worker.id })
+            if (session.status === "active" && session.turn_state !== "running") {
+              const settings = await sdk.client.getSettings()
+              const launched = await launchProxySession({
+                executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+                workerPort: worker.port,
+                profile: worker.id,
+                configDir: Global.Path.config,
+                mode: "hosted-terminal",
+                sessionID: updated.session_id,
+                opener: settings.settings.terminal.opener,
+                tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+                tmuxHostSession: settings.settings.terminal.tmux.host_session,
+              })
+              if (launched) workerFrecency.record(worker.id)
+            }
             await refreshSessions()
             dialog.pop()
           } catch (err) {
@@ -169,11 +192,12 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   async function duplicateSession(session: HostedSessionSummary) {
     try {
       const duplicated = await sdk.client.duplicateHostedSession(session.session_id)
+      const duplicatedWorkerID = sessionWorkerID(duplicated)
       const settings = await sdk.client.getSettings()
       const launched = await launchProxySession({
         executable: import.meta.env?.AINN_EXECUTABLE || undefined,
         workerPort: duplicated.worker_port,
-        profile: duplicated.worker_name,
+        profile: duplicatedWorkerID,
         configDir: Global.Path.config,
         mode: "hosted-terminal",
         sessionID: duplicated.session_id,
@@ -181,7 +205,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         tmuxSocketName: settings.settings.terminal.tmux.socket_name,
         tmuxHostSession: settings.settings.terminal.tmux.host_session,
       })
-      if (launched) workerFrecency.record(duplicated.worker_name)
+      if (launched) workerFrecency.record(duplicatedWorkerID)
       await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, "Duplicate hosted session failed", String(err instanceof Error ? err.message : err))
@@ -206,7 +230,11 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         {
           command: "session.change_worker",
           title: "worker",
-          hidden: (option) => option?.value.type !== "session" || option.value.session.status !== "stale",
+          hidden: (option) => {
+            if (option?.value.type !== "session") return true
+            const session = option.value.session
+            return session.turn_state === "running"
+          },
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             changeSessionWorker(option.value.session)
@@ -282,12 +310,13 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           return
         }
         const session = option.value.session
+        const currentWorkerID = sessionWorkerID(session)
         void sdk.client.getSettings().then(async (settings) => {
           try {
             const launched = await launchProxySession({
               executable: import.meta.env?.AINN_EXECUTABLE || undefined,
               workerPort: session.worker_port,
-              profile: session.worker_name,
+              profile: currentWorkerID,
               configDir: Global.Path.config,
               mode: "hosted-terminal",
               sessionID: session.session_id,
@@ -295,7 +324,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxSocketName: settings.settings.terminal.tmux.socket_name,
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
-            if (launched) workerFrecency.record(session.worker_name)
+            if (launched) workerFrecency.record(currentWorkerID)
           } catch (err) {
             await DialogAlert.show(dialog, "Open hosted session failed", String(err instanceof Error ? err.message : err))
           }

@@ -32,6 +32,8 @@ test("computeLayout places upstream above single worker", () => {
 
   expect(layout.groups).toHaveLength(1)
   const group = layout.groups[0]
+  expect(group.upstream.id).toBe("upstream:openai")
+  expect(group.workers[0].id).toBe("worker:app")
   expect(group.upstream).toEqual({
     id: "upstream:openai",
     kind: "upstream",
@@ -79,6 +81,47 @@ test("computeLayout places upstream above single worker", () => {
   expect(layout.groupRows).toEqual([{ groups: [group], width: 17 }])
   expect(layout.orphans).toEqual([])
   expect(layout.orphanRows).toEqual([])
+})
+
+test("computeLayout uses stable ids while displaying names", () => {
+  const upstream = { ...makeUpstream("openai"), id: "upstream-openai", name: "OpenAI Main" }
+  const worker = { ...makeWorker("Codex Main", upstream), id: "worker-app", upstream_id: "upstream-openai" }
+  const layout = computeLayout([worker], [upstream])
+  expect(layout.groups[0].upstream.id).toBe("upstream:upstream-openai")
+  expect(layout.groups[0].upstream.label).toBe("OpenAI Main")
+  expect(layout.groups[0].workers[0].id).toBe("worker:worker-app")
+  expect(layout.groups[0].workers[0].label).toBe("Codex Main")
+})
+
+test("computeLayout groups missing upstream workers by stable upstream id", () => {
+  const missingUpstream = { ...makeUpstream("Missing Display"), id: "openai", missing: true }
+  const worker = { ...makeWorker("app", missingUpstream), upstream_id: "openai" }
+  const layout = computeLayout([worker], [])
+
+  expect(layout.groups).toHaveLength(1)
+  expect(layout.groups[0].upstream.id).toBe("upstream:openai")
+  expect(layout.groups[0].upstream.label).toBe("Missing Display")
+  expect(layout.groups[0].workers[0].id).toBe("worker:app")
+})
+
+test("computeLayout groups workers through upstream_id over stale embedded upstream summaries", () => {
+  const upstream = { ...makeUpstream("openai"), id: "canonical-openai", name: "OpenAI Current" }
+  const staleUpstream = { ...makeUpstream("openai"), id: "stale-openai", name: "OpenAI Stale" }
+  const worker = { ...makeWorker("app", staleUpstream), upstream_id: "canonical-openai" }
+  const layout = computeLayout([worker], [upstream])
+
+  expect(layout.groups[0].upstream).toEqual({
+    id: "upstream:canonical-openai",
+    kind: "upstream",
+    label: "OpenAI Current",
+    meta: "1",
+    displayLabel: "OpenAI Current",
+    displayMeta: "1",
+    width: 22,
+    height: 3,
+    data: upstream,
+  })
+  expect(layout.orphans).toEqual([])
 })
 
 test("computeLayout sets group width to fit multiple workers", () => {

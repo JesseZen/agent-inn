@@ -289,6 +289,38 @@ test("hosted terminal delete page still deletes selected session on enter", asyn
   }
 })
 
+test("hosted terminal delete page displays missing worker", async () => {
+  const app = await setupHostedTerminal([
+    {
+      ...staleHostedSessionA,
+      session_label: "solve problem A",
+      worker_id: "orphan-worker",
+      worker_name: "legacy orphan",
+      worker: { id: "orphan-worker", name: "legacy orphan", missing: true },
+    },
+  ])
+
+  try {
+    await app.openHostedTerminal()
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Delete Hosted Session")
+    })
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Delete Hosted Session") && frame.includes("missing worker: orphan-worker")
+    })
+
+    await app.close()
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
 test("hosted terminal delete page escape returns to hosted terminal picker", async () => {
   const app = await setupHostedTerminal()
 

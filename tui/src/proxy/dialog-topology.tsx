@@ -81,11 +81,11 @@ export function DialogTopology() {
     const { worker, upstream } = toDropPair(source, target)
     const workerData = worker.data as WorkerSummary
     const upstreamData = upstream.data as RedactedUpstream
-    if (workerData.upstream.name === upstreamData.name) return
+    if (workerData.upstream_id === upstreamData.id) return
     try {
-      await sdk.client.patchWorker(workerData.port, { upstream: upstreamData.name })
+      await sdk.client.patchWorker(workerData.id, { upstream_id: upstreamData.id })
       await sync.bootstrap({ fatal: false })
-      toast.show({ message: `Switched ${workerData.name} → ${upstreamData.name}`, variant: "success" })
+      toast.show({ message: `Switched ${workerData.name} -> ${upstreamData.name}`, variant: "success" })
     } catch (err) {
       toast.error(err)
     }

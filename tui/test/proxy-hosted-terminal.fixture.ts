@@ -16,10 +16,12 @@ export async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000)
 }
 
 export const defaultWorker = {
+  id: "test-cli",
   name: "test-cli",
+  upstream_id: "test",
   port: 1234,
   role: "cli",
-  upstream: { name: "test", base_url: "", has_api_key: false },
+  upstream: { id: "test", name: "test", base_url: "", has_api_key: false },
   status: "running",
   snapshot_generation: 0,
   log_level: "info",
@@ -28,6 +30,7 @@ export const defaultWorker = {
 export const activeHostedSession = {
   session_id: "hs_1",
   session_label: "solve problem A",
+  worker_id: "test-cli",
   worker_name: "test-cli",
   worker_port: 1234,
   created_at: "2026-06-23T00:00:00Z",
@@ -38,6 +41,7 @@ export const activeHostedSession = {
 export const staleHostedSessionA = {
   session_id: "hs_2",
   session_label: "stale problem A",
+  worker_id: "test-cli",
   worker_name: "test-cli",
   worker_port: 1234,
   created_at: "2026-06-23T00:00:00Z",
@@ -48,6 +52,7 @@ export const staleHostedSessionA = {
 export const staleHostedSessionB = {
   session_id: "hs_3",
   session_label: "stale problem B",
+  worker_id: "test-cli",
   worker_name: "test-cli",
   worker_port: 1234,
   created_at: "2026-06-23T00:00:00Z",

@@ -75,6 +75,7 @@ function fitNodeDisplay(label: string, meta: string, availableWidth: number) {
 
 function makeNode(
   kind: "upstream" | "worker",
+  rawId: string,
   label: string,
   meta: string,
   data: WorkerSummary | RedactedUpstream,
@@ -82,7 +83,7 @@ function makeNode(
 ): TopologyNode {
   const { displayLabel, displayMeta } = fitNodeDisplay(label, meta, availableWidth)
   return {
-    id: `${kind}:${label}`,
+    id: `${kind}:${rawId}`,
     kind,
     label,
     meta,
@@ -141,14 +142,15 @@ type Group = {
   workers: WorkerSummary[]
 }
 
-function groupWorkers(workers: WorkerSummary[]): Group[] {
+function groupWorkers(workers: WorkerSummary[], upstreams: RedactedUpstream[]): Group[] {
+  const upstreamByID = new Map(upstreams.map((upstream) => [upstream.id, upstream]))
   const map = new Map<string, Group>()
   for (const worker of workers) {
-    const name = worker.upstream.name
-    let group = map.get(name)
+    const upstreamID = worker.upstream_id
+    let group = map.get(upstreamID)
     if (!group) {
-      group = { upstream: worker.upstream, workers: [] }
-      map.set(name, group)
+      group = { upstream: upstreamByID.get(upstreamID) ?? worker.upstream, workers: [] }
+      map.set(upstreamID, group)
     }
     group.workers.push(worker)
   }
@@ -156,8 +158,8 @@ function groupWorkers(workers: WorkerSummary[]): Group[] {
 }
 
 function orphanUpstreams(upstreams: RedactedUpstream[], groups: Group[]): RedactedUpstream[] {
-  const used = new Set(groups.map((g) => g.upstream.name))
-  return upstreams.filter((u) => !used.has(u.name))
+  const used = new Set(groups.map((g) => g.upstream.id))
+  return upstreams.filter((u) => !used.has(u.id))
 }
 
 export function computeLayout(
@@ -169,11 +171,11 @@ export function computeLayout(
     return { groups: [], groupRows: [], orphans: [], orphanRows: [], rows: 0 }
   }
 
-  const rawGroups = groupWorkers(workers)
+  const rawGroups = groupWorkers(workers, upstreams)
   const orphans = orphanUpstreams(upstreams, rawGroups)
   const groups: TopologyGroup[] = rawGroups.map((group) => {
-    const upstreamNode = makeNode("upstream", group.upstream.name, `${group.workers.length}`, group.upstream, availableWidth)
-    const workerNodes = group.workers.map((w) => makeNode("worker", w.name, w.status, w, availableWidth))
+    const upstreamNode = makeNode("upstream", group.upstream.id, group.upstream.name, `${group.workers.length}`, group.upstream, availableWidth)
+    const workerNodes = group.workers.map((w) => makeNode("worker", w.id, w.name, w.status, w, availableWidth))
     const workerRows = packNodes(workerNodes, availableWidth).map((row) => ({
       workers: row,
       width: nodeRowWidth(row),
@@ -187,7 +189,7 @@ export function computeLayout(
     }
   })
 
-  const orphanNodes = orphans.map((u) => makeNode("upstream", u.name, "idle", u, availableWidth))
+  const orphanNodes = orphans.map((u) => makeNode("upstream", u.id, u.name, "idle", u, availableWidth))
   const groupRows = packGroups(groups, availableWidth)
   const orphanRows = packNodes(orphanNodes, availableWidth)
   const connectedRows = groupRows.reduce((sum, row) => {

@@ -302,6 +302,49 @@ test("launch dialog opens hosted terminal session menu", async () => {
   }
 })
 
+test("hosted terminal picker displays backend worker summary and missing worker", async () => {
+  const app = await mountHostedTerminalApp((url) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions")
+      return json({
+        sessions: [
+          {
+            ...activeHostedSession,
+            worker_id: "worker-id",
+            worker_name: "legacy worker",
+            worker: { id: "worker-id", name: "Worker Summary" },
+          },
+          {
+            ...staleHostedSessionA,
+            worker_id: "orphan-worker",
+            worker_name: "legacy orphan",
+            worker: { id: "orphan-worker", name: "legacy orphan", missing: true },
+          },
+        ],
+      })
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Worker Summary • active")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.end")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("missing worker: orphan-worker")
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("hosted terminal create returns to refreshed session list", async () => {
   const originalPath = process.env.PATH
   const originalExecutable = process.env.AINN_EXECUTABLE
@@ -459,11 +502,12 @@ test("hosted terminal duplicate label alert returns to worker picker", async () 
 test("stale hosted session changes worker from session list", async () => {
   const localWorker = {
     ...defaultWorker,
+    id: "local-cli",
     name: "local-cli",
-    port: 5678,
+    port: 11200,
   }
-  const patches: Array<{ session_id: string; worker_name: string }> = []
-  let sessions: HostedSessionSummary[] = [{ ...staleHostedSessionA }]
+  const patches: Array<{ session_id: string; worker_id: string }> = []
+  let sessions: HostedSessionSummary[] = [{ ...staleHostedSessionA, worker_id: "test-cli" }]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -474,17 +518,18 @@ test("stale hosted session changes worker from session list", async () => {
         sessions,
       })
     if (url.pathname === "/api/hosted-sessions/hs_2" && request.method === "PATCH") {
-      const body = (await request.json()) as { worker_name: string }
-      patches.push({ session_id: "hs_2", worker_name: body.worker_name })
+      const body = (await request.json()) as { worker_id: string }
+      patches.push({ session_id: "hs_2", worker_id: body.worker_id })
       sessions = sessions.map((session) =>
         session.session_id === "hs_2"
-          ? { ...session, worker_name: body.worker_name, worker_port: localWorker.port }
+          ? { ...session, worker_id: body.worker_id, worker_name: localWorker.name, worker_port: localWorker.port }
           : session,
       )
       const updated = sessions[0]
       return json({
         session_id: updated.session_id,
         session_label: updated.session_label,
+        worker_id: updated.worker_id,
         worker_name: updated.worker_name,
         worker_port: updated.worker_port,
         created_at: updated.created_at,
@@ -517,7 +562,95 @@ test("stale hosted session changes worker from session list", async () => {
       return patches.length === 1 && frame.includes("Hosted Terminal") && frame.includes("local-cli • stale")
     })
 
-    expect(patches).toEqual([{ session_id: "hs_2", worker_name: "local-cli" }])
+    expect(patches).toEqual([{ session_id: "hs_2", worker_id: "local-cli" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("active non-running hosted session changes worker and reopens same session", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      const child = {
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") queueMicrotask(() => handler(0))
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  const localWorker = {
+    ...defaultWorker,
+    id: "local-cli",
+    name: "local-cli",
+    port: 11200,
+  }
+  const patches: Array<{ session_id: string; worker_id: string }> = []
+  let sessions: HostedSessionSummary[] = [
+    {
+      ...activeHostedSession,
+      session_id: "hs_active",
+      worker_id: "test-cli",
+      turn_state: "done",
+    },
+  ]
+  const app = await mountHostedTerminalApp(async (url, request) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker, localWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
+      return json({
+        sessions,
+      })
+    if (url.pathname === "/api/hosted-sessions/hs_active" && request.method === "PATCH") {
+      const body = (await request.json()) as { worker_id: string }
+      patches.push({ session_id: "hs_active", worker_id: body.worker_id })
+      sessions = sessions.map((session) =>
+        session.session_id === "hs_active"
+          ? { ...session, worker_id: body.worker_id, worker_name: localWorker.name, worker_port: localWorker.port }
+          : session,
+      )
+      return json(sessions[0])
+    }
+    return undefined
+  })
+
+  try {
+    await app.openHostedTerminalPicker()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("solve problem A")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("session.change_worker")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Change worker") && frame.includes("local-cli")
+    })
+    app.api().keymap.dispatchCommand("dialog.select.next")
+    app.api().keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return spawns.some((spawned) =>
+        spawned.cmd.endsWith("ainn") &&
+        spawned.args.join(" ") ===
+          "launch --worker 11200 --mode hosted-terminal --no-attach --profile local-cli --config-dir " +
+            Global.Path.config +
+            " --session-id hs_active"
+      )
+    })
+
+    expect(patches).toEqual([{ session_id: "hs_active", worker_id: "local-cli" }])
   } finally {
     await app.cleanup()
   }

@@ -1211,7 +1211,12 @@ test("topology dialog click on upstream navigates to upstream editor", async () 
 })
 
 test("topology dialog drag worker to upstream calls patchWorker", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({
+    upstreams: [
+      { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+      { id: "anthropic-id", name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true, api_format: "anthropic" },
+    ],
+  })
 
   try {
     app.api.keymap.dispatchCommand("proxy.topology")
@@ -1222,7 +1227,8 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic", log_level: "simple" })
+    expect(app.calls.getWorkerRoute).toContain("app")
+    expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic-id", log_level: "simple" })
   } finally {
     await app.cleanup()
   }
@@ -1249,7 +1255,12 @@ test("topology dialog does not start a text selection", async () => {
 })
 
 test("topology dialog drag upstream to worker calls patchWorker", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({
+    upstreams: [
+      { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+      { id: "anthropic-id", name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true, api_format: "anthropic" },
+    ],
+  })
 
   try {
     app.api.keymap.dispatchCommand("proxy.topology")
@@ -1260,7 +1271,8 @@ test("topology dialog drag upstream to worker calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic", log_level: "simple" })
+    expect(app.calls.getWorkerRoute).toContain("app")
+    expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic-id", log_level: "simple" })
   } finally {
     await app.cleanup()
   }

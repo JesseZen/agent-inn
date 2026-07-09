@@ -71,12 +71,15 @@ export function DialogHostedTerminalDelete(
       : []),
     ...sessions()
       .filter((session) => session.status === "active" || session.status === "stale")
-      .map((session) => ({
-        title: session.session_label,
-        value: { type: "session" as const, session },
-        description: `${session.worker_name} • ${session.status}`,
-        category: session.status === "active" ? "Active sessions" : "Stale sessions",
-      })),
+      .map((session) => {
+        const worker = session.worker?.missing ? `missing worker: ${session.worker_id}` : session.worker?.name ?? session.worker_name
+        return {
+          title: session.session_label,
+          value: { type: "session" as const, session },
+          description: `${worker} • ${session.status}`,
+          category: session.status === "active" ? "Active sessions" : "Stale sessions",
+        }
+      }),
   ])
 
   return (
