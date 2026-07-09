@@ -70,9 +70,6 @@ func (r *BatchRegistry) List() ([]BatchRun, error) {
 	err := r.withLockedFile(func(file *batchRunsFile) error {
 		runs = make([]BatchRun, 0, len(file.Runs))
 		for _, run := range file.Runs {
-			if run.WinnerVariantID == "" && len(run.Variants) > 0 {
-				continue
-			}
 			runs = append(runs, run)
 		}
 		sort.Slice(runs, func(i, j int) bool {

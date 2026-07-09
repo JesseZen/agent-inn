@@ -63,13 +63,21 @@ func TestBatchRegistryCreatesListsSelectsAndDeletesRun(t *testing.T) {
 	if !reflect.DeepEqual(selected, created) {
 		t.Fatalf("selected mismatch:\n got %#v\nwant %#v", selected, created)
 	}
+	updated.CreatedAt = selected.CreatedAt.Add(time.Second)
+	err = registry.withLockedFile(func(file *batchRunsFile) error {
+		file.Runs[updated.ID] = updated
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	listed, err := registry.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(listed, []BatchRun{selected}) {
-		t.Fatalf("list mismatch:\n got %#v\nwant %#v", listed, []BatchRun{selected})
+	if !reflect.DeepEqual(listed, []BatchRun{updated, selected}) {
+		t.Fatalf("list mismatch:\n got %#v\nwant %#v", listed, []BatchRun{updated, selected})
 	}
 
 	deleted, err := registry.Delete(created.ID)
@@ -83,8 +91,22 @@ func TestBatchRegistryCreatesListsSelectsAndDeletesRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 0 {
-		t.Fatalf("expected no batches, got %#v", listed)
+	if !reflect.DeepEqual(listed, []BatchRun{updated}) {
+		t.Fatalf("list after delete mismatch:\n got %#v\nwant %#v", listed, []BatchRun{updated})
+	}
+	deleted, err = registry.Delete(updated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deleted, updated) {
+		t.Fatalf("deleted reserved mismatch:\n got %#v\nwant %#v", deleted, updated)
+	}
+	listed, err = registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(listed, []BatchRun{}) {
+		t.Fatalf("list after final delete mismatch:\n got %#v\nwant %#v", listed, []BatchRun{})
 	}
 }
 
