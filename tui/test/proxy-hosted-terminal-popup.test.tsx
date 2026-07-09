@@ -70,6 +70,96 @@ test("popup mode renders hosted terminal picker without home route", async () =>
   }
 })
 
+test("popup mode renders the hosted terminal root directly in the right rail", async () => {
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Hosted Terminal")
+    })
+
+    const lines = app.setup.captureCharFrame().split("\n")
+    expect({ headerRow: lines.findIndex((line) => line.includes("Hosted Terminal")), hasRootActions: lines.join("\n").includes("Create new session") }).toEqual({
+      headerRow: 0,
+      hasRootActions: true,
+    })
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode root escape exits the right rail", async () => {
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Hosted Terminal")
+    })
+    app.setup.mockInput.pressEscape()
+    await wait(() => app.setup.renderer.isDestroyed)
+
+    expect({ rendererDestroyed: app.setup.renderer.isDestroyed }).toEqual({ rendererDestroyed: true })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("popup mode nested escape returns to the visible right-rail root", async () => {
+  let listCalls = 0
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions") {
+      listCalls += 1
+      return json({ sessions: [activeHostedSession] })
+    }
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Create new session")
+    })
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Choose worker")
+    })
+    app.setup.mockInput.pressEscape()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && !frame.includes("Choose worker")
+    })
+
+    const lines = app.setup.captureCharFrame().split("\n")
+    expect({
+      headerRow: lines.findIndex((line) => line.includes("Hosted Terminal")),
+      rendererDestroyed: app.setup.renderer.isDestroyed,
+      listCalls,
+    }).toEqual({
+      headerRow: 0,
+      rendererDestroyed: false,
+      listCalls: 1,
+    })
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
 test("popup mode does not start plugin host or render command palette", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers")

@@ -1177,18 +1177,11 @@ function HostedTerminalPopupApp() {
   const exit = useExit()
   const dimensions = useTerminalDimensions()
   const { theme } = useTheme()
-  let opened = false
-
-  createEffect(() => {
-    if (opened) return
-    if (sync.status === "loading") return
-    if (sync.data.error) return
-    opened = true
-    dialog.replace(() => <DialogHostedTerminal mode="popup" />, () => exit())
-  })
+  const rootLoaded = createMemo(() => sync.status === "complete" && !sync.data.error)
+  const rootVisible = createMemo(() => rootLoaded() && dialog.stack.length === 0)
 
   useBindings(() => ({
-    enabled: !!sync.data.error,
+    enabled: !!sync.data.error || rootVisible(),
     bindings: [
       {
         key: "escape",
@@ -1206,27 +1199,18 @@ function HostedTerminalPopupApp() {
   }))
 
   return (
-    <Show when={sync.data.error}>
-      <box
-        width={dimensions().width}
-        height={dimensions().height}
-        alignItems="center"
-        justifyContent="center"
-      >
-        <box
-          width={60}
-          maxWidth={dimensions().width - 2}
-          flexDirection="column"
-          borderStyle="single"
-          borderColor={theme.border}
-          paddingX={2}
-          paddingY={1}
-          backgroundColor={theme.backgroundPanel}
-        >
+    <>
+      <Show when={rootLoaded()}>
+        <box width={dimensions().width} height={dimensions().height} flexDirection="column">
+          <DialogHostedTerminal mode="popup" onClose={() => exit()} />
+        </box>
+      </Show>
+      <Show when={sync.data.error}>
+        <box width={dimensions().width} height={dimensions().height} flexDirection="column" paddingX={4} paddingY={1}>
           <text fg={theme.text}>Hosted Terminal</text>
           <text fg={theme.textMuted}>{sync.data.error}</text>
         </box>
-      </box>
-    </Show>
+      </Show>
+    </>
   )
 }

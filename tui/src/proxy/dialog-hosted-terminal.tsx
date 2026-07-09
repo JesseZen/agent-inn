@@ -35,7 +35,7 @@ function sessionWorkerID(session: HostedSessionRecord) {
   return session.worker_id ?? session.worker_name
 }
 
-export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[]; mode?: HostedTerminalSurface } = {}) {
+export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[]; mode?: HostedTerminalSurface; onClose?: () => void } = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
@@ -198,6 +198,10 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     try {
       await sdk.client.patchHostedSession(session.session_id, { session_label: label })
       const nextSessions = await sdk.client.listHostedSessions()
+      if (mode === "popup") {
+        setSessions(nextSessions)
+        return
+      }
       dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
     } catch (err) {
       await DialogAlert.show(dialog, "Rename hosted session failed", String(err instanceof Error ? err.message : err))
@@ -239,6 +243,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   return (
     <DialogSelect
       title="Hosted Terminal"
+      onClose={props.onClose}
       options={options()}
       placeholder="Select hosted session..."
       actions={[
@@ -304,6 +309,10 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               refreshSessions,
               onDeleted: (session) => {
                 const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
+                if (mode === "popup") {
+                  setSessions(nextSessions)
+                  return
+                }
                 dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
               },
             })
