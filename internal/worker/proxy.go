@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,16 +24,19 @@ import (
 const headerRequestID = "X-Request-Id"
 
 type Worker struct {
-	snapshots *snapshotHolder
-	client    *http.Client
-	logger    *slog.Logger
+	snapshots     *snapshotHolder
+	client        *http.Client
+	logger        *slog.Logger
+	metrics       *MetricsTracker
+	metricsWriter io.Writer
 }
 
 type Options struct {
-	Snapshot RuntimeConfigSnapshot
-	Runtime  appruntime.WorkerRuntime
-	Client   *http.Client
-	Logger   *slog.Logger
+	Snapshot      RuntimeConfigSnapshot
+	Runtime       appruntime.WorkerRuntime
+	Client        *http.Client
+	Logger        *slog.Logger
+	MetricsWriter io.Writer
 }
 
 func New(opts Options) (*Worker, error) {
@@ -58,10 +62,16 @@ func New(opts Options) (*Worker, error) {
 		return nil, err
 	}
 	return &Worker{
-		snapshots: newSnapshotHolder(snapshot),
-		client:    client,
-		logger:    logger,
+		snapshots:     newSnapshotHolder(snapshot),
+		client:        client,
+		logger:        logger,
+		metrics:       NewMetricsTracker(time.Now),
+		metricsWriter: opts.MetricsWriter,
 	}, nil
+}
+
+func (w *Worker) MetricsSnapshot() MetricsSnapshot {
+	return w.metrics.Snapshot()
 }
 
 func (w *Worker) UpdateRuntime(runtime appruntime.WorkerRuntime) (appruntime.Generation, error) {
@@ -94,7 +104,7 @@ func (w *Worker) UpdateSnapshot(snapshot RuntimeConfigSnapshot) error {
 }
 
 func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, constants.ProxyPathPrefix) {
+	if strings.HasPrefix(r.URL.Path, constants.ProxyPathPrefix) || r.URL.Path == proxyStatusAliasPath {
 		w.serveManagement(rw, r)
 		return
 	}
@@ -107,6 +117,7 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	rec := &responseRecorder{ResponseWriter: rw}
 	start := time.Now()
+	w.metrics.Start()
 	w.logger.InfoContext(ctx, logging.EventRequestStart,
 		"method", r.Method,
 		"path", r.URL.Path,
@@ -114,12 +125,27 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	snapshot := w.snapshots.Load()
 	snapshot = snapshot.withCompiledUpstream()
-	err := w.proxyRequest(rec, r.WithContext(ctx), snapshot)
+	result, err := w.proxyRequest(rec, r.WithContext(ctx), snapshot)
 	dur := time.Since(start)
 	if err != nil {
 		if rec.status == 0 {
 			http.Error(rec, err.Error(), http.StatusBadGateway)
 		}
+	}
+	event := RequestMetricEvent{
+		Timestamp:     time.Now(),
+		Method:        r.Method,
+		Path:          r.URL.Path,
+		Status:        rec.status,
+		DurationMS:    dur.Milliseconds(),
+		ResponseBytes: rec.written,
+		Usage:         result.Usage,
+	}
+	w.metrics.Finish(event)
+	if w.metricsWriter != nil {
+		_ = json.NewEncoder(w.metricsWriter).Encode(event)
+	}
+	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventRequestDone,
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -166,7 +192,7 @@ func (r *responseRecorder) Flush() {
 	}
 }
 
-func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot RuntimeConfigSnapshot) error {
+func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot RuntimeConfigSnapshot) (responseCopyResult, error) {
 	ctx := r.Context()
 	proxyReq := &module.ProxyRequest{
 		Method:       r.Method,
@@ -193,7 +219,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	if bodyRequired {
 		body, contentType, err := readRequestBody(r)
 		if err != nil {
-			return err
+			return responseCopyResult{}, err
 		}
 		proxyReq.Body = body
 		proxyReq.ContentType = contentType
@@ -207,13 +233,13 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 				"path", proxyReq.Path,
 				"err", err.Error(),
 			)
-			return err
+			return responseCopyResult{}, err
 		}
 	}
 	if !bodyRequired && contentEncoding != "" && contentEncoding != "identity" {
 		body, _, err := readRequestBody(r)
 		if err != nil {
-			return err
+			return responseCopyResult{}, err
 		}
 		proxyReq.Body = body
 		bodyRequired = true
@@ -224,7 +250,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 
 	upstreamURL, err := snapshot.CompiledUpstream.Join(proxyReq.Path, proxyReq.RawQuery)
 	if err != nil {
-		return err
+		return responseCopyResult{}, err
 	}
 	var body io.Reader = r.Body
 	if bodyRequired {
@@ -232,7 +258,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	}
 	upstreamReq, err := http.NewRequestWithContext(ctx, proxyReq.Method, upstreamURL, body)
 	if err != nil {
-		return err
+		return responseCopyResult{}, err
 	}
 	upstreamReq.Header = proxyReq.Headers.Clone()
 	if snapshot.CompiledUpstream.AuthorizationHeader != "" {
@@ -254,7 +280,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			"url", upstreamURL,
 			"err", err.Error(),
 		)
-		return err
+		return responseCopyResult{}, err
 	}
 	proxyResp := &module.ProxyResponse{
 		StatusCode:  upstreamHTTPResp.StatusCode,
@@ -274,7 +300,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 				"phase", "wrap_response",
 				"err", err.Error(),
 			)
-			return err
+			return responseCopyResult{}, err
 		}
 	}
 
@@ -315,8 +341,17 @@ func readRequestBody(r *http.Request) ([]byte, string, error) {
 	return body, r.Header.Get("Content-Type"), err
 }
 
-func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) error {
+type responseCopyResult struct {
+	Usage UsageTokens
+}
+
+func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) (responseCopyResult, error) {
 	defer resp.Body.Close()
+	contentType := resp.ContentType
+	if contentType == "" {
+		contentType = resp.Headers.Get("Content-Type")
+	}
+	observer := NewUsageObserver(contentType)
 	for key, values := range resp.Headers {
 		for _, value := range values {
 			rw.Header().Add(key, value)
@@ -331,24 +366,25 @@ func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return responseCopyResult{Usage: observer.Finish()}, ctx.Err()
 		default:
 		}
 
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			observer.Observe(buf[:n])
 			if _, writeErr := rw.Write(buf[:n]); writeErr != nil {
-				return writeErr
+				return responseCopyResult{Usage: observer.Finish()}, writeErr
 			}
 			if flusher != nil {
 				flusher.Flush()
 			}
 		}
 		if err == io.EOF {
-			return nil
+			return responseCopyResult{Usage: observer.Finish()}, nil
 		}
 		if err != nil {
-			return err
+			return responseCopyResult{Usage: observer.Finish()}, err
 		}
 	}
 }

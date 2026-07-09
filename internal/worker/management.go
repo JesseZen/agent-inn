@@ -13,6 +13,8 @@ import (
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
+const proxyStatusAliasPath = "/__ainn/status"
+
 func (w *Worker) serveManagement(rw http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == constants.ProxyHealthPath && r.Method == http.MethodGet {
 		rw.Header().Set("Content-Type", "application/json")
@@ -22,7 +24,7 @@ func (w *Worker) serveManagement(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if r.URL.Path == constants.ProxyStatusPath && r.Method == http.MethodGet {
+	if (r.URL.Path == constants.ProxyStatusPath || r.URL.Path == proxyStatusAliasPath) && r.Method == http.MethodGet {
 		w.writeStatus(rw)
 		return
 	}
@@ -52,6 +54,7 @@ func (w *Worker) writeStatus(rw http.ResponseWriter) {
 		"module_support":      snapshot.ModuleSupport,
 		"modules":             snapshot.requestModuleStates(),
 		"hooks":               snapshot.hookModules(),
+		"metrics":             w.MetricsSnapshot(),
 	}
 	if len(snapshot.HookStatuses) > 0 {
 		status["hook_statuses"] = snapshot.HookStatuses

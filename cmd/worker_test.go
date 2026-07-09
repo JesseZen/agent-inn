@@ -87,6 +87,42 @@ func TestRunWorkerReadsExternalPluginRuntimeConfigFromFD(t *testing.T) {
 	}
 }
 
+func TestRunWorkerAcceptsMetricsFD(t *testing.T) {
+	configReader, configWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer configReader.Close()
+	if _, err := configWriter.Write([]byte(`{"id":"codex-app","generation":1,"listen_port":6767,"upstream":{"id":"openai","base_url":"https://api.openai.com/v1"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := configWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	metricsReader, metricsWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer metricsReader.Close()
+	defer metricsWriter.Close()
+
+	var called bool
+	restore := SetWorkerRunnerForTest(func(cfg WorkerRuntimeConfig) error {
+		called = true
+		return nil
+	})
+	defer restore()
+
+	code := runWorkerWithFD([]string{"--port", "6767", "--config-fd", "3", "--metrics-fd", "4"}, &bytes.Buffer{}, &bytes.Buffer{}, map[int]*os.File{3: configReader, 4: metricsWriter})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if !called {
+		t.Fatal("worker runner was not called")
+	}
+}
+
 func TestRunWorkerRejectsMissingFDConfig(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runWorkerWithFD([]string{"--port", "6767", "--config-fd", "3"}, &bytes.Buffer{}, &stderr, map[int]*os.File{})

@@ -40,6 +40,8 @@ type WorkerRuntimeConfig struct {
 	Plugins    map[string]appruntime.PluginRuntime `json:"plugins,omitempty"`
 	Modules    map[string]module.ModuleConfig      `json:"modules,omitempty"`
 	Hooks      map[string]module.ModuleConfig      `json:"hooks,omitempty"`
+
+	MetricsWriter io.Writer `json:"-"`
 }
 
 type workerHookStatusRefresher interface {
@@ -160,8 +162,9 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		snapshot.HookStatuses[hook.Name()] = modulehook.Status{State: hook.State(), Detail: hook.Detail()}
 	}
 	w, err := worker.New(worker.Options{
-		Snapshot: snapshot,
-		Logger:   logging.New(os.Stdout, string(cfg.LogLevel), logging.ComponentWorkerProxy),
+		Snapshot:      snapshot,
+		Logger:        logging.New(os.Stdout, string(cfg.LogLevel), logging.ComponentWorkerProxy),
+		MetricsWriter: cfg.MetricsWriter,
 	})
 	if err != nil {
 		return err
@@ -228,6 +231,7 @@ func runWorkerWithFD(args []string, stdout io.Writer, stderr io.Writer, files ma
 	flags.SetOutput(stderr)
 	port := flags.Int("port", 0, "worker port")
 	configFD := flags.Int("config-fd", 0, "runtime config fd")
+	metricsFD := flags.Int("metrics-fd", 0, "metrics fd")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -244,6 +248,13 @@ func runWorkerWithFD(args []string, stdout io.Writer, stderr io.Writer, files ma
 	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
 		fmt.Fprintf(stderr, "failed to read runtime config: %v\n", err)
 		return 1
+	}
+	if *metricsFD > 0 {
+		metricsFile := files[*metricsFD]
+		if metricsFile == nil {
+			metricsFile = os.NewFile(uintptr(*metricsFD), "metrics-fd")
+		}
+		cfg.MetricsWriter = metricsFile
 	}
 	if cfg.ListenPort == 0 {
 		cfg.ListenPort = *port

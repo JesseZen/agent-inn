@@ -66,6 +66,94 @@ func TestWorkerPassesThroughWithNoModulesAndInjectsAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "gpt-5",
+			"usage": map[string]any{"input_tokens": 12, "output_tokens": 8},
+		})
+	}))
+	defer upstreamServer.Close()
+
+	var metrics bytes.Buffer
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+		MetricsWriter: &metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5"}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	wantSnapshot := MetricsSnapshot{
+		WindowSeconds: MetricsWindowSeconds,
+		Requests:      1,
+		RPM:           1,
+		TPM:           20,
+		AvgLatencyMS:  0,
+		InputTokens:   12,
+		OutputTokens:  8,
+		TotalTokens:   20,
+	}
+	gotSnapshot := w.MetricsSnapshot()
+	wantSnapshot.AvgLatencyMS = gotSnapshot.AvgLatencyMS
+	if gotSnapshot != wantSnapshot {
+		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", gotSnapshot, wantSnapshot)
+	}
+	var event RequestMetricEvent
+	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusOK || event.Usage.TotalTokens != 20 {
+		t.Fatalf("bad metrics event: %#v", event)
+	}
+}
+
+func TestWorkerRecordsFailedUpstreamMetricsAndUnknownUsage(t *testing.T) {
+	var metrics bytes.Buffer
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: "http://127.0.0.1:1"},
+		},
+		MetricsWriter: &metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5"}`)))
+	if res.Code != http.StatusBadGateway {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	wantSnapshot := MetricsSnapshot{
+		WindowSeconds:        MetricsWindowSeconds,
+		Requests:             1,
+		Errors:               1,
+		RPM:                  1,
+		UnknownUsageRequests: 1,
+	}
+	if got := w.MetricsSnapshot(); got != wantSnapshot {
+		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", got, wantSnapshot)
+	}
+	var event RequestMetricEvent
+	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusBadGateway || event.Usage.Known {
+		t.Fatalf("bad metrics event: %#v", event)
+	}
+}
+
 func TestWorkerRoutesUpstreamRequestThroughProxyURL(t *testing.T) {
 	received := make(chan string, 1)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -852,7 +940,7 @@ func TestCopyResponseSkipsEmptyReads(t *testing.T) {
 		Body:       body,
 	}
 
-	err := copyProxyResponse(context.Background(), writer, resp)
+	_, err := copyProxyResponse(context.Background(), writer, resp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +957,7 @@ func TestCopyResponseFlushesThroughResponseRecorder(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader("ok")),
 	}
 
-	err := copyProxyResponse(context.Background(), rec, resp)
+	_, err := copyProxyResponse(context.Background(), rec, resp)
 	if err != nil {
 		t.Fatal(err)
 	}

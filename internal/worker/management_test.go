@@ -89,6 +89,54 @@ func TestWorkerManagementStatusIncludesProxyURL(t *testing.T) {
 	}
 }
 
+func TestWorkerStatusIncludesMetrics(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"usage": map[string]any{"input_tokens": 12, "output_tokens": 8},
+		})
+	}))
+	defer upstreamServer.Close()
+
+	w := mustNewWorker(t, Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+	})
+
+	proxy := httptest.NewRecorder()
+	w.ServeHTTP(proxy, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5"}`)))
+	if proxy.Code != http.StatusOK {
+		t.Fatalf("unexpected proxy status %d: %s", proxy.Code, proxy.Body.String())
+	}
+
+	status := httptest.NewRecorder()
+	w.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "http://proxy.local/__ainn/status", nil))
+	if status.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", status.Code, status.Body.String())
+	}
+	var got struct {
+		Metrics MetricsSnapshot `json:"metrics"`
+	}
+	if err := json.Unmarshal(status.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := MetricsSnapshot{
+		WindowSeconds: MetricsWindowSeconds,
+		Requests:      1,
+		RPM:           1,
+		TPM:           20,
+		InputTokens:   12,
+		OutputTokens:  8,
+		TotalTokens:   20,
+	}
+	want.AvgLatencyMS = got.Metrics.AvgLatencyMS
+	if got.Metrics != want {
+		t.Fatalf("bad status metrics:\ngot  %#v\nwant %#v", got.Metrics, want)
+	}
+}
+
 func TestWorkerManagementStatusIncludesConfigPatchState(t *testing.T) {
 	w := mustNewWorker(t, Options{
 		Snapshot: RuntimeConfigSnapshot{
