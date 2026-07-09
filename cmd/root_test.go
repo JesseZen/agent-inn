@@ -1078,9 +1078,9 @@ printf 'AINN_HOSTED_TERMINAL_POPUP=%s\n' "$AINN_HOSTED_TERMINAL_POPUP"
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
+	exe := hostedSessionExecutable()
+	if exe == "" {
+		t.Fatal("expected hosted popup executable env value")
 	}
 	wd, err := os.Getwd()
 	if err != nil {

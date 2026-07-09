@@ -105,11 +105,9 @@ func (p *hostedSessionPopupProgram) Env() map[string]string {
 	env := map[string]string{
 		"AINN_URL":                   p.managerURL,
 		"AINN_CONFIG_DIR":            p.configDir,
+		"AINN_EXECUTABLE":            hostedSessionExecutable(),
 		"AINN_FAST_BOOT":             "1",
 		"AINN_HOSTED_TERMINAL_POPUP": "1",
-	}
-	if exe, err := os.Executable(); err == nil {
-		env["AINN_EXECUTABLE"] = exe
 	}
 	return env
 }
