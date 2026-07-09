@@ -933,6 +933,175 @@ func TestRunHostedSessionMarkCaptureKeepsTurnStateWhenHookInputIsEmpty(t *testin
 	}
 }
 
+func TestRunHostedSessionPopupOpenDisplaysHostedPopup(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "real-config")
+	stateDir := filepath.Join(configDir, "state")
+	linkDir := filepath.Join(dir, "linked-config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := manager.HostedSessionRegistryPath(stateDir)
+	if err := os.WriteFile(registryPath, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(configDir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	resolvedConfigDir, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFile(filepath.Join(resolvedConfigDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "popup-open", "--config-dir", linkDir, "--manager-url", "http://127.0.0.1:19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	want := [][]string{
+		manager.TmuxDetectCommand(),
+		manager.TmuxDisplayHostedPopupCommandForSettings(cfg.Settings, resolvedConfigDir, "http://127.0.0.1:19090", hostedSessionExecutable()),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux calls %#v, want %#v", got, want)
+	}
+	data, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{" {
+		t.Fatalf("popup-open should not write hosted session registry, got %q", string(data))
+	}
+}
+
+func TestRunHostedSessionPopupOpenUsesEnvManagerURLThenDefault(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "env", env: "http://127.0.0.1:19091", want: "http://127.0.0.1:19091"},
+		{name: "default", want: defaultManagerURL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configDir := filepath.Join(dir, "config")
+			writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+			t.Setenv("AINN_URL", tc.env)
+			resolvedConfigDir, err := filepath.EvalSymlinks(configDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var got [][]string
+			restore := func() func() {
+				previous := launchRunnerFactory
+				launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+					return launchRunnerFunc(func(args []string) (string, error) {
+						got = append(got, append([]string{}, args...))
+						return "", nil
+					})
+				}
+				return func() { launchRunnerFactory = previous }
+			}()
+			defer restore()
+
+			var stderr bytes.Buffer
+			code := Run([]string{"hosted-session", "popup-open", "--config-dir", configDir}, &bytes.Buffer{}, &stderr)
+			if code != 0 {
+				t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+			}
+			want := [][]string{
+				manager.TmuxDetectCommand(),
+				manager.TmuxDisplayHostedPopupCommandForSettings(cfg.Settings, resolvedConfigDir, tc.want, hostedSessionExecutable()),
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got tmux calls %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestRunHostedSessionPopupStartsTUIProgramWithPopupEnv(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	resolvedConfigDir, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(dir, "popup-env.txt")
+	bunPath := filepath.Join(dir, "bun")
+	script := `#!/bin/sh
+{
+printf 'cwd=%s\n' "$(pwd)"
+printf 'argv=%s\n' "$*"
+printf 'AINN_URL=%s\n' "$AINN_URL"
+printf 'AINN_CONFIG_DIR=%s\n' "$AINN_CONFIG_DIR"
+printf 'AINN_EXECUTABLE=%s\n' "$AINN_EXECUTABLE"
+printf 'AINN_FAST_BOOT=%s\n' "$AINN_FAST_BOOT"
+printf 'AINN_HOSTED_TERMINAL_POPUP=%s\n' "$AINN_HOSTED_TERMINAL_POPUP"
+} > "$AINN_POPUP_CAPTURE"
+`
+	if err := os.WriteFile(bunPath, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BUN_PATH", bunPath)
+	t.Setenv("AINN_POPUP_CAPTURE", capturePath)
+	t.Chdir("..")
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "popup", "--config-dir", configDir, "--manager-url", "http://127.0.0.1:19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "cwd=" + filepath.Join(wd, "tui") + "\n" +
+		"argv=run src/cli.ts\n" +
+		"AINN_URL=http://127.0.0.1:19090\n" +
+		"AINN_CONFIG_DIR=" + resolvedConfigDir + "\n" +
+		"AINN_EXECUTABLE=" + exe + "\n" +
+		"AINN_FAST_BOOT=1\n" +
+		"AINN_HOSTED_TERMINAL_POPUP=1\n"
+	data, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want {
+		t.Fatalf("got popup env:\n%s\nwant:\n%s", string(data), want)
+	}
+}
+
 func TestRunDefaultStartsRootRunnerWithConfig(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")

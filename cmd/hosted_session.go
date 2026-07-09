@@ -30,6 +30,10 @@ func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedSessionToggleTodo(args[1:], stdout, stderr)
 	case "watch-all":
 		return runHostedSessionWatchAll(args[1:], stdout, stderr)
+	case "popup-open":
+		return runHostedSessionPopupOpen(args[1:], stdout, stderr)
+	case "popup":
+		return runHostedSessionPopup(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown hosted-session subcommand %q\n", args[0])
 		return 2
