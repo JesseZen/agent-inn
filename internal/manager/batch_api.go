@@ -167,15 +167,6 @@ func (m *Manager) handleBatchByID(rw http.ResponseWriter, r *http.Request) {
 		http.NotFound(rw, r)
 		return
 	}
-	if len(parts) == 4 && parts[1] == "variants" && parts[3] == "select" && r.Method == http.MethodPost {
-		batch, err := m.batchRegistry.SelectWinner(batchID, strings.TrimSpace(parts[2]))
-		if err != nil {
-			writeJSON(rw, http.StatusNotFound, map[string]any{"error": redactedErrorMessage(err)})
-			return
-		}
-		writeJSON(rw, http.StatusOK, batch)
-		return
-	}
 	http.NotFound(rw, r)
 }
 

@@ -27,7 +27,6 @@ type BatchRun struct {
 	Model           string         `json:"model,omitempty"`
 	SourceDirectory string         `json:"source_directory"`
 	CreatedAt       time.Time      `json:"created_at"`
-	WinnerVariantID string         `json:"winner_variant_id,omitempty"`
 	Variants        []BatchVariant `json:"variants"`
 }
 
@@ -148,36 +147,6 @@ func (r *BatchRegistry) SetVariants(batchID string, variants []BatchVariant) (Ba
 			return fmt.Errorf("batch %q not found", batchID)
 		}
 		run.Variants = batchVariantsWithIDs(variants)
-		file.Runs[batchID] = run
-		updated = run
-		return nil
-	})
-	return updated, err
-}
-
-func (r *BatchRegistry) SelectWinner(batchID string, variantID string) (BatchRun, error) {
-	var updated BatchRun
-	err := r.withLockedFile(func(file *batchRunsFile) error {
-		batchID = strings.TrimSpace(batchID)
-		variantID = strings.TrimSpace(variantID)
-		run, ok := file.Runs[batchID]
-		if !ok {
-			return fmt.Errorf("batch %q not found", batchID)
-		}
-		if variantID == "" {
-			return errors.New("winner variant id is required")
-		}
-		found := false
-		for _, variant := range run.Variants {
-			if variant.ID == variantID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("batch %q variant %q not found", batchID, variantID)
-		}
-		run.WinnerVariantID = variantID
 		file.Runs[batchID] = run
 		updated = run
 		return nil

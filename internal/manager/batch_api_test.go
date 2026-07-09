@@ -143,24 +143,14 @@ func TestManagerAPICreatesBatchesWithDuplicateTitles(t *testing.T) {
 	}
 }
 
-func TestManagerAPISelectsBatchWinner(t *testing.T) {
+func TestManagerAPIBatchVariantSelectRouteIsNotAvailable(t *testing.T) {
 	m, _ := newBatchAPITestManager(t)
 	created := createBatchForAPITest(t, m)
 
 	res := httptest.NewRecorder()
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/batches/"+created.ID+"/variants/variant_2/select", nil))
-	if res.Code != http.StatusOK {
+	if res.Code != http.StatusNotFound {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
-	}
-
-	var got BatchRun
-	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	want := created
-	want.WinnerVariantID = "variant_2"
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("batch mismatch:\n got %#v\nwant %#v", got, want)
 	}
 }
 

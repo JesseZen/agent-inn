@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestBatchRegistryCreatesListsSelectsAndDeletesRun(t *testing.T) {
+func TestBatchRegistryCreatesListsUpdatesAndDeletesRun(t *testing.T) {
 	registry := NewBatchRegistry(filepath.Join(t.TempDir(), "batch-runs.json"))
 
 	created, err := registry.Create(BatchCreateInput{
@@ -54,16 +54,7 @@ func TestBatchRegistryCreatesListsSelectsAndDeletesRun(t *testing.T) {
 		t.Fatalf("unexpected reserved variant id: %#v", updated.Variants)
 	}
 
-	selected, err := registry.SelectWinner(created.ID, "variant_2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	created.WinnerVariantID = "variant_2"
-	created.CreatedAt = selected.CreatedAt
-	if !reflect.DeepEqual(selected, created) {
-		t.Fatalf("selected mismatch:\n got %#v\nwant %#v", selected, created)
-	}
-	updated.CreatedAt = selected.CreatedAt.Add(time.Second)
+	updated.CreatedAt = created.CreatedAt.Add(time.Second)
 	err = registry.withLockedFile(func(file *batchRunsFile) error {
 		file.Runs[updated.ID] = updated
 		return nil
@@ -76,16 +67,16 @@ func TestBatchRegistryCreatesListsSelectsAndDeletesRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(listed, []BatchRun{updated, selected}) {
-		t.Fatalf("list mismatch:\n got %#v\nwant %#v", listed, []BatchRun{updated, selected})
+	if !reflect.DeepEqual(listed, []BatchRun{updated, created}) {
+		t.Fatalf("list mismatch:\n got %#v\nwant %#v", listed, []BatchRun{updated, created})
 	}
 
 	deleted, err := registry.Delete(created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(deleted, selected) {
-		t.Fatalf("deleted mismatch:\n got %#v\nwant %#v", deleted, selected)
+	if !reflect.DeepEqual(deleted, created) {
+		t.Fatalf("deleted mismatch:\n got %#v\nwant %#v", deleted, created)
 	}
 	listed, err = registry.List()
 	if err != nil {
