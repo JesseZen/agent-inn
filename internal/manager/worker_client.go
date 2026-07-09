@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
@@ -12,8 +13,14 @@ import (
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
+const defaultWorkerClientTimeout = 2 * time.Second
+
 type HTTPWorkerClient struct {
 	Client *http.Client
+}
+
+func defaultWorkerClient() HTTPWorkerClient {
+	return HTTPWorkerClient{Client: &http.Client{Timeout: defaultWorkerClientTimeout}}
 }
 
 func (c HTTPWorkerClient) ToggleModule(port int, moduleName string) error {

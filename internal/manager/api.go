@@ -410,7 +410,7 @@ func (m *Manager) validateConfigPatchRecoveryState(workerName string) error {
 	}
 	client := m.workerClient
 	if client == nil {
-		client = HTTPWorkerClient{Client: http.DefaultClient}
+		client = defaultWorkerClient()
 	}
 	status, err := client.GetStatus(worker.Port)
 	if err != nil {
@@ -448,7 +448,7 @@ func (m *Manager) patchLiveWorkerModule(workerName string, port int, moduleName 
 	}
 	client := m.workerClient
 	if client == nil {
-		client = HTTPWorkerClient{Client: http.DefaultClient}
+		client = defaultWorkerClient()
 	}
 	return client.PatchModule(port, moduleName, cfg)
 }
@@ -459,7 +459,7 @@ func (m *Manager) toggleLiveWorkerModule(workerName string, port int, moduleName
 	}
 	client := m.workerClient
 	if client == nil {
-		client = HTTPWorkerClient{Client: http.DefaultClient}
+		client = defaultWorkerClient()
 	}
 	return client.ToggleModule(port, moduleName)
 }
@@ -584,7 +584,7 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 func (m *Manager) applyRuntimeToLiveWorkersUsingUpstream(upstreamName string) []string {
 	client := m.workerClient
 	if client == nil {
-		client = HTTPWorkerClient{Client: http.DefaultClient}
+		client = defaultWorkerClient()
 	}
 	failures := []string{}
 	for _, target := range m.liveWorkersUsingUpstream(upstreamName) {

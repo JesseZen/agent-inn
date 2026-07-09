@@ -306,7 +306,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			if !configured {
 				client := m.workerClient
 				if client == nil {
-					client = HTTPWorkerClient{Client: http.DefaultClient}
+					client = defaultWorkerClient()
 				}
 				runtime, err := m.runtimeForWorker(workerName)
 				if err == nil {

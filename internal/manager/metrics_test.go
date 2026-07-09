@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/upstream"
+	"github.com/jesse/agent-inn/internal/worker"
 )
 
 func TestMetricsStoreRecordWritesDailyJSONL(t *testing.T) {
@@ -220,6 +223,151 @@ func TestMetricsStoreQueryWorkerFilter(t *testing.T) {
 	}
 }
 
+func TestMetricsStoreQueryWorkerFilterKeepsLiveMetrics(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
+	for _, record := range []MetricsRecord{
+		{Timestamp: now, Worker: "app", Port: 6767, Status: 200, UsageKnown: true, TotalTokens: 15},
+		{Timestamp: now, Worker: "cli", Port: 6768, Status: 200, UsageKnown: true, TotalTokens: 25},
+	} {
+		if err := store.Record(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		InFlight:      1,
+		Requests:      2,
+		RPM:           2,
+		TPM:           30,
+		TotalTokens:   30,
+	}
+
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday, Worker: "app"}, []WorkerSummary{
+		{Name: "app", Port: 6767, Status: "running", Upstream: upstream.RedactedUpstream{Name: "openai"}, Metrics: live},
+		{Name: "cli", Port: 6768, Status: "running", Upstream: upstream.RedactedUpstream{Name: "openai"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "openai", Live: live, Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestMetricsStoreQueryDimensionedFiltersZeroLiveMetrics(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
+	if err := store.Record(MetricsRecord{
+		Timestamp:   now,
+		Worker:      "app",
+		Port:        6767,
+		Upstream:    "openai",
+		Model:       "gpt-5",
+		Path:        "/v1/responses",
+		Status:      500,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	live := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		InFlight:      1,
+		Requests:      2,
+		Errors:        1,
+		RPM:           2,
+		TPM:           30,
+		TotalTokens:   30,
+	}
+	workers := []WorkerSummary{{Name: "app", Port: 6767, Status: "running", Upstream: upstream.RedactedUpstream{Name: "openai"}, Metrics: live}}
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "openai", Totals: MetricsTotals{Requests: 1, Errors: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	for _, query := range []MetricsQuery{
+		{Range: MetricsRangeToday, Model: "gpt-5"},
+		{Range: MetricsRangeToday, Path: "/v1/responses"},
+		{Range: MetricsRangeToday, Status: 500},
+	} {
+		got, err := store.Query(query, workers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("bad metrics query for %#v:\ngot  %#v\nwant %#v", query, got, want)
+		}
+	}
+}
+
+func TestMetricsStoreQueryUpstreamFilterUsesLiveMetricsOnlyForCurrentUpstream(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
+	if err := store.Record(MetricsRecord{
+		Timestamp:   now,
+		Worker:      "app",
+		Port:        6767,
+		Upstream:    "openai",
+		Status:      200,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	live := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		InFlight:      1,
+		Requests:      2,
+		RPM:           2,
+		TPM:           30,
+		TotalTokens:   30,
+	}
+	workers := []WorkerSummary{{Name: "app", Port: 6767, Status: "running", Upstream: upstream.RedactedUpstream{Name: "anthropic"}, Metrics: live}}
+
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday, Upstream: "openai"}, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "openai", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad openai metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+
+	got, err = store.Query(MetricsQuery{Range: MetricsRangeToday, Upstream: "anthropic"}, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "anthropic", Live: live},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad anthropic metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestMetricsStoreQueryCountsCorruptJSONL(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
@@ -239,6 +387,47 @@ func TestMetricsStoreQueryCountsCorruptJSONL(t *testing.T) {
 	want := MetricsQueryResponse{
 		Range:          MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
 		Workers:        []WorkerMetricsAggregate{{Worker: "app", Port: 6767, Status: "running"}},
+		SkippedRecords: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestMetricsStoreQueryContinuesAfterOversizedCorruptJSONLRecord(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	metricsDir := filepath.Join(dir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	record := MetricsRecord{
+		Timestamp:   now,
+		Worker:      "app",
+		Port:        6767,
+		Status:      200,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}
+	valid, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(strings.Repeat("x", 70*1024) + "\n" + string(valid) + "\n")
+	if err := os.WriteFile(filepath.Join(metricsDir, "usage-2026-07-10.jsonl"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
+
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767, Status: "running"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local), End: time.Date(2026, 7, 11, 0, 0, 0, 0, time.Local)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
 		SkippedRecords: 1,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -271,6 +460,34 @@ func TestMetricsStoreCleanupRetentionRemovesOldFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(keepPath); err != nil {
 		t.Fatalf("recent metrics file should remain: %v", err)
+	}
+}
+
+func TestMetricsStoreCleanupRetentionKeepsExactNumberOfLocalDates(t *testing.T) {
+	dir := t.TempDir()
+	metricsDir := filepath.Join(dir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	removePath := filepath.Join(metricsDir, "usage-2026-06-10.jsonl")
+	keepPath := filepath.Join(metricsDir, "usage-2026-06-11.jsonl")
+	for _, path := range []string{removePath, keepPath} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newMetricsStore(config.Settings{StateDir: dir, Metrics: config.MetricsSettings{RetentionDays: 30}}, func() time.Time {
+		return time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	})
+
+	if err := store.CleanupRetention(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(removePath); !os.IsNotExist(err) {
+		t.Fatalf("cutoff metrics file should be removed: %v", err)
+	}
+	if _, err := os.Stat(keepPath); err != nil {
+		t.Fatalf("first retained metrics file should remain: %v", err)
 	}
 }
 

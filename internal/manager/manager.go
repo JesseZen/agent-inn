@@ -68,7 +68,6 @@ type Manager struct {
 	hookStatuses       map[string]map[string]modulehook.Status
 	metricsStore       *metricsStore
 	metricsTrackers    map[string]*worker.MetricsTracker
-	metricsSnapshots   map[string]worker.MetricsSnapshot
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -195,7 +194,6 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		hookStatuses:       map[string]map[string]modulehook.Status{},
 		metricsTrackers:    map[string]*worker.MetricsTracker{},
-		metricsSnapshots:   map[string]worker.MetricsSnapshot{},
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
@@ -297,9 +295,6 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		profile, ok := m.config.Upstreams[upstreamID]
 		status := string(m.workerStatusLocked(name))
 		metrics := worker.MetricsSnapshot{}
-		if status == string(WorkerStateRunning) {
-			metrics = m.metricsSnapshots[name]
-		}
 		seeds = append(seeds, summarySeed{
 			name:          name,
 			worker:        cloneWorkerConfig(workerConfig),
@@ -348,8 +343,12 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Hooks:              cloneModules(seed.worker.Hooks),
 			Metrics:            seed.metrics,
 		}
-		if summary.Status == string(WorkerStateRunning) && m.workerClient != nil {
-			status, err := m.workerClient.GetStatus(seed.worker.Port)
+		if summary.Status == string(WorkerStateRunning) {
+			client := m.workerClient
+			if client == nil {
+				client = defaultWorkerClient()
+			}
+			status, err := client.GetStatus(seed.worker.Port)
 			if err == nil {
 				if status.Protocol != "" {
 					summary.Protocol = status.Protocol
@@ -404,11 +403,10 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 	if detail.Status != string(WorkerStateRunning) {
 		return detail
 	}
-	detail.Metrics = m.metricsSnapshot(name)
 
 	client := m.workerClient
 	if client == nil {
-		client = HTTPWorkerClient{Client: http.DefaultClient}
+		client = defaultWorkerClient()
 	}
 	status, err := client.GetStatus(worker.Port)
 	if err != nil {
@@ -892,7 +890,7 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 			m.bumpWorkerGeneration(name)
 			client := m.workerClient
 			if client == nil {
-				client = HTTPWorkerClient{Client: http.DefaultClient}
+				client = defaultWorkerClient()
 			}
 			runtime, err := m.runtimeForWorker(name)
 			if err == nil {

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -147,7 +148,7 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			Port:     summary.Port,
 			Status:   summary.Status,
 			Upstream: summary.Upstream.Name,
-			Live:     summary.Metrics,
+			Live:     liveMetricsForQuery(summary, query),
 		}
 	}
 
@@ -160,31 +161,30 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			}
 			return MetricsQueryResponse{}, err
 		}
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
+		err = readJSONLLines(file, func(line []byte) {
 			var record MetricsRecord
-			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			if err := json.Unmarshal(line, &record); err != nil {
 				response.SkippedRecords++
-				continue
+				return
 			}
 			if !record.Timestamp.Before(resolved.End) || record.Timestamp.Before(resolved.Start) {
-				continue
+				return
 			}
 			if !recordMatchesQuery(record, query) {
-				continue
+				return
 			}
 			aggregate := aggregates[record.Worker]
 			if aggregate == nil {
 				summary, ok := summaries[record.Worker]
 				if !ok {
-					continue
+					return
 				}
 				aggregate = &WorkerMetricsAggregate{
 					Worker:   record.Worker,
 					Port:     record.Port,
 					Status:   summary.Status,
 					Upstream: record.Upstream,
-					Live:     summary.Metrics,
+					Live:     liveMetricsForQuery(summary, query),
 				}
 				aggregates[record.Worker] = aggregate
 			}
@@ -204,8 +204,8 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			} else {
 				aggregate.Totals.UnknownUsageRequests++
 			}
-		}
-		if err := scanner.Err(); err != nil {
+		})
+		if err != nil {
 			_ = file.Close()
 			return MetricsQueryResponse{}, err
 		}
@@ -235,7 +235,7 @@ func (s *metricsStore) CleanupRetention() error {
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
-	cutoff := startOfLocalDay(s.clock()).AddDate(0, 0, -retentionDays)
+	cutoff := startOfLocalDay(s.clock()).AddDate(0, 0, 1-retentionDays)
 	entries, err := os.ReadDir(s.metricsDir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -309,6 +309,16 @@ func recordMatchesQuery(record MetricsRecord, query MetricsQuery) bool {
 	return true
 }
 
+func liveMetricsForQuery(summary WorkerSummary, query MetricsQuery) worker.MetricsSnapshot {
+	if query.Model != "" || query.Path != "" || query.Status != 0 {
+		return worker.MetricsSnapshot{}
+	}
+	if query.Upstream != "" && summary.Upstream.Name != query.Upstream {
+		return worker.MetricsSnapshot{}
+	}
+	return summary.Metrics
+}
+
 func startOfLocalDay(t time.Time) time.Time {
 	year, month, day := t.In(time.Local).Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.Local)
@@ -348,14 +358,13 @@ func (m *Manager) readWorkerMetrics(name string, r io.Reader) {
 }
 
 func (m *Manager) readWorkerMetricsFrom(source workerMetricSource, r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
+	_ = readJSONLLines(r, func(line []byte) {
 		var event worker.RequestMetricEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			continue
+		if err := json.Unmarshal(line, &event); err != nil {
+			return
 		}
 		m.handleWorkerMetricEventFrom(source, event)
-	}
+	})
 }
 
 func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetricEvent) {
@@ -380,7 +389,6 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 	tracker.Start()
 	tracker.Finish(event)
 	snapshot := tracker.Snapshot()
-	m.metricsSnapshots[source.name] = snapshot
 	store := m.metricsStore
 	m.mu.Unlock()
 
@@ -408,8 +416,21 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": source.name, "port": source.port, "metrics": snapshot})
 }
 
-func (m *Manager) metricsSnapshot(name string) worker.MetricsSnapshot {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.metricsSnapshots[name]
+func readJSONLLines(r io.Reader, handle func([]byte)) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			line = bytes.TrimRight(line, "\r\n")
+			if len(bytes.TrimSpace(line)) > 0 {
+				handle(line)
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }

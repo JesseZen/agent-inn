@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,6 +185,101 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 	}
 }
 
+func TestManagerAPIMetricsUsesProductionWorkerStatusForLiveMetrics(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	live := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		InFlight:      1,
+		Requests:      2,
+		RPM:           2,
+		TPM:           30,
+		TotalTokens:   30,
+	}
+	var statusCode atomic.Int32
+	statusCode.Store(http.StatusOK)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_proxy/status" {
+			http.NotFound(rw, r)
+			return
+		}
+		if code := int(statusCode.Load()); code >= 400 {
+			http.Error(rw, "unavailable", code)
+			return
+		}
+		writeJSON(rw, http.StatusOK, WorkerStatus{Metrics: live})
+	})}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			t.Errorf("status server failed: %v", err)
+		}
+	}()
+	t.Cleanup(func() { _ = server.Close() })
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Role: "app", Port: port, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	m.statuses["app"] = WorkerStateRunning
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp:  now,
+		Method:     "POST",
+		Path:       "/v1/responses",
+		Status:     200,
+		Usage:      worker.UsageTokens{Known: true, TotalTokens: 15},
+		DurationMS: 120,
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: port, Status: "running", Upstream: "openai", Live: live, Totals: MetricsTotals{Requests: 1, AvgLatencyMS: 120, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad live metrics response:\ngot  %#v\nwant %#v", got, want)
+	}
+
+	statusCode.Store(http.StatusInternalServerError)
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want.Workers[0].Live = worker.MetricsSnapshot{}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed status should not expose manager event snapshot:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
@@ -288,6 +384,60 @@ func TestManagerRecordsWorkerMetricsWithCapturedSource(t *testing.T) {
 		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
 		Workers: []WorkerMetricsAggregate{
 			{Worker: "app", Port: 6767, Status: "configured", Upstream: "openai", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerReadsAndQueriesLargeWorkerMetricLines(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	largePath := "/" + strings.Repeat("x", 70*1024)
+	records := []worker.RequestMetricEvent{
+		{Timestamp: now, Method: "POST", Path: largePath, Status: 200, Usage: worker.UsageTokens{Known: true, TotalTokens: 15}},
+		{Timestamp: now, Method: "POST", Path: "/v1/responses", Status: 200, Usage: worker.UsageTokens{Known: true, TotalTokens: 3}},
+	}
+	var payload bytes.Buffer
+	for _, record := range records {
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload.Write(data)
+		payload.WriteByte('\n')
+	}
+	m.readWorkerMetricsFrom(workerMetricSource{name: "app", port: 6767, upstream: "openai"}, &payload)
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "configured", Upstream: "openai", Totals: MetricsTotals{Requests: 2, TotalTokens: 18}},
 		},
 		SkippedRecords: 0,
 	}
