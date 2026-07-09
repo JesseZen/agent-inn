@@ -3,6 +3,8 @@ import { Global } from "@agent-inn/core/global"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogAlert } from "../ui/dialog-alert"
+import { DialogConfirm } from "../ui/dialog-confirm"
 import { useProject } from "../context/project"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
@@ -167,28 +169,21 @@ export function DialogBatch() {
 
 export function DialogBatchRun(props: { batch: BatchRun }) {
   const sdk = useSDK()
-  const [batch, setBatch] = createSignal(props.batch)
+  const dialog = useDialog()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
-  const sessionStatus = createMemo(() => new Map(sessions().map((session) => [session.session_id, session.status])))
+  const sessionStates = createMemo(() => new Map(sessions().map((session) => [session.session_id, session.turn_state ?? "idle"])))
 
   onMount(async () => {
     setSessions(await sdk.client.listHostedSessions())
   })
 
   const options = createMemo<DialogSelectOption<BatchVariant>[]>(() =>
-    batch().variants.map((variant) => {
-      const winner = batch().winner_variant_id === variant.id
-      const status = sessionStatus().get(variant.hosted_session_id) ?? "stale"
+    props.batch.variants.map((variant) => {
+      const state = sessionStates().get(variant.hosted_session_id) ?? "interrupted"
       return {
-        title: `${winner ? "[winner] " : ""}${variant.session_label}`,
+        title: variant.session_label,
         value: variant,
-        description: `${status} • ${variant.hosted_session_id}`,
-        details: [
-          `Hosted session ${variant.hosted_session_id}`,
-          `Worktree ${variant.worktree_dir}`,
-          `Status ${status}`,
-          `Winner ${winner ? "yes" : "no"}`,
-        ],
+        description: state === "idle" ? "waiting for CLI confirmation" : state,
       }
     }),
   )
@@ -197,11 +192,11 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
     const settings = await sdk.client.getSettings()
     await launchProxySession({
       executable: import.meta.env?.AINN_EXECUTABLE || undefined,
-      workerPort: batch().worker_port,
-      profile: batch().worker_name,
+      workerPort: props.batch.worker_port,
+      profile: props.batch.worker_name,
       configDir: Global.Path.config,
       workspace: variant.worktree_dir,
-      model: batch().model,
+      model: props.batch.model,
       mode: "hosted-terminal",
       sessionID: variant.hosted_session_id,
       opener: settings.settings.terminal.opener,
@@ -213,17 +208,26 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
 
   return (
     <DialogSelect
-      title={`Batch: ${batch().title}`}
+      title={`Batch: ${props.batch.title}`}
       options={options()}
       placeholder="Select variant..."
       actions={[
         {
-          command: "batch.winner",
-          title: "winner",
-          onTrigger: (option) => {
-            void sdk.client.selectBatchWinner(batch().id, option.value.id).then((nextBatch) => {
-              setBatch(nextBatch)
-            })
+          command: "batch.delete",
+          title: "delete",
+          onTrigger: async () => {
+            const confirmed = await DialogConfirm.show(
+              dialog,
+              "Delete batch",
+              "Remove all variants, hosted sessions, and worktrees?",
+            )
+            if (!confirmed) return
+            try {
+              await sdk.client.deleteBatch(props.batch.id)
+              dialog.replace(() => <DialogBatch />)
+            } catch (err) {
+              await DialogAlert.show(dialog, "Delete batch failed", String(err instanceof Error ? err.message : err))
+            }
           },
         },
       ]}

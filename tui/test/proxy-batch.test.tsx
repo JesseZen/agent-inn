@@ -5,7 +5,6 @@ import { afterEach, expect, mock, test } from "bun:test"
 import { onMount } from "solid-js"
 import { SDKProvider, useSDK } from "../src/context/sdk"
 import { resolveSlashCommand } from "../src/keymap"
-import type { BatchRun } from "../src/proxy/backend"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
 const launchCalls: unknown[] = []
@@ -292,10 +291,10 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
   }
 })
 
-test("batch winner action selects the highlighted variant", async () => {
+test("batch detail shows only hosted turn confirmation states", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
-  const batch: BatchRun = {
+  const batch = {
     id: "batch_1",
     title: "fix scroll",
     prompt: "Fix scroll",
@@ -308,15 +307,84 @@ test("batch winner action selects the highlighted variant", async () => {
         id: "variant_1",
         index: 1,
         hosted_session_id: "session_1",
-        session_label: "fix scroll 1",
+        session_label: "fix scroll batch_1 #1",
         worktree_dir: `${directory}/.worktrees/fix-scroll-1`,
       },
       {
         id: "variant_2",
         index: 2,
         hosted_session_id: "session_2",
-        session_label: "fix scroll 2",
+        session_label: "fix scroll batch_1 #2",
         worktree_dir: `${directory}/.worktrees/fix-scroll-2`,
+      },
+    ],
+  }
+  const app = await mountProxyApp({ batches: [batch] })
+  app.hostedSessions.push(
+    {
+      session_id: "session_1",
+      session_label: "fix scroll batch_1 #1",
+      worker_name: "cli-openrouter",
+      worker_port: 11199,
+      status: "active",
+      turn_state: "idle",
+      created_at: "2026-07-09T00:00:00Z",
+      last_opened_at: "2026-07-09T00:00:00Z",
+    },
+    {
+      session_id: "session_2",
+      session_label: "fix scroll batch_1 #2",
+      worker_name: "cli-openrouter",
+      worker_port: 11199,
+      status: "active",
+      turn_state: "running",
+      created_at: "2026-07-09T00:00:00Z",
+      last_opened_at: "2026-07-09T00:00:00Z",
+    },
+  )
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return app.calls.listHostedSessions === 1 && (frame.includes("active") || frame.includes("waiting for CLI confirmation"))
+    })
+
+    expect(app.frame()).toContain("waiting for CLI confirmation")
+    expect(app.frame()).toContain("running")
+    expect(app.frame()).not.toContain("Hosted session")
+    expect(app.frame()).not.toContain("Worktree")
+    expect(app.frame()).not.toContain("Winner")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("batch detail deletes all variants after confirmation", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const batch = {
+    id: "batch_1",
+    title: "fix scroll",
+    worker_name: "cli-openrouter",
+    worker_port: 11199,
+    source_directory: directory,
+    created_at: "2026-07-09T00:00:00Z",
+    variants: [
+      {
+        id: "variant_1",
+        index: 1,
+        hosted_session_id: "session_1",
+        session_label: "fix scroll batch_1 #1",
+        worktree_dir: `${directory}/.worktrees/fix-scroll-1`,
       },
     ],
   }
@@ -333,14 +401,23 @@ test("batch winner action selects the highlighted variant", async () => {
     await runCommand(app, "dialog.select.submit")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("fix scroll 1") && app.frame().includes("fix scroll 2")
+      return app.frame().includes("Batch: fix scroll")
     })
 
-    await runCommand(app, "dialog.select.next")
-    app.api.keymap.dispatchCommand("batch.winner")
-    await wait(() => app.calls.selectBatchWinner.length === 1)
+    app.api.keymap.dispatchCommand("batch.delete")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Delete batch")
+    })
 
-    expect(app.calls.selectBatchWinner).toEqual([{ batchID: "batch_1", variantID: "variant_2" }])
+    app.mockInput.pressEnter()
+    await wait(() => app.calls.deleteBatch.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Batch Runs") && !app.frame().includes("fix scroll")
+    })
+
+    expect(app.calls.deleteBatch).toEqual(["batch_1"])
   } finally {
     await app.cleanup()
   }
@@ -355,14 +432,12 @@ type BatchClient = ReturnType<typeof useSDK>["client"] & {
     source_directory: string
     model?: string
   }): Promise<unknown>
-  selectBatchWinner(batchID: string, variantID: string): Promise<unknown>
 }
 
 async function withBatchClient(fn: (client: BatchClient) => Promise<void>) {
   let done: Promise<void> | undefined
   const calls = {
     createBatch: [] as unknown[],
-    selectBatchWinner: [] as string[],
   }
 
   function Probe() {
@@ -384,19 +459,6 @@ async function withBatchClient(fn: (client: BatchClient) => Promise<void>) {
         worker_port: 19091,
         source_directory: "/repo",
         created_at: "2026-07-09T00:00:00Z",
-        variants: [],
-      })
-    }
-    if (url.pathname === "/api/batches/batch_1/variants/variant_2/select" && request.method === "POST") {
-      calls.selectBatchWinner.push(url.pathname)
-      return json({
-        id: "batch_1",
-        title: "Race parser fix",
-        worker_name: "coder",
-        worker_port: 19091,
-        source_directory: "/repo",
-        created_at: "2026-07-09T00:00:00Z",
-        winner_variant_id: "variant_2",
         variants: [],
       })
     }
@@ -453,24 +515,14 @@ test("createBatch POSTs the exact request body to /api/batches", async () => {
   })
 })
 
-test("selectBatchWinner POSTs to the batch variant select endpoint", async () => {
-  let selected: unknown
+test("batch client does not expose winner selection", async () => {
+  let client!: BatchClient
 
-  const calls = await withBatchClient(async (client) => {
-    selected = await client.selectBatchWinner("batch_1", "variant_2")
+  await withBatchClient(async (nextClient) => {
+    client = nextClient
   })
 
-  expect(calls.selectBatchWinner).toEqual(["/api/batches/batch_1/variants/variant_2/select"])
-  expect(selected).toEqual({
-    id: "batch_1",
-    title: "Race parser fix",
-    worker_name: "coder",
-    worker_port: 19091,
-    source_directory: "/repo",
-    created_at: "2026-07-09T00:00:00Z",
-    winner_variant_id: "variant_2",
-    variants: [],
-  })
+  expect(client).not.toHaveProperty("selectBatchWinner")
 })
 
 test("pasteHostedPrompt sends literal prompt text without Enter", async () => {

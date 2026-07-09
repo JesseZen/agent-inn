@@ -242,11 +242,6 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async getBatch(id: string) {
           return request<BatchRun>(`/api/batches/${id}`)
         },
-        async selectBatchWinner(batchID: string, variantID: string) {
-          return request<BatchRun>(`/api/batches/${batchID}/variants/${variantID}/select`, {
-            method: "POST",
-          })
-        },
         async deleteBatch(batchID: string) {
           return request<{ batch_id: string }>(`/api/batches/${batchID}`, {
             method: "DELETE",

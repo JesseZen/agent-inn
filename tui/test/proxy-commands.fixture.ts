@@ -186,7 +186,6 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     createBatch: [] as CreateBatchRequest[],
     getBatch: [] as string[],
     deleteBatch: [] as string[],
-    selectBatchWinner: [] as Array<{ batchID: string; variantID: string }>,
     testUpstream: [] as string[],
     testAllUpstreams: 0,
   }
@@ -528,15 +527,6 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         calls.deleteBatch.push(batchID)
         batches.delete(batchID)
         return json({ batch_id: batchID })
-      }
-      if (parts.length === 7 && parts[4] === "variants" && parts[6] === "select" && method === "POST") {
-        const variantID = parts[5]
-        calls.selectBatchWinner.push({ batchID, variantID })
-        const batchRun = batches.get(batchID)
-        if (!batchRun) return json({ error: "batch not found" }, { status: 404 })
-        const selected = { ...batchRun, winner_variant_id: variantID }
-        batches.set(batchID, selected)
-        return json(selected)
       }
     }
 

@@ -160,7 +160,6 @@ export type BatchRun = {
   model?: string
   source_directory: string
   created_at: string
-  winner_variant_id?: string
   variants: BatchVariant[]
 }
 
