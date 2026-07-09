@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"os/signal"
@@ -97,6 +98,35 @@ func TestExecStarterDoesNotInheritSecretEnvironment(t *testing.T) {
 	}
 }
 
+func TestExecStarterPassesMetricsPipeOnFD4(t *testing.T) {
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
+	gotMetrics := make(chan string, 1)
+	spawn := WorkerSpawn{
+		Args:        helperProcessArgs("metrics-fd", "", ""),
+		RuntimeJSON: []byte(`{"ok":true}`),
+		MetricsHandler: func(r io.Reader) {
+			data, _ := io.ReadAll(r)
+			gotMetrics <- string(bytes.TrimSpace(data))
+		},
+	}
+
+	process, err := ExecStarter{Executable: os.Args[0]}.Start(spawn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-gotMetrics:
+		if got != `{"ok":true}` {
+			t.Fatalf("unexpected metrics payload: %q", got)
+		}
+	case <-time.After(processTestTimeout):
+		t.Fatal("timed out waiting for metrics payload")
+	}
+	if err := process.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExecProcessStopSendsSIGTERM(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
@@ -174,6 +204,21 @@ func TestExecProcessHelper(t *testing.T) {
 		return
 	}
 	args := helperArgsAfterSeparator()
+	if len(args) == 5 && args[0] == "metrics-fd" {
+		if args[3] != "--metrics-fd" || args[4] != "4" {
+			os.Exit(2)
+		}
+		if file := os.NewFile(uintptr(3), "config-fd"); file != nil {
+			_, _ = io.Copy(io.Discard, file)
+			_ = file.Close()
+		}
+		if file := os.NewFile(uintptr(4), "metrics-fd"); file != nil {
+			_, _ = file.Write([]byte(`{"ok":true}` + "\n"))
+			_ = file.Close()
+			os.Exit(0)
+		}
+		os.Exit(2)
+	}
 	if len(args) != 3 {
 		os.Exit(2)
 	}

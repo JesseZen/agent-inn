@@ -10,6 +10,9 @@ settings:
             socket_name: ainn
             host_session: ainn-host
             host_start_mode: new-window
+    metrics:
+        persist_enabled: true
+        retention_days: 30
 plugins:
     api_translate:
         kind: request_middleware

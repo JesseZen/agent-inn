@@ -1,5 +1,7 @@
 package manager
 
+import "github.com/jesse/agent-inn/internal/worker"
+
 // payloadInt 从 any 中提取 int，兼容 JSON 反序列化后的 float64。
 func payloadInt(value any) int {
 	switch v := value.(type) {
@@ -126,4 +128,15 @@ func (e Event) AsStreamRawRedacted() (worker string, line string, ok bool) {
 	worker, _ = e.Payload["worker"].(string)
 	line, _ = e.Payload["line"].(string)
 	return worker, line, true
+}
+
+// AsMetricsUpdated 解析 metrics.updated 事件。ok=false 表示类型不匹配。
+func (e Event) AsMetricsUpdated() (workerName string, port int, metrics worker.MetricsSnapshot, ok bool) {
+	if e.Type != EventMetricsUpdated {
+		return "", 0, worker.MetricsSnapshot{}, false
+	}
+	workerName, _ = e.Payload["worker"].(string)
+	port = payloadInt(e.Payload["port"])
+	metrics, _ = e.Payload["metrics"].(worker.MetricsSnapshot)
+	return workerName, port, metrics, true
 }

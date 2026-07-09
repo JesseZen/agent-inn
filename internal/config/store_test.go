@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -107,6 +108,7 @@ upstreams:
 		t.Fatal(err)
 	}
 
+	enabled := true
 	want := Settings{
 		StateDir: "~/.ainn",
 		LogDir:   "~/.ainn/logs",
@@ -123,8 +125,12 @@ upstreams:
 				HostedPopupKey: "",
 			},
 		},
+		Metrics: MetricsSettings{
+			PersistEnabled: &enabled,
+			RetentionDays:  30,
+		},
 	}
-	if cfg.Settings != want {
+	if !reflect.DeepEqual(cfg.Settings, want) {
 		t.Fatalf("unexpected settings defaults:\n got %#v\nwant %#v", cfg.Settings, want)
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/jesse/agent-inn/internal/modulehook"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 	"github.com/jesse/agent-inn/internal/upstream"
+	"github.com/jesse/agent-inn/internal/worker"
 )
 
 type Config struct {
@@ -65,6 +66,9 @@ type Manager struct {
 	generations        map[string]int
 	logs               map[string]*logging.WorkerLogSink
 	hookStatuses       map[string]map[string]modulehook.Status
+	metricsStore       *metricsStore
+	metricsTrackers    map[string]*worker.MetricsTracker
+	metricsSnapshots   map[string]worker.MetricsSnapshot
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -87,6 +91,7 @@ type WorkerSummary struct {
 	LogLevel           string                                      `json:"log_level"`
 	Modules            map[string]config.ModuleConfig              `json:"modules,omitempty"`
 	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
+	Metrics            worker.MetricsSnapshot                      `json:"metrics"`
 }
 
 type Starter interface {
@@ -128,6 +133,7 @@ type WorkerStatus struct {
 	Modules            map[string]config.ModuleConfig              `json:"modules"`
 	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
 	HookStatuses       map[string]modulehook.Status                `json:"hook_statuses,omitempty"`
+	Metrics            worker.MetricsSnapshot                      `json:"metrics"`
 }
 
 type WorkerDetail struct {
@@ -148,6 +154,7 @@ type WorkerDetail struct {
 	HookStatuses       map[string]modulehook.Status                `json:"hook_statuses,omitempty"`
 	Modules            map[string]config.ModuleConfig              `json:"modules,omitempty"`
 	Hooks              map[string]config.ModuleConfig              `json:"hooks,omitempty"`
+	Metrics            worker.MetricsSnapshot                      `json:"metrics"`
 }
 
 const healthyRetryResetWindow = 60 * time.Second
@@ -187,10 +194,13 @@ func New(cfg Config) *Manager {
 		generations:        map[string]int{},
 		logs:               map[string]*logging.WorkerLogSink{},
 		hookStatuses:       map[string]map[string]modulehook.Status{},
+		metricsTrackers:    map[string]*worker.MetricsTracker{},
+		metricsSnapshots:   map[string]worker.MetricsSnapshot{},
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
+	m.metricsStore = newMetricsStore(cfg.Config.Settings, func() time.Time { return m.clock() })
 	if cfg.ConfigPath != "" {
 		m.stopConfigWriter = store.StartAsyncWriter()
 	}
@@ -267,6 +277,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 		providerFound bool
 		status        string
 		generation    int
+		metrics       worker.MetricsSnapshot
 	}
 
 	m.mu.RLock()
@@ -278,20 +289,26 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 
 	seeds := make([]summarySeed, 0, len(names))
 	for _, name := range names {
-		worker := m.config.Workers[name]
-		upstreamID := worker.UpstreamID
+		workerConfig := m.config.Workers[name]
+		upstreamID := workerConfig.UpstreamID
 		if upstreamID == "" {
-			upstreamID = worker.Upstream
+			upstreamID = workerConfig.Upstream
 		}
 		profile, ok := m.config.Upstreams[upstreamID]
+		status := string(m.workerStatusLocked(name))
+		metrics := worker.MetricsSnapshot{}
+		if status == string(WorkerStateRunning) {
+			metrics = m.metricsSnapshots[name]
+		}
 		seeds = append(seeds, summarySeed{
 			name:          name,
-			worker:        cloneWorkerConfig(worker),
+			worker:        cloneWorkerConfig(workerConfig),
 			profile:       profile,
 			plugins:       clonePluginDefinitions(m.config.Plugins),
 			providerFound: ok,
-			status:        string(m.workerStatusLocked(name)),
+			status:        status,
 			generation:    m.workerGenerationLocked(name),
+			metrics:       metrics,
 		})
 	}
 	m.mu.RUnlock()
@@ -329,6 +346,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			LogLevel:           workerLogLevel(seed.worker),
 			Modules:            cloneModules(seed.worker.RequestModules),
 			Hooks:              cloneModules(seed.worker.Hooks),
+			Metrics:            seed.metrics,
 		}
 		if summary.Status == string(WorkerStateRunning) && m.workerClient != nil {
 			status, err := m.workerClient.GetStatus(seed.worker.Port)
@@ -339,6 +357,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 				if status.ModuleSupport != nil {
 					overlayModuleSupport(summary.ModuleSupport, status.ModuleSupport)
 				}
+				summary.Metrics = status.Metrics
 			}
 		}
 		out = append(out, summary)
@@ -385,6 +404,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 	if detail.Status != string(WorkerStateRunning) {
 		return detail
 	}
+	detail.Metrics = m.metricsSnapshot(name)
 
 	client := m.workerClient
 	if client == nil {
@@ -420,6 +440,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 	if status.HookStatuses != nil {
 		detail.HookStatuses = cloneHookStatuses(status.HookStatuses)
 	}
+	detail.Metrics = status.Metrics
 	return detail
 }
 
@@ -562,6 +583,7 @@ func (m *Manager) syncConfigFromStore() (config.Config, config.Status) {
 	m.config = cfg
 	m.configStatus = status
 	m.portIndex = buildPortIndex(cfg.Workers)
+	m.metricsStore = newMetricsStore(cfg.Settings, func() time.Time { return m.clock() })
 	m.mu.Unlock()
 	return cfg, status
 }
@@ -744,6 +766,9 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 		return err
 	}
 	spawn.LogWriter = m.LogSink(name)
+	spawn.MetricsHandler = func(r io.Reader) {
+		m.readWorkerMetrics(name, r)
+	}
 	if m.starter == nil {
 		m.mu.Lock()
 		m.supervisorFor(name).setStatus(WorkerStateRunning)

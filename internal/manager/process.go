@@ -14,10 +14,11 @@ import (
 )
 
 type WorkerSpawn struct {
-	Port        int
-	Args        []string
-	RuntimeJSON []byte
-	LogWriter   io.Writer
+	Port           int
+	Args           []string
+	RuntimeJSON    []byte
+	LogWriter      io.Writer
+	MetricsHandler func(io.Reader)
 }
 
 type ExecStarter struct {
@@ -55,10 +56,28 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 		_ = configWrite.Close()
 		return nil, err
 	}
+	var metricsRead *os.File
+	var metricsWrite *os.File
+	if spawn.MetricsHandler != nil {
+		metricsRead, metricsWrite, err = os.Pipe()
+		if err != nil {
+			_ = configRead.Close()
+			_ = configWrite.Close()
+			_ = stdinRead.Close()
+			_ = stdinWrite.Close()
+			return nil, err
+		}
+	}
 
-	cmd := exec.Command(executable, spawn.Args...)
+	args := append([]string{}, spawn.Args...)
+	extraFiles := []*os.File{configRead}
+	if spawn.MetricsHandler != nil {
+		args = append(args, "--metrics-fd", "4")
+		extraFiles = append(extraFiles, metricsWrite)
+	}
+	cmd := exec.Command(executable, args...)
 	cmd.Env = sanitizedWorkerEnv(os.Environ())
-	cmd.ExtraFiles = []*os.File{configRead}
+	cmd.ExtraFiles = extraFiles
 	cmd.Stdin = stdinRead
 	if spawn.LogWriter != nil {
 		cmd.Stdout = spawn.LogWriter
@@ -72,10 +91,21 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 		_ = configWrite.Close()
 		_ = stdinRead.Close()
 		_ = stdinWrite.Close()
+		if metricsRead != nil {
+			_ = metricsRead.Close()
+			_ = metricsWrite.Close()
+		}
 		return nil, err
 	}
 	_ = configRead.Close()
 	_ = stdinRead.Close()
+	if spawn.MetricsHandler != nil {
+		_ = metricsWrite.Close()
+		go func() {
+			spawn.MetricsHandler(metricsRead)
+			_ = metricsRead.Close()
+		}()
+	}
 	if _, err := configWrite.Write(spawn.RuntimeJSON); err != nil {
 		_ = configWrite.Close()
 		_ = stdinWrite.Close()

@@ -40,6 +40,12 @@ type Settings struct {
 	LogLevel string           `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	Launch   LaunchSettings   `yaml:"launch" json:"launch"`
 	Terminal TerminalSettings `yaml:"terminal" json:"terminal"`
+	Metrics  MetricsSettings  `yaml:"metrics" json:"metrics"`
+}
+
+type MetricsSettings struct {
+	PersistEnabled *bool `yaml:"persist_enabled" json:"persist_enabled"`
+	RetentionDays  int   `yaml:"retention_days" json:"retention_days"`
 }
 
 type LaunchSettings struct {
@@ -110,6 +116,12 @@ func (c *Config) ApplyDefaults() {
 	if c.Settings.Terminal.Tmux.HostStartMode == "" {
 		c.Settings.Terminal.Tmux.HostStartMode = TmuxHostStartModeNewWindow
 	}
+	if c.Settings.Metrics.PersistEnabled == nil {
+		c.Settings.Metrics.PersistEnabled = boolPtr(true)
+	}
+	if c.Settings.Metrics.RetentionDays == 0 {
+		c.Settings.Metrics.RetentionDays = 30
+	}
 	if c.Workers == nil {
 		c.Workers = map[string]WorkerConfig{}
 	}
@@ -156,4 +168,8 @@ func (c *Config) ApplyDefaults() {
 
 func defaultDirMode() os.FileMode {
 	return 0700
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

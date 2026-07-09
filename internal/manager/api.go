@@ -16,6 +16,7 @@ import (
 
 func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/events", m.handleEvents)
+	mux.HandleFunc("/api/metrics", m.handleMetrics)
 	mux.HandleFunc("/api/workers", m.handleWorkers)
 	mux.HandleFunc("/api/workers/", m.handleWorkerByPort)
 	mux.HandleFunc("/api/hosted-sessions", m.handleHostedSessions)
@@ -26,6 +27,35 @@ func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/upstreams/", m.handleUpstreamByName)
 	mux.HandleFunc("/api/settings", m.handleSettings)
 	mux.HandleFunc("/api/config", m.handleConfig)
+}
+
+func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(rw, r)
+		return
+	}
+	status, err := metricsStatusFromQuery(r.URL.Query().Get("status"))
+	if err != nil {
+		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	query := MetricsQuery{
+		Range:    r.URL.Query().Get("range"),
+		Worker:   r.URL.Query().Get("worker"),
+		Upstream: r.URL.Query().Get("upstream"),
+		Model:    r.URL.Query().Get("model"),
+		Path:     r.URL.Query().Get("path"),
+		Status:   status,
+	}
+	m.mu.RLock()
+	store := m.metricsStore
+	m.mu.RUnlock()
+	response, err := store.Query(query, m.workerSummaries())
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		return
+	}
+	writeJSON(rw, http.StatusOK, response)
 }
 
 func (m *Manager) handleWorkers(rw http.ResponseWriter, r *http.Request) {
@@ -652,11 +682,16 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		Opener *string    `json:"opener"`
 		Tmux   *tmuxPatch `json:"tmux"`
 	}
+	type metricsPatch struct {
+		PersistEnabled *bool `json:"persist_enabled"`
+		RetentionDays  *int  `json:"retention_days"`
+	}
 	var patch struct {
 		StateDir *string        `json:"state_dir"`
 		LogDir   *string        `json:"log_dir"`
 		Launch   *launchPatch   `json:"launch"`
 		Terminal *terminalPatch `json:"terminal"`
+		Metrics  *metricsPatch  `json:"metrics"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
@@ -696,6 +731,14 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 				if patch.Terminal.Tmux.TurnStatusHooks != nil {
 					cfgRoot.Settings.Terminal.Tmux.TurnStatusHooks = *patch.Terminal.Tmux.TurnStatusHooks
 				}
+			}
+		}
+		if patch.Metrics != nil {
+			if patch.Metrics.PersistEnabled != nil {
+				cfgRoot.Settings.Metrics.PersistEnabled = patch.Metrics.PersistEnabled
+			}
+			if patch.Metrics.RetentionDays != nil {
+				cfgRoot.Settings.Metrics.RetentionDays = *patch.Metrics.RetentionDays
 			}
 		}
 	})

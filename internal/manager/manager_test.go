@@ -23,6 +23,7 @@ import (
 	"github.com/jesse/agent-inn/internal/modulehook"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 	"github.com/jesse/agent-inn/internal/upstream"
+	"github.com/jesse/agent-inn/internal/worker"
 )
 
 func TestManagerDetectsManagedPortConflict(t *testing.T) {
@@ -99,6 +100,175 @@ func TestManagerAPIListsWorkersAndProvidersWithoutSecrets(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), `"dirty"`) {
 		t.Fatalf("config API missing status: %s", res.Body.String())
+	}
+}
+
+func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	live := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		InFlight:      1,
+		Requests:      2,
+		Errors:        1,
+		RPM:           2,
+		TPM:           30,
+		AvgLatencyMS:  50,
+		TotalTokens:   30,
+	}
+	statusJSON, err := json.Marshal(WorkerStatus{Metrics: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Role: "app", Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: &recordingWorkerClient{statusBody: string(statusJSON)},
+	})
+	m.clock = func() time.Time { return now }
+	m.statuses["app"] = WorkerStateRunning
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp:     now,
+		Method:        "POST",
+		Path:          "/v1/responses",
+		Status:        200,
+		DurationMS:    120,
+		ResponseBytes: 64,
+		Usage:         worker.UsageTokens{Known: true, InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
+		Workers: []WorkerMetricsAggregate{
+			{
+				Worker:   "app",
+				Port:     6767,
+				Status:   "running",
+				Upstream: "openai",
+				Metrics:  live,
+				Totals: MetricsTotals{
+					Requests:      1,
+					AvgLatencyMS:  120,
+					ResponseBytes: 64,
+					InputTokens:   10,
+					OutputTokens:  5,
+					TotalTokens:   15,
+				},
+			},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	sub := m.events.Subscribe(0)
+	defer sub.Close()
+
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp: now,
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+	})
+
+	event := nextEventOfType(t, sub, EventMetricsUpdated)
+	gotWorker, gotPort, gotMetrics, ok := event.AsMetricsUpdated()
+	if !ok {
+		t.Fatalf("metrics.updated accessor rejected event: %#v", event)
+	}
+	wantMetrics := worker.MetricsSnapshot{
+		WindowSeconds: worker.MetricsWindowSeconds,
+		Requests:      1,
+		RPM:           1,
+		TPM:           15,
+		TotalTokens:   15,
+	}
+	if gotWorker != "app" || gotPort != 6767 || !reflect.DeepEqual(gotMetrics, wantMetrics) {
+		t.Fatalf("bad metrics event: worker=%q port=%d metrics=%#v", gotWorker, gotPort, gotMetrics)
+	}
+}
+
+func TestManagerAPIMetricsIncludesStoppedWorkerWithZeroLiveMetrics(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp: now,
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+	})
+	m.statuses["app"] = WorkerStateStopped
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "stopped", Upstream: "openai", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

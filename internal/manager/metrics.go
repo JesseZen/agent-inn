@@ -1,0 +1,361 @@
+package manager
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/worker"
+)
+
+const (
+	MetricsRangeToday   = "today"
+	MetricsRangeLast24H = "last_24h"
+)
+
+type MetricsRecord struct {
+	Timestamp     time.Time          `json:"timestamp"`
+	Worker        string             `json:"worker"`
+	Port          int                `json:"port"`
+	Upstream      string             `json:"upstream,omitempty"`
+	Model         string             `json:"model,omitempty"`
+	Method        string             `json:"method"`
+	Path          string             `json:"path"`
+	Status        int                `json:"status"`
+	DurationMS    int64              `json:"duration_ms"`
+	ResponseBytes int64              `json:"response_bytes"`
+	Usage         worker.UsageTokens `json:"usage"`
+}
+
+type MetricsQuery struct {
+	Range    string
+	Worker   string
+	Upstream string
+	Model    string
+	Path     string
+	Status   int
+}
+
+type MetricsRange struct {
+	Name  string    `json:"name"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+type MetricsTotals struct {
+	Requests             int64 `json:"requests"`
+	Errors               int64 `json:"errors"`
+	AvgLatencyMS         int64 `json:"avg_latency_ms"`
+	ResponseBytes        int64 `json:"response_bytes"`
+	InputTokens          int64 `json:"input_tokens"`
+	OutputTokens         int64 `json:"output_tokens"`
+	CacheReadTokens      int64 `json:"cache_read_tokens"`
+	CacheWriteTokens     int64 `json:"cache_write_tokens"`
+	ReasoningTokens      int64 `json:"reasoning_tokens"`
+	TotalTokens          int64 `json:"total_tokens"`
+	UnknownUsageRequests int64 `json:"unknown_usage_requests"`
+}
+
+type WorkerMetricsAggregate struct {
+	Worker   string                 `json:"worker"`
+	Port     int                    `json:"port"`
+	Status   string                 `json:"status"`
+	Upstream string                 `json:"upstream,omitempty"`
+	Metrics  worker.MetricsSnapshot `json:"metrics"`
+	Totals   MetricsTotals          `json:"totals"`
+}
+
+type MetricsQueryResponse struct {
+	Range          MetricsRange             `json:"range"`
+	Workers        []WorkerMetricsAggregate `json:"workers"`
+	SkippedRecords int                      `json:"skipped_records"`
+}
+
+type metricsStore struct {
+	settings config.Settings
+	clock    func() time.Time
+}
+
+func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
+	cfg := config.Config{Settings: settings}
+	cfg.ApplyDefaults()
+	if clock == nil {
+		clock = time.Now
+	}
+	return &metricsStore{settings: cfg.Settings, clock: clock}
+}
+
+func (s *metricsStore) Record(record MetricsRecord) error {
+	if s.settings.Metrics.PersistEnabled != nil && !*s.settings.Metrics.PersistEnabled {
+		return nil
+	}
+	if err := os.MkdirAll(s.metricsDir(), 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(s.metricsDir(), metricsFileName(record.Timestamp))
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return json.NewEncoder(file).Encode(record)
+}
+
+func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (MetricsQueryResponse, error) {
+	resolved := s.resolveRange(query.Range)
+	response := MetricsQueryResponse{Range: resolved}
+	aggregates := map[string]*WorkerMetricsAggregate{}
+	for _, summary := range workers {
+		if query.Worker != "" && summary.Name != query.Worker {
+			continue
+		}
+		if query.Upstream != "" && summary.Upstream.Name != query.Upstream {
+			continue
+		}
+		aggregates[summary.Name] = &WorkerMetricsAggregate{
+			Worker:   summary.Name,
+			Port:     summary.Port,
+			Status:   summary.Status,
+			Upstream: summary.Upstream.Name,
+			Metrics:  summary.Metrics,
+		}
+	}
+
+	durationByWorker := map[string]int64{}
+	for _, path := range s.filesForRange(resolved) {
+		file, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return MetricsQueryResponse{}, err
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			var record MetricsRecord
+			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+				response.SkippedRecords++
+				continue
+			}
+			if !record.Timestamp.Before(resolved.End) || record.Timestamp.Before(resolved.Start) {
+				continue
+			}
+			if !recordMatchesQuery(record, query) {
+				continue
+			}
+			aggregate := aggregates[record.Worker]
+			if aggregate == nil {
+				continue
+			}
+			aggregate.Totals.Requests++
+			if record.Status >= 400 {
+				aggregate.Totals.Errors++
+			}
+			durationByWorker[record.Worker] += record.DurationMS
+			aggregate.Totals.ResponseBytes += record.ResponseBytes
+			if record.Usage.Known {
+				aggregate.Totals.InputTokens += record.Usage.InputTokens
+				aggregate.Totals.OutputTokens += record.Usage.OutputTokens
+				aggregate.Totals.CacheReadTokens += record.Usage.CacheReadTokens
+				aggregate.Totals.CacheWriteTokens += record.Usage.CacheWriteTokens
+				aggregate.Totals.ReasoningTokens += record.Usage.ReasoningTokens
+				aggregate.Totals.TotalTokens += record.Usage.TotalTokens
+			} else {
+				aggregate.Totals.UnknownUsageRequests++
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			_ = file.Close()
+			return MetricsQueryResponse{}, err
+		}
+		if err := file.Close(); err != nil {
+			return MetricsQueryResponse{}, err
+		}
+	}
+
+	names := make([]string, 0, len(aggregates))
+	for name := range aggregates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	response.Workers = make([]WorkerMetricsAggregate, 0, len(names))
+	for _, name := range names {
+		aggregate := aggregates[name]
+		if aggregate.Totals.Requests > 0 {
+			aggregate.Totals.AvgLatencyMS = durationByWorker[name] / aggregate.Totals.Requests
+		}
+		response.Workers = append(response.Workers, *aggregate)
+	}
+	return response, nil
+}
+
+func (s *metricsStore) CleanupRetention() error {
+	retentionDays := s.settings.Metrics.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	cutoff := startOfLocalDay(s.clock()).AddDate(0, 0, -retentionDays)
+	entries, err := os.ReadDir(s.metricsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		day, ok := dayFromMetricsFileName(entry.Name())
+		if !ok || !day.Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.metricsDir(), entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *metricsStore) metricsDir() string {
+	return filepath.Join(expandHomePath(s.settings.StateDir), "metrics")
+}
+
+func (s *metricsStore) resolveRange(name string) MetricsRange {
+	if name == "" {
+		name = MetricsRangeToday
+	}
+	now := s.clock()
+	switch name {
+	case MetricsRangeLast24H:
+		return MetricsRange{Name: name, Start: now.Add(-24 * time.Hour), End: now}
+	default:
+		start := startOfLocalDay(now)
+		return MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)}
+	}
+}
+
+func (s *metricsStore) filesForRange(r MetricsRange) []string {
+	day := startOfLocalDay(r.Start)
+	endDay := startOfLocalDay(r.End)
+	if r.End.Equal(endDay) {
+		endDay = endDay.Add(-24 * time.Hour)
+	}
+	var paths []string
+	for !day.After(endDay) {
+		paths = append(paths, filepath.Join(s.metricsDir(), metricsFileName(day)))
+		day = day.Add(24 * time.Hour)
+	}
+	return paths
+}
+
+func recordMatchesQuery(record MetricsRecord, query MetricsQuery) bool {
+	if query.Worker != "" && record.Worker != query.Worker {
+		return false
+	}
+	if query.Upstream != "" && record.Upstream != query.Upstream {
+		return false
+	}
+	if query.Model != "" && record.Model != query.Model {
+		return false
+	}
+	if query.Path != "" && record.Path != query.Path {
+		return false
+	}
+	if query.Status != 0 && record.Status != query.Status {
+		return false
+	}
+	return true
+}
+
+func startOfLocalDay(t time.Time) time.Time {
+	year, month, day := t.In(time.Local).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.Local)
+}
+
+func metricsFileName(t time.Time) string {
+	return "usage-" + t.In(time.Local).Format("2006-01-02") + ".jsonl"
+}
+
+func dayFromMetricsFileName(name string) (time.Time, bool) {
+	if !strings.HasPrefix(name, "usage-") || !strings.HasSuffix(name, ".jsonl") {
+		return time.Time{}, false
+	}
+	day, err := time.ParseInLocation("2006-01-02", strings.TrimSuffix(strings.TrimPrefix(name, "usage-"), ".jsonl"), time.Local)
+	return day, err == nil
+}
+
+func metricsStatusFromQuery(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	status, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid status")
+	}
+	return status, nil
+}
+
+func (m *Manager) readWorkerMetrics(name string, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		var event worker.RequestMetricEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		m.handleWorkerMetricEvent(name, event)
+	}
+}
+
+func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetricEvent) {
+	m.mu.Lock()
+	workerConfig, ok := m.config.Workers[name]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	tracker := m.metricsTrackers[name]
+	if tracker == nil {
+		tracker = worker.NewMetricsTracker(m.clock)
+		m.metricsTrackers[name] = tracker
+	}
+	tracker.Start()
+	tracker.Finish(event)
+	snapshot := tracker.Snapshot()
+	m.metricsSnapshots[name] = snapshot
+	port := workerConfig.Port
+	upstreamName := workerConfig.Upstream
+	store := m.metricsStore
+	m.mu.Unlock()
+
+	if store != nil {
+		_ = store.Record(MetricsRecord{
+			Timestamp:     event.Timestamp,
+			Worker:        name,
+			Port:          port,
+			Upstream:      upstreamName,
+			Model:         event.Model,
+			Method:        event.Method,
+			Path:          event.Path,
+			Status:        event.Status,
+			DurationMS:    event.DurationMS,
+			ResponseBytes: event.ResponseBytes,
+			Usage:         event.Usage,
+		})
+	}
+	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": name, "port": port, "metrics": snapshot})
+}
+
+func (m *Manager) metricsSnapshot(name string) worker.MetricsSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.metricsSnapshots[name]
+}

@@ -28,4 +28,5 @@ const (
 	EventUpstreamProbed      EventType = "upstream.probed"
 	EventConfigStatusChanged EventType = "config.status.changed"
 	EventStreamRawRedacted   EventType = "stream.raw_redacted"
+	EventMetricsUpdated      EventType = "metrics.updated"
 )
