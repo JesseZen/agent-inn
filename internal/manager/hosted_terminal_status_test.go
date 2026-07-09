@@ -138,6 +138,31 @@ func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
 	}
 }
 
+func TestTmuxThemeCommandForSettingsIncludesHostedSessions(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	got := TmuxThemeCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"set-option", "-g", "status", "on", ";",
+		"set-option", "-g", "status-left", "", ";",
+		"set-option", "-g", "status-right", "#[range=user|ainn-hosted-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]", ";",
+		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
+		"set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";",
+		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
+		"set-window-option", "-g", "automatic-rename", "off",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{
@@ -371,6 +396,32 @@ func TestTmuxHostedPopupCommandsForSettings(t *testing.T) {
 	wantBinding := []string{"tmux", "-L", "ainn-test", "bind-key", "-T", "prefix", "H", "display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
 	if !reflect.DeepEqual(gotBinding, wantBinding) {
 		t.Fatalf("got %#v, want %#v", gotBinding, wantBinding)
+	}
+}
+
+func TestTmuxHostedPopupMouseBindingCommandForSettingsSelectMode(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	got := TmuxHostedPopupMouseBindingCommandForSettings(settings, "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin", TmuxHostedPopupMouseModeSelect)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"bind-key", "-T", "root", "MouseDown1Status",
+		"if -F \"#{==:#{mouse_status_range},ainn-hosted-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t =\"",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestTmuxHostedPopupMouseBindingCommandForSettingsAcknowledgeMode(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	got := TmuxHostedPopupMouseBindingCommandForSettings(settings, "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin", TmuxHostedPopupMouseModeAcknowledge)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"bind-key", "-T", "root", "MouseDown1Status",
+		"if -F \"#{==:#{mouse_status_range},ainn-hosted-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t = ; run-shell -b -t = \\\"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\\\"\"",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 

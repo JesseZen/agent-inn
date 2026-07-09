@@ -25,6 +25,14 @@ const (
 	hostedPopupWidth                 = "80%"
 	hostedPopupHeight                = "70%"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
+	tmuxHostedPopupStatusRange       = "ainn-hosted-sessions"
+)
+
+type TmuxHostedPopupMouseMode int
+
+const (
+	TmuxHostedPopupMouseModeSelect TmuxHostedPopupMouseMode = iota
+	TmuxHostedPopupMouseModeAcknowledge
 )
 
 type hostedTMuxRunner interface {
@@ -187,16 +195,39 @@ func TmuxDisplayHostedPopupCommandForSettings(settings config.Settings, configDi
 	)
 }
 
-func TmuxHostedPopupBindingCommandForSettings(settings config.Settings, key string, configDir string, managerURL string, executable string) []string {
+func tmuxDisplayHostedPopupCommand(configDir string, managerURL string, executable string) string {
 	shellCommand := tmuxShellQuote(executable) +
 		" hosted-session popup --config-dir " + tmuxShellQuote(configDir) +
 		" --manager-url " + tmuxShellQuote(managerURL)
-	command := "display-popup -E -x R -y 0 -w " + hostedPopupWidth +
+	return "display-popup -E -x R -y 0 -w " + hostedPopupWidth +
 		" -h " + hostedPopupHeight +
 		" -T " + tmuxShellQuote(hostedPopupTitle) +
 		" " + shellCommand
+}
+
+func TmuxHostedPopupBindingCommandForSettings(settings config.Settings, key string, configDir string, managerURL string, executable string) []string {
+	command := tmuxDisplayHostedPopupCommand(configDir, managerURL, executable)
 	return append(tmuxPrefixForSettings(settings),
 		"bind-key", "-T", "prefix", key, command,
+	)
+}
+
+func TmuxHostedPopupMouseBindingCommandForSettings(settings config.Settings, configDir string, managerURL string, executable string, mode TmuxHostedPopupMouseMode) []string {
+	falseCommand := "switch-client -t ="
+	if mode == TmuxHostedPopupMouseModeAcknowledge {
+		shellCommand := tmuxShellQuote(executable) +
+			" hosted-session acknowledge --config-dir " + tmuxShellQuote(configDir) +
+			" --window-id #{window_id}" +
+			" --window-name " + tmuxShellEscapedWindowNameFormat
+		falseCommand += " ; run-shell -b -t = " + tmuxCommandQuote(shellCommand)
+	}
+	command := "if -F " +
+		tmuxCommandQuote("#{==:#{mouse_status_range},"+tmuxHostedPopupStatusRange+"}") +
+		" " + tmuxCommandQuote(tmuxDisplayHostedPopupCommand(configDir, managerURL, executable)) +
+		" " + tmuxCommandQuote(falseCommand)
+	return append(tmuxPrefixForSettings(settings),
+		"bind-key", "-T", "root", TmuxAcknowledgeMouseKey,
+		command,
 	)
 }
 

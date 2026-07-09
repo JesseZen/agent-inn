@@ -9,12 +9,13 @@ import (
 // AINN-owned tmux namespace. All hosted-terminal commands use `tmux -L ainn` to
 // isolate AINN-managed sessions from user tmux sessions.
 const (
-	tmuxSocketName   = "ainn"
-	tmuxHostSession  = "ainn-host"
-	tmuxMainWindowID = "0"
-	tmuxWindowPrefix = "ainn"
-	tmuxExtkeysSlot  = "terminal-features[3]"
-	tmuxExtkeys      = "xterm*:extkeys"
+	tmuxSocketName                = "ainn"
+	tmuxHostSession               = "ainn-host"
+	tmuxMainWindowID              = "0"
+	tmuxWindowPrefix              = "ainn"
+	tmuxExtkeysSlot               = "terminal-features[3]"
+	tmuxExtkeys                   = "xterm*:extkeys"
+	tmuxHostedSessionsStatusRight = "#[range=user|ainn-hosted-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]"
 )
 
 func defaultTmuxSettings() config.Settings {
@@ -192,7 +193,7 @@ func TmuxThemeCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings),
 		"set-option", "-g", "status", "on", ";",
 		"set-option", "-g", "status-left", "", ";",
-		"set-option", "-g", "status-right", "", ";",
+		"set-option", "-g", "status-right", tmuxHostedSessionsStatusRight, ";",
 		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
 		"set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";",
 		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
