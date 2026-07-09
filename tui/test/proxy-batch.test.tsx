@@ -225,6 +225,55 @@ test("proxy batch create flow omits blank count so the backend default applies",
   }
 })
 
+test("proxy batch create flow re-prompts invalid variant count before creating", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+    await app.mockInput.typeText("cli-openrouter")
+    await runCommand(app, "dialog.select.submit")
+
+    await submitPrompt(app)
+    await submitPrompt(app, "invalid count")
+    await submitPrompt(app, "abc")
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Variant Count")
+    })
+    expect(app.calls.createBatch).toEqual([])
+
+    await submitPrompt(app, "2")
+    await submitPrompt(app, "Fix scroll")
+    await submitPrompt(app)
+
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 2)
+    expect(app.calls.createBatch).toEqual([
+      {
+        title: "invalid count",
+        prompt: "Fix scroll",
+        worker_name: "cli-openrouter",
+        count: 2,
+        source_directory: directory,
+      },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("batch winner action selects the highlighted variant", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()

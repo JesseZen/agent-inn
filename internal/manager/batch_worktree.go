@@ -37,6 +37,8 @@ var batchCommandRunnerFactory = func() batchCommandRunner {
 
 var batchWorktreeCreator = createBatchWorktree
 
+var batchWorktreeRemover = removeBatchWorktree
+
 func createBatchWorktree(sourceDir string, targetDir string) error {
 	sourceDir = strings.TrimSpace(sourceDir)
 	targetDir = strings.TrimSpace(targetDir)
@@ -59,5 +61,19 @@ func createBatchWorktree(sourceDir string, targetDir string) error {
 		return errors.New("git repository root is required")
 	}
 	_, err = runner.Run([]string{"git", "-C", repoRoot, "worktree", "add", "--detach", targetDir, "HEAD"})
+	return err
+}
+
+func removeBatchWorktree(sourceDir string, targetDir string) error {
+	sourceDir = strings.TrimSpace(sourceDir)
+	targetDir = strings.TrimSpace(targetDir)
+	if sourceDir == "" {
+		return errors.New("source directory is required")
+	}
+	if targetDir == "" {
+		return errors.New("target directory is required")
+	}
+	runner := batchCommandRunnerFactory()
+	_, err := runner.Run([]string{"git", "-C", sourceDir, "worktree", "remove", "--force", targetDir})
 	return err
 }

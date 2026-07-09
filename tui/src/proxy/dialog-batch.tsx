@@ -6,8 +6,12 @@ import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useProject } from "../context/project"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
+import { useToast } from "../ui/toast"
 import type { BatchRun, BatchVariant, HostedSessionSummary, WorkerSummary } from "./backend"
 import { launchProxySession, pasteHostedPrompt } from "./launch"
+
+const minBatchVariantCount = 1
+const maxBatchVariantCount = 8
 
 type BatchListOption =
   | {
@@ -23,6 +27,7 @@ export function DialogBatch() {
   const dialog = useDialog()
   const sync = useSync()
   const project = useProject()
+  const toast = useToast()
   const [batches, setBatches] = createSignal<BatchRun[]>([])
 
   onMount(async () => {
@@ -102,10 +107,21 @@ export function DialogBatch() {
       placeholder: "Title",
     })
     if (title === null) return
-    const countText = await DialogPrompt.show(dialog, "Variant Count", {
-      placeholder: "Count",
-    })
-    if (countText === null) return
+    let count: number | undefined
+    for (;;) {
+      const countText = await DialogPrompt.show(dialog, "Variant Count", {
+        placeholder: "Count",
+      })
+      if (countText === null) return
+      const trimmedCount = countText.trim()
+      if (trimmedCount === "") break
+      const parsedCount = Number(trimmedCount)
+      if (Number.isInteger(parsedCount) && parsedCount >= minBatchVariantCount && parsedCount <= maxBatchVariantCount) {
+        count = parsedCount
+        break
+      }
+      toast.show({ message: `Variant count must be between ${minBatchVariantCount} and ${maxBatchVariantCount}`, variant: "error" })
+    }
     const prompt = await DialogPrompt.show(dialog, "Prompt", {
       placeholder: "Prompt",
     })
@@ -115,12 +131,11 @@ export function DialogBatch() {
     })
     if (model === null) return
 
-    const count = countText.trim()
     const batch = await sdk.client.createBatch({
       title,
       ...(prompt ? { prompt } : {}),
       worker_name: worker.name,
-      ...(count ? { count: Number(count) } : {}),
+      ...(count !== undefined ? { count } : {}),
       source_directory: sourceDirectory,
       ...(model ? { model } : {}),
     })

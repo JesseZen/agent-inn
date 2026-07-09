@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -327,6 +328,60 @@ func TestManagerAPIDeleteRetriesAfterPartialHostedSessionCleanup(t *testing.T) {
 	}
 }
 
+func TestManagerAPIBatchCreateCleansWorktreesWhenVariantCreationFails(t *testing.T) {
+	repo := t.TempDir()
+	runGitForBatchAPITest(t, repo, "init")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGitForBatchAPITest(t, repo, "add", "README.md")
+	runGitForBatchAPITest(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+
+	m, dir := newBatchAPITestManager(t)
+	var firstWorktree string
+	createdWorktrees := 0
+	restore := setBatchWorktreeCreatorForTest(func(sourceDir string, targetDir string) error {
+		createdWorktrees++
+		if createdWorktrees == 2 {
+			return errors.New("create worktree failed")
+		}
+		firstWorktree = targetDir
+		return createBatchWorktree(sourceDir, targetDir)
+	})
+	t.Cleanup(restore)
+
+	body := strings.NewReader(`{"title":"rollback","prompt":"Fix","worker_name":"codex-app","count":2,"source_directory":` + strconv.Quote(repo) + `}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/batches", body))
+	if res.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if firstWorktree == "" {
+		t.Fatal("expected first worktree to be created")
+	}
+	if _, err := os.Stat(firstWorktree); !os.IsNotExist(err) {
+		t.Fatalf("expected first worktree directory to be removed, stat err: %v", err)
+	}
+	worktreeList := runGitForBatchAPITest(t, repo, "worktree", "list", "--porcelain")
+	if strings.Contains(worktreeList, firstWorktree) {
+		t.Fatalf("expected git worktree metadata to be removed, got:\n%s", worktreeList)
+	}
+	batches, err := NewBatchRegistry(BatchRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewHostedSessionRegistry(HostedSessionRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(batches, []BatchRun{}) {
+		t.Fatalf("batches mismatch: %#v", batches)
+	}
+	if !reflect.DeepEqual(sessions, []HostedSessionRecord{}) {
+		t.Fatalf("hosted sessions mismatch: %#v", sessions)
+	}
+}
+
 func newBatchAPITestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -359,4 +414,14 @@ func createBatchForAPITest(t *testing.T, m *Manager) BatchRun {
 		t.Fatal(err)
 	}
 	return got
+}
+
+func runGitForBatchAPITest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out)
 }

@@ -95,6 +95,7 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 
 	variants := make([]BatchVariant, 0, count)
 	createdSessionIDs := make([]string, 0, count)
+	createdWorktreeDirs := make([]string, 0, count)
 	labelBase := batch.ID
 	if strings.TrimSpace(payload.Title) != "" {
 		labelBase = fmt.Sprintf("%s %s", title, batch.ID)
@@ -102,10 +103,11 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 	for i := 1; i <= count; i++ {
 		worktreeDir := filepath.Join(expandHomePath(cfg.Settings.StateDir), "worktrees", batch.ID, fmt.Sprintf("%d", i))
 		if err := batchWorktreeCreator(sourceDirectory, worktreeDir); err != nil {
-			m.cleanupReservedBatch(batch.ID, createdSessionIDs, cfg.Settings)
+			m.cleanupReservedBatch(batch.ID, createdSessionIDs, createdWorktreeDirs, sourceDirectory, cfg.Settings)
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
+		createdWorktreeDirs = append(createdWorktreeDirs, worktreeDir)
 		sessionLabel := fmt.Sprintf("%s #%d", labelBase, i)
 		session, err := m.hostedSessions.Create(HostedSessionRecord{
 			SessionLabel: sessionLabel,
@@ -115,7 +117,7 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 			Model:        model,
 		})
 		if err != nil {
-			m.cleanupReservedBatch(batch.ID, createdSessionIDs, cfg.Settings)
+			m.cleanupReservedBatch(batch.ID, createdSessionIDs, createdWorktreeDirs, sourceDirectory, cfg.Settings)
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
@@ -129,7 +131,7 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := m.batchRegistry.SetVariants(batch.ID, variants)
 	if err != nil {
-		m.cleanupReservedBatch(batch.ID, createdSessionIDs, cfg.Settings)
+		m.cleanupReservedBatch(batch.ID, createdSessionIDs, createdWorktreeDirs, sourceDirectory, cfg.Settings)
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 		return
 	}
@@ -209,9 +211,12 @@ func (m *Manager) handleDeleteBatch(rw http.ResponseWriter, batchID string) {
 	writeJSON(rw, http.StatusOK, map[string]any{"batch_id": batch.ID})
 }
 
-func (m *Manager) cleanupReservedBatch(batchID string, sessionIDs []string, settings config.Settings) {
+func (m *Manager) cleanupReservedBatch(batchID string, sessionIDs []string, worktreeDirs []string, sourceDirectory string, settings config.Settings) {
 	for _, sessionID := range sessionIDs {
 		_ = m.hostedSessions.RemoveForSettings(sessionID, settings, hostedTMuxRunnerFactory())
+	}
+	for i := len(worktreeDirs) - 1; i >= 0; i-- {
+		_ = batchWorktreeRemover(sourceDirectory, worktreeDirs[i])
 	}
 	_, _ = m.batchRegistry.Delete(batchID)
 }

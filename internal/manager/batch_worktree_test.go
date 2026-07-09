@@ -51,6 +51,26 @@ func TestCreateBatchWorktreeReturnsGitError(t *testing.T) {
 	}
 }
 
+func TestRemoveBatchWorktreeRunsGitWorktreeRemove(t *testing.T) {
+	var commands [][]string
+	restore := setBatchCommandRunnerForTest(func(args []string) (string, error) {
+		commands = append(commands, append([]string{}, args...))
+		return "", nil
+	})
+	defer restore()
+
+	if err := removeBatchWorktree("/repo/sub", "/tmp/worktree"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := [][]string{
+		{"git", "-C", "/repo/sub", "worktree", "remove", "--force", "/tmp/worktree"},
+	}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("commands mismatch:\n got %#v\nwant %#v", commands, want)
+	}
+}
+
 func setBatchWorktreeCreatorForTest(fn func(string, string) error) func() {
 	old := batchWorktreeCreator
 	batchWorktreeCreator = fn
