@@ -158,8 +158,8 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 		return nil, err
 	}
 	plansByPath := map[string]int{}
-	activePaths := map[string]bool{}
 	plans := []hostedTurnWatchPlan{}
+	unresolvedLauncherWatch := false
 	for _, watch := range watches {
 		if watch.TranscriptPath == "" {
 			transcriptPath := w.launcherPaths[watch.LauncherSessionID]
@@ -178,6 +178,7 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 					return nil, err
 				}
 				if len(matches) == 0 {
+					unresolvedLauncherWatch = true
 					continue
 				}
 				sort.Strings(matches)
@@ -187,17 +188,39 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 
 			file, err := os.Open(transcriptPath)
 			if os.IsNotExist(err) {
+				unresolvedLauncherWatch = true
 				continue
 			}
 			if err != nil {
 				return nil, err
 			}
+			stat, err := file.Stat()
+			if err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+			cursor, hasCursor := w.files[transcriptPath]
+			if cursor.Offset > stat.Size() {
+				cursor.Offset = 0
+			}
+			if !hasCursor && watch.TurnGeneration > 1 {
+				w.files[transcriptPath] = hostedTurnTranscriptCursor{Offset: stat.Size(), Size: stat.Size(), ModTime: stat.ModTime()}
+				_ = file.Close()
+				unresolvedLauncherWatch = true
+				continue
+			}
+			if _, err := file.Seek(cursor.Offset, io.SeekStart); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
 			latestTurnID := ""
+			nextOffset := cursor.Offset
 			reader := bufio.NewReader(file)
 			scanErr := error(nil)
 			for {
 				line, err := reader.ReadString('\n')
 				if len(line) > 0 {
+					nextOffset += int64(len(line))
 					if len(line) > hostedTurnTranscriptMaxLine {
 						scanErr = fmt.Errorf("line exceeds %d bytes", hostedTurnTranscriptMaxLine)
 						break
@@ -232,12 +255,13 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 				return nil, scanErr
 			}
 			if latestTurnID == "" {
+				w.files[transcriptPath] = hostedTurnTranscriptCursor{Offset: nextOffset, Size: stat.Size(), ModTime: stat.ModTime()}
+				unresolvedLauncherWatch = true
 				continue
 			}
 			watch.TranscriptPath = transcriptPath
 			watch.TurnID = latestTurnID
 		}
-		activePaths[watch.TranscriptPath] = true
 		index, ok := plansByPath[watch.TranscriptPath]
 		if !ok {
 			index = len(plans)
@@ -249,19 +273,16 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 		}
 		plans[index].TurnsByID[watch.TurnID] = append(plans[index].TurnsByID[watch.TurnID], watch)
 	}
-	for path := range w.files {
-		if !activePaths[path] {
-			delete(w.files, path)
-		}
-	}
 	stat, err = os.Stat(w.registry.path)
 	if err != nil {
 		return nil, err
 	}
-	w.registryCursor = hostedTurnRegistryCursor{
-		Size:    stat.Size(),
-		ModTime: stat.ModTime(),
-		Plans:   plans,
+	if !unresolvedLauncherWatch {
+		w.registryCursor = hostedTurnRegistryCursor{
+			Size:    stat.Size(),
+			ModTime: stat.ModTime(),
+			Plans:   plans,
+		}
 	}
 	return plans, nil
 }
