@@ -107,13 +107,44 @@ func (w *hostedTurnWatcher) pollOnce() error {
 		if err != nil {
 			return err
 		}
+		completed := []HostedSessionRecord{}
 		for _, result := range results {
+			if result.State == HostedTurnStateRunning {
+				for _, completedSession := range completed {
+					session, err := w.registry.MarkTurnStateWithWatch(completedSession.SessionID, HostedTurnStateRunning, "", "", plan.TranscriptPath, result.TurnID, HostedTurnWatchKindCodex)
+					if err != nil {
+						return err
+					}
+					plan.TurnsByID[result.TurnID] = append(plan.TurnsByID[result.TurnID], HostedTurnWatch{
+						SessionID:         session.SessionID,
+						TurnGeneration:    session.TurnGeneration,
+						TranscriptPath:    session.TurnTranscriptPath,
+						TurnID:            session.TurnID,
+						LauncherSessionID: session.LauncherSessionID,
+						TmuxWindowID:      session.TmuxWindowID,
+						TurnState:         session.TurnState,
+						SessionSnapshot:   session,
+					})
+					if session.TmuxWindowID == "" {
+						continue
+					}
+					if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
+						return err
+					}
+				}
+				completed = nil
+				continue
+			}
 			for _, watch := range plan.TurnsByID[result.TurnID] {
 				session, ok, err := w.registry.CompleteWatchedTurn(watch.SessionID, watch.TurnGeneration, result.State, result.Reason)
 				if err != nil {
 					return err
 				}
-				if !ok || session.TmuxWindowID == "" {
+				if !ok {
+					continue
+				}
+				if session.TmuxWindowID == "" {
+					completed = append(completed, session)
 					continue
 				}
 				if result.State == HostedTurnStateDone {
@@ -135,6 +166,7 @@ func (w *hostedTurnWatcher) pollOnce() error {
 						}
 					}
 				}
+				completed = append(completed, session)
 				if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
 					return err
 				}
@@ -364,6 +396,9 @@ func parseHostedTurnTranscriptLine(line string) (hostedTurnTranscriptResult, boo
 	case codexTranscriptEventMsg:
 		if event.Payload.TurnID == "" {
 			return hostedTurnTranscriptResult{}, false, nil
+		}
+		if event.Payload.Type == codexTranscriptTaskStarted {
+			return hostedTurnTranscriptResult{TurnID: event.Payload.TurnID, State: HostedTurnStateRunning}, true, nil
 		}
 		if event.Payload.Type == codexTranscriptTurnAborted {
 			return hostedTurnTranscriptResult{TurnID: event.Payload.TurnID, State: HostedTurnStateInterrupted, Reason: hostedTurnInterruptedReason}, true, nil

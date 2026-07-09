@@ -365,6 +365,74 @@ func TestHostedTurnWatcherPollOnceWaitsForNewLauncherTaskStartedOnLaterTurn(t *t
 	}
 }
 
+func TestHostedTurnWatcherPollOnceMarksNextGoalTurnRunning(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(stateDir, "codex.jsonl")
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", transcriptPath, "turn_1", HostedTurnWatchKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn_1","last_agent_message":"done"}}`,
+		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_2"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	watcher := newHostedTurnWatcher(settings, registry, hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		gotCalls = append(gotCalls, append([]string{}, args...))
+		return "", nil
+	}))
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDone := running
+	wantDone.TurnState = HostedTurnStateDone
+	wantDone.TurnTranscriptPath = ""
+	wantDone.TurnID = ""
+	wantDone.TurnWatchKind = ""
+	wantRunning := running
+	wantRunning.TurnGeneration = running.TurnGeneration + 1
+	wantRunning.TurnID = "turn_2"
+	if !ok || !reflect.DeepEqual(updated, wantRunning) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantRunning)
+	}
+	wantCalls := [][]string{
+		TmuxActiveWindowDetailsCommandForSettings(settings),
+		TmuxHostedTurnStatusCommandForRecord(settings, wantDone),
+		TmuxHostedTurnStatusCommandForRecord(settings, wantRunning),
+	}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
+	}
+}
+
 func TestHostedTurnWatcherPollOnceRechecksUnresolvedLauncherWatchAfterTranscriptAppears(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
