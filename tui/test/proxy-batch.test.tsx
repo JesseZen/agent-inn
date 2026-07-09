@@ -8,11 +8,9 @@ import { resolveSlashCommand } from "../src/keymap"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
 const launchCalls: unknown[] = []
-const pasteCalls: unknown[] = []
 
 afterEach(() => {
   launchCalls.length = 0
-  pasteCalls.length = 0
   mock.restore()
 })
 
@@ -26,10 +24,6 @@ function installLaunchMock() {
     },
     async launchProxySession(opts: unknown) {
       launchCalls.push(opts)
-      return true
-    },
-    async pasteHostedPrompt(opts: unknown) {
-      pasteCalls.push(opts)
       return true
     },
   }))
@@ -88,15 +82,13 @@ test("proxy batch create flow sets up variants before opening one hosted termina
     await submitPrompt(app)
     await submitPrompt(app, "fix scroll")
     await submitPrompt(app, "3")
-    await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
-    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4 && pasteCalls.length === 3)
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4)
 
     expect(app.calls.createBatch).toEqual([
       {
         title: "fix scroll",
-        prompt: "Fix scroll",
         worker_name: "cli-openrouter",
         count: 3,
         source_directory: directory,
@@ -140,18 +132,12 @@ test("proxy batch create flow sets up variants before opening one hosted termina
         hostedTerminalAttachMode: "open",
       }),
     ])
-    expect(app.calls.getHostedSession).toEqual(["batch_1_session_1", "batch_1_session_2", "batch_1_session_3"])
-    expect(pasteCalls).toEqual([
-      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@1" },
-      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@2" },
-      { prompt: "Fix scroll", submit: true, tmuxSocketName: "ainn", tmuxWindowID: "@3" },
-    ])
   } finally {
     await app.cleanup()
   }
 })
 
-test("proxy batch create flow waits for tmux window before pasting prompt", async () => {
+test("proxy batch create flow does not inspect tmux windows", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const app = await mountProxyApp({ batchHostedSessionWindowMode: "missing" })
@@ -174,12 +160,11 @@ test("proxy batch create flow waits for tmux window before pasting prompt", asyn
     await submitPrompt(app)
     await submitPrompt(app, "no window")
     await submitPrompt(app, "1")
-    await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
     await wait(async () => {
       await app.render()
-      return app.calls.getHostedSession.length === 1 && app.frame().includes("Batch: no window")
+      return app.frame().includes("Batch: no window")
     })
 
     expect(launchCalls).toEqual([
@@ -194,8 +179,6 @@ test("proxy batch create flow waits for tmux window before pasting prompt", asyn
         hostedTerminalAttachMode: "open",
       }),
     ])
-    expect(app.calls.getHostedSession).toEqual(["batch_1_session_1"])
-    expect(pasteCalls).toEqual([])
   } finally {
     await app.cleanup()
   }
@@ -224,7 +207,6 @@ test("proxy batch create flow omits blank count so the backend default applies",
     await submitPrompt(app)
     await submitPrompt(app, "default count")
     await submitPrompt(app)
-    await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4)
@@ -232,7 +214,6 @@ test("proxy batch create flow omits blank count so the backend default applies",
     expect(app.calls.createBatch).toEqual([
       {
         title: "default count",
-        prompt: "Fix scroll",
         worker_name: "cli-openrouter",
         source_directory: directory,
       },
@@ -273,14 +254,12 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
     expect(app.calls.createBatch).toEqual([])
 
     await submitPrompt(app, "2")
-    await submitPrompt(app, "Fix scroll")
     await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3)
     expect(app.calls.createBatch).toEqual([
       {
         title: "invalid count",
-        prompt: "Fix scroll",
         worker_name: "cli-openrouter",
         count: 2,
         source_directory: directory,
@@ -291,13 +270,12 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
   }
 })
 
-test("batch detail shows only hosted turn confirmation states", async () => {
+test("batch detail shows hosted session states", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
     id: "batch_1",
     title: "fix scroll",
-    prompt: "Fix scroll",
     worker_name: "cli-openrouter",
     worker_port: 11199,
     source_directory: directory,
@@ -355,10 +333,10 @@ test("batch detail shows only hosted turn confirmation states", async () => {
     await wait(async () => {
       await app.render()
       const frame = app.frame()
-      return app.calls.listHostedSessions === 1 && (frame.includes("active") || frame.includes("waiting for CLI confirmation"))
+      return app.calls.listHostedSessions === 1 && (frame.includes("active") || frame.includes("ready"))
     })
 
-    expect(app.frame()).toContain("waiting for CLI confirmation")
+    expect(app.frame()).toContain("ready")
     expect(app.frame()).toContain("running")
     expect(app.frame()).not.toContain("Hosted session")
     expect(app.frame()).not.toContain("Worktree")
@@ -368,7 +346,7 @@ test("batch detail shows only hosted turn confirmation states", async () => {
   }
 })
 
-test("batch detail refreshes when a CLI confirms the prompt", async () => {
+test("batch detail refreshes when a hosted session state changes", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
@@ -411,7 +389,7 @@ test("batch detail refreshes when a CLI confirms the prompt", async () => {
     await runCommand(app, "dialog.select.submit")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("waiting for CLI confirmation")
+      return app.frame().includes("ready")
     })
 
     app.hostedSessions[0].turn_state = "running"
@@ -483,7 +461,6 @@ test("batch detail deletes all variants after confirmation", async () => {
 type BatchClient = ReturnType<typeof useSDK>["client"] & {
   createBatch(input: {
     title: string
-    prompt?: string
     worker_name: string
     count?: number
     source_directory: string
@@ -543,7 +520,6 @@ test("createBatch POSTs the exact request body to /api/batches", async () => {
   const calls = await withBatchClient(async (client) => {
     created = await client.createBatch({
       title: "Race parser fix",
-      prompt: "fix it",
       worker_name: "coder",
       count: 3,
       source_directory: "/repo",
@@ -554,7 +530,6 @@ test("createBatch POSTs the exact request body to /api/batches", async () => {
   expect(calls.createBatch).toEqual([
     {
       title: "Race parser fix",
-      prompt: "fix it",
       worker_name: "coder",
       count: 3,
       source_directory: "/repo",
@@ -580,97 +555,4 @@ test("batch client does not expose winner selection", async () => {
   })
 
   expect(client).not.toHaveProperty("selectBatchWinner")
-})
-
-test("pasteHostedPrompt sends literal prompt text without Enter", async () => {
-  const spawns: Array<{ cmd: string; args: string[] }> = []
-
-  mock.module("node:child_process", () => ({
-    spawn(cmd: string, args: string[]) {
-      spawns.push({ cmd, args })
-      const child = {
-        stdout: { on() {} },
-        stderr: { on() {} },
-        on(event: string, handler: (code?: number) => void) {
-          if (event === "exit") queueMicrotask(() => handler(0))
-          return child
-        },
-      }
-      return child
-    },
-  }))
-
-  const launchModule = await import(`../src/proxy/launch?paste-hosted-prompt=${Date.now()}`)
-  const pasted = await launchModule.pasteHostedPrompt({
-    prompt: "prompt",
-    tmuxSocketName: "ainn",
-    tmuxWindowID: "@12",
-  })
-
-  expect(pasted).toBe(true)
-  expect(spawns).toEqual([
-    {
-      cmd: "tmux",
-      args: ["-L", "ainn", "send-keys", "-l", "-t", "@12", "prompt"],
-    },
-  ])
-})
-
-test("pasteHostedPrompt can submit after literal prompt", async () => {
-  const spawns: Array<{ cmd: string; args: string[] }> = []
-
-  mock.module("node:child_process", () => ({
-    spawn(cmd: string, args: string[]) {
-      spawns.push({ cmd, args })
-      const child = {
-        stdout: { on() {} },
-        stderr: { on() {} },
-        on(event: string, handler: (code?: number) => void) {
-          if (event === "exit") queueMicrotask(() => handler(0))
-          return child
-        },
-      }
-      return child
-    },
-  }))
-
-  const launchModule = await import(`../src/proxy/launch?paste-hosted-submit=${Date.now()}`)
-  const pasted = await launchModule.pasteHostedPrompt({
-    prompt: "prompt",
-    submit: true,
-    tmuxSocketName: "ainn",
-    tmuxWindowID: "@12",
-  })
-
-  expect(pasted).toBe(true)
-  expect(spawns).toEqual([
-    {
-      cmd: "tmux",
-      args: ["-L", "ainn", "send-keys", "-l", "-t", "@12", "prompt"],
-    },
-    {
-      cmd: "tmux",
-      args: ["-L", "ainn", "send-keys", "-t", "@12", "Enter"],
-    },
-  ])
-})
-
-test("pasteHostedPrompt returns false for an empty prompt", async () => {
-  const spawns: Array<{ cmd: string; args: string[] }> = []
-
-  mock.module("node:child_process", () => ({
-    spawn(cmd: string, args: string[]) {
-      spawns.push({ cmd, args })
-      throw new Error("empty prompt should not spawn")
-    },
-  }))
-
-  const launchModule = await import(`../src/proxy/launch?paste-empty-prompt=${Date.now()}`)
-  const pasted = await launchModule.pasteHostedPrompt({
-    prompt: "",
-    tmuxWindowID: "@12",
-  })
-
-  expect(pasted).toBe(false)
-  expect(spawns).toEqual([])
 })

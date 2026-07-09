@@ -154,7 +154,6 @@ export type BatchVariant = {
 export type BatchRun = {
   id: string
   title: string
-  prompt?: string
   worker_name: string
   worker_port: number
   model?: string
@@ -165,7 +164,6 @@ export type BatchRun = {
 
 export type CreateBatchRequest = {
   title: string
-  prompt?: string
   worker_name: string
   count?: number
   source_directory: string

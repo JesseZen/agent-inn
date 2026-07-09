@@ -10,7 +10,7 @@ import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import type { BatchRun, BatchVariant, HostedSessionSummary, WorkerSummary } from "./backend"
-import { launchProxySession, pasteHostedPrompt, type HostedTerminalAttachMode } from "./launch"
+import { launchProxySession, type HostedTerminalAttachMode } from "./launch"
 
 const minBatchVariantCount = 1
 const maxBatchVariantCount = 8
@@ -52,7 +52,7 @@ export function DialogBatch() {
     })),
   ])
 
-  async function launchVariant(batch: BatchRun, variant: BatchVariant, hostedTerminalAttachMode: HostedTerminalAttachMode, prompt?: string) {
+  async function launchVariant(batch: BatchRun, variant: BatchVariant, hostedTerminalAttachMode: HostedTerminalAttachMode) {
     const settings = await sdk.client.getSettings()
     await launchProxySession({
       executable: import.meta.env?.AINN_EXECUTABLE || undefined,
@@ -69,15 +69,6 @@ export function DialogBatch() {
       hostedTerminalAttachMode,
     })
 
-    if (!prompt) return
-    const session = await sdk.client.getHostedSession(variant.hosted_session_id)
-    if (!session.tmux_window_id) return
-    await pasteHostedPrompt({
-      prompt,
-      submit: true,
-      tmuxSocketName: settings.settings.terminal.tmux.socket_name,
-      tmuxWindowID: session.tmux_window_id,
-    })
   }
 
   function createBatch() {
@@ -127,10 +118,6 @@ export function DialogBatch() {
       }
       toast.show({ message: `Variant count must be between ${minBatchVariantCount} and ${maxBatchVariantCount}`, variant: "error" })
     }
-    const prompt = await DialogPrompt.show(dialog, "Prompt", {
-      placeholder: "Prompt",
-    })
-    if (prompt === null) return
     const model = await DialogPrompt.show(dialog, "Model", {
       placeholder: "Model",
     })
@@ -138,14 +125,13 @@ export function DialogBatch() {
 
     const batch = await sdk.client.createBatch({
       title,
-      ...(prompt ? { prompt } : {}),
       worker_name: worker.name,
       ...(count !== undefined ? { count } : {}),
       source_directory: sourceDirectory,
       ...(model ? { model } : {}),
     })
     for (const variant of batch.variants) {
-      await launchVariant(batch, variant, "setup-only", batch.prompt)
+      await launchVariant(batch, variant, "setup-only")
     }
     if (batch.variants.length > 0) await launchVariant(batch, batch.variants[0], "open")
     dialog.replace(() => <DialogBatchRun batch={batch} />)
@@ -189,7 +175,7 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
       return {
         title: variant.session_label,
         value: variant,
-        description: state === "idle" ? "waiting for CLI confirmation" : state,
+        description: state === "idle" ? "ready" : state,
       }
     }),
   )

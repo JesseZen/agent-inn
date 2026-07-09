@@ -504,7 +504,6 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const batchRun: BatchRun = {
         id: batchID,
         title: body.title,
-        prompt: body.prompt,
         worker_name: body.worker_name,
         worker_port: workerPort,
         model: body.model,
