@@ -1064,7 +1064,7 @@ func TestRunLaunchHostedTerminalHostedPopupKeyInstallsBinding(t *testing.T) {
 					return "", nil
 				}
 				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
-					return "", nil
+					return "", errors.New("exit status 1: unknown key: H")
 				}
 				if len(args) > 3 && args[3] == "select-window" {
 					return "", errors.New("can't find window")

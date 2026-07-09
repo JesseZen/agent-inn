@@ -522,7 +522,10 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 
 	bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, key))
 	if err != nil {
-		return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
+		if !strings.HasSuffix(strings.TrimSpace(err.Error()), "unknown key: "+key) {
+			return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
+		}
+		bindingOut = ""
 	}
 	binding := strings.TrimSpace(bindingOut)
 	if owner != "" && owner != configDir {
