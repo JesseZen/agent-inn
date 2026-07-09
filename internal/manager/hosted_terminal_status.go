@@ -20,6 +20,7 @@ const (
 	TmuxToggleTodoMouseKey           = "DoubleClick1Status"
 	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
 	tmuxHostedPopupOwnerOption       = "@ainn_hosted_popup_owner"
+	tmuxHostedPopupKeyOption         = "@ainn_hosted_popup_key"
 	hostedPopupTitle                 = "Hosted Terminal"
 	hostedPopupWidth                 = "80%"
 	hostedPopupHeight                = "70%"
@@ -152,6 +153,20 @@ func TmuxSetHostedPopupOwnerCommandForSettings(settings config.Settings, configD
 	return append(tmuxPrefixForSettings(settings),
 		"set-option", "-t", tmuxHostSessionForSettings(settings),
 		tmuxHostedPopupOwnerOption, configDir,
+	)
+}
+
+func TmuxHostedPopupKeyCommandForSettings(settings config.Settings) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"show-option", "-qv", "-t", tmuxHostSessionForSettings(settings),
+		tmuxHostedPopupKeyOption,
+	)
+}
+
+func TmuxSetHostedPopupKeyCommandForSettings(settings config.Settings, key string) []string {
+	return append(tmuxPrefixForSettings(settings),
+		"set-option", "-t", tmuxHostSessionForSettings(settings),
+		tmuxHostedPopupKeyOption, key,
 	)
 }
 

@@ -340,6 +340,18 @@ func TestTmuxHostedPopupOwnerCommandsForSettings(t *testing.T) {
 		t.Fatalf("got %#v, want %#v", gotSetOwner, wantSetOwner)
 	}
 
+	gotKey := TmuxHostedPopupKeyCommandForSettings(settings)
+	wantKey := []string{"tmux", "-L", "ainn-test", "show-option", "-qv", "-t", "ainn-test-host", "@ainn_hosted_popup_key"}
+	if !reflect.DeepEqual(gotKey, wantKey) {
+		t.Fatalf("got %#v, want %#v", gotKey, wantKey)
+	}
+
+	gotSetKey := TmuxSetHostedPopupKeyCommandForSettings(settings, "H")
+	wantSetKey := []string{"tmux", "-L", "ainn-test", "set-option", "-t", "ainn-test-host", "@ainn_hosted_popup_key", "H"}
+	if !reflect.DeepEqual(gotSetKey, wantSetKey) {
+		t.Fatalf("got %#v, want %#v", gotSetKey, wantSetKey)
+	}
+
 	gotList := TmuxListHostedPopupBindingCommandForSettings(settings, "H")
 	wantList := []string{"tmux", "-L", "ainn-test", "list-keys", "-T", "prefix", "H"}
 	if !reflect.DeepEqual(gotList, wantList) {
