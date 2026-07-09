@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useSDK, type MetricsRangeName, type MetricsResponse } from "../context/sdk"
@@ -15,6 +15,8 @@ const RANGES: Array<{ title: string; value: MetricsRangeName }> = [
   { title: "Last 24h", value: "last_24h" },
 ]
 
+const METRICS_REFRESH_DELAY_MS = 100
+
 function formatTokens(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M tok`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K tok`
@@ -28,29 +30,66 @@ export function DialogMetrics() {
   const toast = useToast()
   const [range, setRange] = createSignal<MetricsRangeName>("today")
   const [metrics, setMetrics] = createSignal<MetricsResponse>()
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined
+  let pendingRange: MetricsRangeName | undefined
+  let metricsRequestInFlight = false
+  let metricsRequestGeneration = 0
 
-  async function loadMetrics(nextRange: MetricsRangeName) {
+  async function requestMetrics() {
+    if (metricsRequestInFlight || !pendingRange) return
+    const nextRange = pendingRange
+    const requestGeneration = metricsRequestGeneration
+    pendingRange = undefined
+    metricsRequestInFlight = true
     try {
-      setRange(nextRange)
-      setMetrics(await sdk.client.getMetrics(nextRange))
+      const result = await sdk.client.getMetrics(nextRange)
+      if (requestGeneration === metricsRequestGeneration) setMetrics(result)
     } catch (err) {
-      toast.error(err)
+      if (requestGeneration === metricsRequestGeneration) toast.error(err)
+    } finally {
+      metricsRequestInFlight = false
+      if (pendingRange) void requestMetrics()
     }
   }
 
+  function loadMetrics(nextRange: MetricsRangeName) {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+      refreshTimer = undefined
+    }
+    setRange(nextRange)
+    metricsRequestGeneration += 1
+    pendingRange = nextRange
+    void requestMetrics()
+  }
+
+  function scheduleMetricsRefresh() {
+    metricsRequestGeneration += 1
+    if (refreshTimer) return
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined
+      pendingRange = range()
+      void requestMetrics()
+    }, METRICS_REFRESH_DELAY_MS)
+  }
+
   onMount(() => {
-    void loadMetrics("today")
+    loadMetrics("today")
   })
 
   createEffect(
     on(
       () => sync.data.metrics_generation,
       () => {
-        void loadMetrics(range())
+        scheduleMetricsRefresh()
       },
       { defer: true },
     ),
   )
+
+  onCleanup(() => {
+    if (refreshTimer) clearTimeout(refreshTimer)
+  })
 
   const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => [
     ...RANGES.map((item) => ({
@@ -58,7 +97,7 @@ export function DialogMetrics() {
       value: { type: "range" as const, range: item.value },
       description: item.value === range() ? "selected" : "",
       category: "Range",
-      onSelect: () => void loadMetrics(item.value),
+      onSelect: () => loadMetrics(item.value),
     })),
     ...(metrics()?.workers ?? []).map((worker) => ({
       title: worker.worker,

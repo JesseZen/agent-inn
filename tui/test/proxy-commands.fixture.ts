@@ -14,6 +14,7 @@ import {
   type CreateBatchRequest,
   type HostedSessionSummary,
   type MetricsRangeName,
+  type MetricsResponse,
   type ProxyConfigStatus,
   type ProxySettings,
   type PluginDefinition,
@@ -61,6 +62,7 @@ type ProxyHarnessInput = {
   hostedSessions?: HostedSessionSummary[]
   patchWorkerDelayMs?: number
   strictModuleWorkerIDs?: boolean
+  metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
 }
 
@@ -231,7 +233,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     getMetrics: [] as string[],
   }
 
-  const fetch = createFetch((url) => {
+  const fetch = createFetch(async (url) => {
     if (url.pathname === "/config/providers")
       return json({
         providers: toAinnUpstreams([...providers.values()]),
@@ -261,6 +263,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     if (url.pathname === "/api/metrics") {
       const range = (url.searchParams.get("range") ?? "today") as MetricsRangeName
       calls.getMetrics.push(range)
+      if (input.metricsResponder) return json(await input.metricsResponder(range))
       return json({
         range: { name: range, start: "2026-07-10T00:00:00+08:00", end: "2026-07-11T00:00:00+08:00" },
         workers: [{
