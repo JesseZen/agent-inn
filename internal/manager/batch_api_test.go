@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -152,6 +153,54 @@ func TestManagerAPIDeletesBatchAndHostedSessions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(sessions, []HostedSessionRecord{}) {
 		t.Fatalf("hosted sessions mismatch: %#v", sessions)
+	}
+}
+
+func TestManagerAPIDeleteKeepsBatchWhenHostedSessionCleanupFails(t *testing.T) {
+	m, dir := newBatchAPITestManager(t)
+	created := createBatchForAPITest(t, m)
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(dir))
+	err := registry.withLockedFile(func(file *hostedSessionFile) error {
+		session := file.Sessions[created.Variants[0].HostedSessionID]
+		session.TmuxWindowID = "@12"
+		file.Sessions[created.Variants[0].HostedSessionID] = session
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removeErr := errors.New("tmux socket permission denied")
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			return "", removeErr
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/batches/"+created.ID, nil))
+	if res.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+
+	got, ok, err := NewBatchRegistry(BatchRegistryPath(dir)).Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected batch to remain gettable")
+	}
+	if !reflect.DeepEqual(got, created) {
+		t.Fatalf("batch mismatch:\n got %#v\nwant %#v", got, created)
+	}
+	listed, err := NewBatchRegistry(BatchRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(listed, []BatchRun{created}) {
+		t.Fatalf("batches mismatch: %#v", listed)
 	}
 }
 

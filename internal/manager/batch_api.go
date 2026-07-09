@@ -178,9 +178,13 @@ func (m *Manager) handleBatchByID(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) handleDeleteBatch(rw http.ResponseWriter, batchID string) {
-	batch, err := m.batchRegistry.Delete(batchID)
+	batch, ok, err := m.batchRegistry.Get(batchID)
 	if err != nil {
-		writeJSON(rw, http.StatusNotFound, map[string]any{"error": redactedErrorMessage(err)})
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		return
+	}
+	if !ok {
+		writeJSON(rw, http.StatusNotFound, map[string]any{"error": fmt.Sprintf("batch %q not found", batchID)})
 		return
 	}
 	cfg, _ := m.syncConfigFromStore()
@@ -191,6 +195,10 @@ func (m *Manager) handleDeleteBatch(rw http.ResponseWriter, batchID string) {
 				return
 			}
 		}
+	}
+	if _, err := m.batchRegistry.Delete(batchID); err != nil {
+		writeJSON(rw, http.StatusNotFound, map[string]any{"error": redactedErrorMessage(err)})
+		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"batch_id": batch.ID})
 }
