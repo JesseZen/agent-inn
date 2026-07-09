@@ -411,6 +411,24 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       setReady(true)
     })
 
+  onCleanup(() => {
+    attention.dispose()
+  })
+
+  const args = useArgs()
+  if (args.hostedTerminalPopup) {
+    return (
+      <box
+        width={dimensions().width}
+        height={dimensions().height}
+        flexDirection="column"
+        backgroundColor={theme.background}
+      >
+        <HostedTerminalPopupApp />
+      </box>
+    )
+  }
+
   // Let selection copy/dismiss win ahead of normal bindings when explicit copy is required.
   const offSelectionKeys = keymap.intercept(
     "key",
@@ -422,7 +440,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   )
   onCleanup(() => {
     offSelectionKeys()
-    attention.dispose()
   })
 
   // Wire up console copy-to-clipboard via opentui's onCopySelection callback
@@ -467,7 +484,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     }
   })
 
-  const args = useArgs()
   onMount(() => {
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
@@ -1104,19 +1120,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     if (!render) return <PluginRouteMissing id={route.data.id} onHome={() => route.navigate({ type: "home" })} />
     return render({ params: route.data.data })
   })
-
-  if (args.hostedTerminalPopup) {
-    return (
-      <box
-        width={dimensions().width}
-        height={dimensions().height}
-        flexDirection="column"
-        backgroundColor={theme.background}
-      >
-        <HostedTerminalPopupApp />
-      </box>
-    )
-  }
 
   return (
     <box

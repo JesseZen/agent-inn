@@ -70,6 +70,55 @@ test("popup mode renders hosted terminal picker without home route", async () =>
   }
 })
 
+test("popup mode ignores normal command palette command", async () => {
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions")
+      return json({
+        sessions: [activeHostedSession],
+      })
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session")
+    })
+
+    app.api().keymap.dispatchCommand("command.palette.show")
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame).toContain("Hosted Terminal")
+    expect(frame).not.toContain("Commands")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("popup mode does not render provider setup with empty providers", async () => {
+  const app = await mountHostedTerminalPopupApp()
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Hosted Terminal") && frame.includes("Create new session")
+    })
+
+    const frame = app.setup.captureCharFrame()
+    expect(frame).toContain("Hosted Terminal")
+    expect(frame).not.toContain("Connect a provider")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("popup mode opens existing hosted session with setup only then exits", async () => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
 
