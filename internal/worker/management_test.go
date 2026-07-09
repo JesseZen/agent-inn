@@ -50,6 +50,42 @@ func TestWorkerManagementStatusRedactsSecretsAndIncludesGeneration(t *testing.T)
 	}
 }
 
+func TestWorkerManagementStatusIncludesProxyURL(t *testing.T) {
+	w := mustNewWorker(t, Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
+			ProxyURL:   "http://user:pass@127.0.0.1:7890",
+		},
+	})
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://proxy.local/_proxy/status", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got struct {
+		SnapshotGeneration int    `json:"snapshot_generation"`
+		ProxyURL           string `json:"proxy_url"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Body.String(), "pass") || strings.Contains(res.Body.String(), "user") {
+		t.Fatalf("status leaked proxy credentials: %s", res.Body.String())
+	}
+	want := struct {
+		SnapshotGeneration int    `json:"snapshot_generation"`
+		ProxyURL           string `json:"proxy_url"`
+	}{
+		SnapshotGeneration: 1,
+		ProxyURL:           "http://127.0.0.1:7890",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad status proxy URL:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestWorkerManagementStatusIncludesConfigPatchState(t *testing.T) {
 	w := mustNewWorker(t, Options{
 		Snapshot: RuntimeConfigSnapshot{

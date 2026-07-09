@@ -37,6 +37,8 @@ workers:
         port: 6767
         upstream: joycode
         launcher: codex
+        # Optional outbound HTTP proxy for this worker.
+        # proxy_url: http://127.0.0.1:7890
         log_level: simple
         request_modules:
             api_translate:

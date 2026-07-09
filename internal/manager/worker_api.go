@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,10 +78,25 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			http.NotFound(rw, r)
 			return
 		}
-		var next config.WorkerConfig
-		if err := json.NewDecoder(r.Body).Decode(&next); err != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
+		}
+		var next config.WorkerConfig
+		if err := json.Unmarshal(body, &next); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+			return
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+			return
+		}
+		if _, ok := fields["proxy_url"]; ok {
+			next.ProxyURL = strings.TrimSpace(next.ProxyURL)
+		} else {
+			next.ProxyURL = current.ProxyURL
 		}
 		if next.Port <= 0 {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker port is required"})

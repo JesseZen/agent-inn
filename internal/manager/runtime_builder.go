@@ -44,6 +44,9 @@ func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation app
 	if !ok {
 		return appruntime.WorkerRuntime{}, fmt.Errorf("upstream %q not found", worker.Upstream)
 	}
+	if _, err := appruntime.ParseProxyURL(worker.ProxyURL); err != nil {
+		return appruntime.WorkerRuntime{}, err
+	}
 	resolved, err := upstream.ResolveRuntime(worker.Upstream, profile)
 	if err != nil {
 		return appruntime.WorkerRuntime{}, err
@@ -92,6 +95,7 @@ func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation app
 		ListenPort: worker.Port,
 		Role:       appruntime.WorkerRole(worker.Role),
 		LogLevel:   appruntime.LogLevel(workerLogLevel(worker)),
+		ProxyURL:   worker.ProxyURL,
 		Upstream:   resolved,
 		Modules:    modules,
 		Hooks:      hooks,

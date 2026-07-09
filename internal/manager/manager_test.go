@@ -1311,6 +1311,90 @@ func TestManagerAPIWorkerDetailIncludesProviderFieldsAndConfigPatchState(t *test
 	}
 }
 
+func TestManagerAPIWorkerSummaryAndDetailIncludeProxyURL(t *testing.T) {
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {
+					Port:     6767,
+					Upstream: "openai",
+					ProxyURL: "http://user:pass@127.0.0.1:7890",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected workers status %d: %s", res.Code, res.Body.String())
+	}
+	var list struct {
+		Workers []WorkerSummary `json:"workers"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Body.String(), "pass") || strings.Contains(res.Body.String(), "user") {
+		t.Fatalf("workers list leaked proxy credentials: %s", res.Body.String())
+	}
+	wantList := struct {
+		Workers []WorkerSummary `json:"workers"`
+	}{
+		Workers: []WorkerSummary{
+			{
+				Name:               "app",
+				Port:               6767,
+				Role:               "cli",
+				Launcher:           "codex",
+				Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
+				ProxyURL:           "http://127.0.0.1:7890",
+				Protocol:           appruntime.ProtocolResponses,
+				ModuleSupport:      supportForPluginDefinitions(testPluginDefinitions()),
+				Status:             "configured",
+				SnapshotGeneration: 1,
+				LogLevel:           "simple",
+			},
+		},
+	}
+	if !reflect.DeepEqual(list, wantList) {
+		t.Fatalf("bad workers list:\ngot  %#v\nwant %#v", list, wantList)
+	}
+
+	res = httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/workers/6767", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected worker detail status %d: %s", res.Code, res.Body.String())
+	}
+	var detail WorkerDetail
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Body.String(), "pass") || strings.Contains(res.Body.String(), "user") {
+		t.Fatalf("worker detail leaked proxy credentials: %s", res.Body.String())
+	}
+	wantDetail := WorkerDetail{
+		Name:               "app",
+		Port:               6767,
+		Role:               "cli",
+		Launcher:           "codex",
+		Upstream:           upstream.RedactedUpstream{Name: "openai", BaseURL: "https://api.openai.com/v1"},
+		ProxyURL:           "http://127.0.0.1:7890",
+		Protocol:           appruntime.ProtocolResponses,
+		ModuleSupport:      supportForPluginDefinitions(testPluginDefinitions()),
+		Status:             "configured",
+		SnapshotGeneration: 1,
+		LogLevel:           "simple",
+	}
+	if !reflect.DeepEqual(detail, wantDetail) {
+		t.Fatalf("bad worker detail:\ngot  %#v\nwant %#v", detail, wantDetail)
+	}
+}
+
 func TestManagerAPIWorkerDetailIncludesGenericHookStatuses(t *testing.T) {
 	m := New(Config{
 		Config: config.Config{
@@ -1352,6 +1436,219 @@ func TestManagerAPIWorkerDetailIncludesGenericHookStatuses(t *testing.T) {
 	}
 	if strings.Contains(res.Body.String(), "config_patch_state") || strings.Contains(res.Body.String(), "config_patch_detail") {
 		t.Fatalf("worker detail included old config_patch fields: %s", res.Body.String())
+	}
+}
+
+func TestManagerAPIPatchesRunningWorkerProxyURL(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"cli": {
+					Port:     11199,
+					Upstream: "openai",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: client,
+	})
+	m.statuses["cli"] = "running"
+
+	body := strings.NewReader(`{"port":11199,"upstream":"openai","proxy_url":"http://127.0.0.1:7890"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/11199", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected update status %d: %s", res.Code, res.Body.String())
+	}
+	gotConfig, ok := m.workerConfig("cli")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	wantConfig := config.WorkerConfig{
+		Role:           "cli",
+		Launcher:       "codex",
+		Port:           11199,
+		Upstream:       "openai",
+		ProxyURL:       "http://127.0.0.1:7890",
+		LogLevel:       "simple",
+		RequestModules: map[string]config.ModuleConfig{},
+		Hooks:          map[string]config.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(gotConfig, wantConfig) {
+		t.Fatalf("bad worker config:\ngot  %#v\nwant %#v", gotConfig, wantConfig)
+	}
+	wantRuntime := appruntime.WorkerRuntime{
+		ID:         "cli",
+		Generation: 2,
+		ListenPort: 11199,
+		Role:       "cli",
+		LogLevel:   "simple",
+		ProxyURL:   "http://127.0.0.1:7890",
+		Upstream: appruntime.UpstreamRuntime{
+			ID:      "openai",
+			BaseURL: "https://api.openai.com/v1",
+		},
+		Modules: map[string]appruntime.ModuleConfig{},
+		Hooks:   map[string]appruntime.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(client.appliedRuntime, wantRuntime) {
+		t.Fatalf("bad applied runtime:\ngot  %#v\nwant %#v", client.appliedRuntime, wantRuntime)
+	}
+}
+
+func TestManagerAPIRejectsInvalidWorkerProxyURL(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"cli": {
+					Port:     11199,
+					Upstream: "openai",
+					ProxyURL: "http://127.0.0.1:7890",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: client,
+	})
+	m.statuses["cli"] = "running"
+
+	body := strings.NewReader(`{"port":11199,"upstream":"openai","proxy_url":"localhost:7890"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/11199", body))
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected update status %d: %s", res.Code, res.Body.String())
+	}
+	gotConfig, ok := m.workerConfig("cli")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	wantConfig := config.WorkerConfig{
+		Role:           "cli",
+		Launcher:       "codex",
+		Port:           11199,
+		Upstream:       "openai",
+		ProxyURL:       "http://127.0.0.1:7890",
+		LogLevel:       "simple",
+		RequestModules: map[string]config.ModuleConfig{},
+		Hooks:          map[string]config.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(gotConfig, wantConfig) {
+		t.Fatalf("bad worker config:\ngot  %#v\nwant %#v", gotConfig, wantConfig)
+	}
+	if !reflect.DeepEqual(client.appliedRuntime, appruntime.WorkerRuntime{}) {
+		t.Fatalf("invalid proxy URL was applied: %#v", client.appliedRuntime)
+	}
+}
+
+func TestManagerAPIPreservesWorkerProxyURLWhenPatchOmitsField(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"cli": {
+					Port:     11199,
+					Upstream: "openai",
+					ProxyURL: "http://127.0.0.1:7890",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		WorkerClient: client,
+	})
+	m.statuses["cli"] = "running"
+
+	body := strings.NewReader(`{"port":11199,"upstream":"openai","log_level":"detail"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/11199", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected update status %d: %s", res.Code, res.Body.String())
+	}
+	gotConfig, ok := m.workerConfig("cli")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	wantConfig := config.WorkerConfig{
+		Role:           "cli",
+		Launcher:       "codex",
+		Port:           11199,
+		Upstream:       "openai",
+		ProxyURL:       "http://127.0.0.1:7890",
+		LogLevel:       "detail",
+		RequestModules: map[string]config.ModuleConfig{},
+		Hooks:          map[string]config.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(gotConfig, wantConfig) {
+		t.Fatalf("bad worker config:\ngot  %#v\nwant %#v", gotConfig, wantConfig)
+	}
+	wantRuntime := appruntime.WorkerRuntime{
+		ID:         "cli",
+		Generation: 2,
+		ListenPort: 11199,
+		Role:       "cli",
+		LogLevel:   "detail",
+		ProxyURL:   "http://127.0.0.1:7890",
+		Upstream: appruntime.UpstreamRuntime{
+			ID:      "openai",
+			BaseURL: "https://api.openai.com/v1",
+		},
+		Modules: map[string]appruntime.ModuleConfig{},
+		Hooks:   map[string]appruntime.ModuleConfig{},
+	}
+	if !reflect.DeepEqual(client.appliedRuntime, wantRuntime) {
+		t.Fatalf("bad applied runtime:\ngot  %#v\nwant %#v", client.appliedRuntime, wantRuntime)
+	}
+}
+
+func TestManagerUpdateWorkerRestartsRunningWorkerWhenHooksChange(t *testing.T) {
+	starter := &recordingStarter{}
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"cli": {
+					Port:     11199,
+					Upstream: "openai",
+				},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter:      starter,
+		WorkerClient: client,
+	})
+	if err := m.StartWorker("cli"); err != nil {
+		t.Fatal(err)
+	}
+	current, ok := m.workerConfig("cli")
+	if !ok {
+		t.Fatal("worker config missing")
+	}
+	next := current
+	next.Hooks = map[string]config.ModuleConfig{
+		"config_patch": {Enabled: false, Params: map[string]any{"config_path": "~/.codex/config.toml"}},
+	}
+
+	if err := m.UpdateWorker("cli", current, next); err != nil {
+		t.Fatal(err)
+	}
+	if len(starter.spawns) != 2 {
+		t.Fatalf("expected hook config change to restart worker, got %d spawns", len(starter.spawns))
+	}
+	if client.appliedPort != 0 || !reflect.DeepEqual(client.appliedRuntime, appruntime.WorkerRuntime{}) {
+		t.Fatalf("hook config change was hot-applied: port=%d runtime=%#v", client.appliedPort, client.appliedRuntime)
 	}
 }
 
@@ -1415,7 +1712,8 @@ func TestManagerAPIPatchesRunningWorkerLogLevelWithoutRecheckingCurrentPort(t *t
 				"openai": {BaseURL: "https://api.openai.com/v1"},
 			},
 		},
-		Starter: fakeStarter{},
+		Starter:      fakeStarter{},
+		WorkerClient: &recordingWorkerClient{},
 	})
 	if err := m.StartWorker("cli"); err != nil {
 		t.Fatal(err)

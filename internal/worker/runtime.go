@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"net/http"
 	"sync/atomic"
 
 	"github.com/jesse/agent-inn/internal/module"
@@ -12,6 +13,8 @@ import (
 
 type RuntimeConfigSnapshot struct {
 	Generation       int
+	ProxyURL         string
+	HTTPClient       *http.Client
 	Upstream         upstream.RuntimeUpstream
 	CompiledUpstream upstream.Compiled
 	// RequestModuleConfigs keeps raw operator config so upstream changes can rebuild derived defaults.
@@ -100,6 +103,7 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 	}
 	snapshot := RuntimeConfigSnapshot{
 		Generation: int(runtime.Generation),
+		ProxyURL:   runtime.ProxyURL,
 		Upstream: upstream.RuntimeUpstream{
 			Name:      string(runtime.Upstream.ID),
 			BaseURL:   runtime.Upstream.BaseURL,
@@ -122,6 +126,33 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 		return RuntimeConfigSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func (s RuntimeConfigSnapshot) withHTTPClient(defaultClient *http.Client) (RuntimeConfigSnapshot, error) {
+	if s.ProxyURL == "" {
+		if s.HTTPClient == nil {
+			if defaultClient != nil {
+				s.HTTPClient = defaultClient
+			} else {
+				s.HTTPClient = http.DefaultClient
+			}
+		}
+		return s, nil
+	}
+	proxyURL, err := appruntime.ParseProxyURL(s.ProxyURL)
+	if err != nil {
+		return RuntimeConfigSnapshot{}, err
+	}
+	baseClient := defaultClient
+	if baseClient == nil {
+		baseClient = http.DefaultClient
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(proxyURL)
+	client := *baseClient
+	client.Transport = transport
+	s.HTTPClient = &client
+	return s, nil
 }
 
 type snapshotHolder struct {

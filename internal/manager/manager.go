@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -73,6 +74,7 @@ type WorkerSummary struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Status             string                                      `json:"status"`
@@ -114,6 +116,7 @@ type ApplyRuntimeStatus struct {
 type WorkerStatus struct {
 	SnapshotGeneration int                                         `json:"snapshot_generation"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Modules            map[string]config.ModuleConfig              `json:"modules"`
@@ -127,6 +130,7 @@ type WorkerDetail struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
+	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	Protocol           appruntime.ProtocolKind                     `json:"protocol,omitempty"`
 	ModuleSupport      map[string]appruntime.ModuleProtocolSupport `json:"module_support,omitempty"`
 	Status             string                                      `json:"status"`
@@ -290,6 +294,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Role:               seed.worker.Role,
 			Launcher:           seed.worker.Launcher,
 			Upstream:           runtimeUpstream.Redacted(),
+			ProxyURL:           appruntime.RedactProxyURL(seed.worker.ProxyURL),
 			Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 			ModuleSupport:      supportForPluginDefinitions(seed.plugins),
 			Status:             seed.status,
@@ -326,6 +331,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Role:               worker.Role,
 		Launcher:           worker.Launcher,
 		Upstream:           runtimeUpstream.Redacted(),
+		ProxyURL:           appruntime.RedactProxyURL(worker.ProxyURL),
 		Protocol:           appruntime.ProtocolKindFromAPIFormat(appruntime.APIFormat(runtimeUpstream.APIFormat)),
 		ModuleSupport:      supportForPluginDefinitions(m.pluginDefinitionsSnapshot()),
 		Status:             string(m.workerStatus(name)),
@@ -354,6 +360,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 	if status.Upstream.Name != "" {
 		detail.Upstream = status.Upstream
 	}
+	detail.ProxyURL = status.ProxyURL
 	if status.Protocol != "" {
 		detail.Protocol = status.Protocol
 	}
@@ -794,7 +801,25 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 		})
 		m.publishWorkerUpdated(name, next)
 		if wasRunning {
-			return m.RestartWorker(name)
+			if !reflect.DeepEqual(current.Hooks, next.Hooks) {
+				return m.RestartWorker(name)
+			}
+			m.bumpWorkerGeneration(name)
+			client := m.workerClient
+			if client == nil {
+				client = HTTPWorkerClient{Client: http.DefaultClient}
+			}
+			runtime, err := m.runtimeForWorker(name)
+			if err == nil {
+				_, err = client.ApplyRuntime(next.Port, runtime)
+			}
+			if err != nil {
+				m.mu.Lock()
+				m.statuses[name] = WorkerStateOutOfSync
+				m.mu.Unlock()
+				m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateOutOfSync), "error": redactedErrorMessage(err)})
+				return err
+			}
 		}
 		return nil
 	}
@@ -867,6 +892,7 @@ func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) 
 		"role":      worker.Role,
 		"launcher":  worker.Launcher,
 		"upstream":  worker.Upstream,
+		"proxy_url": appruntime.RedactProxyURL(worker.ProxyURL),
 		"log_level": workerLogLevel(worker),
 		"modules":   cloneModules(worker.RequestModules),
 		"hooks":     cloneModules(worker.Hooks),
@@ -1243,6 +1269,7 @@ func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
 		Launcher:       worker.Launcher,
 		Port:           worker.Port,
 		Upstream:       worker.Upstream,
+		ProxyURL:       worker.ProxyURL,
 		LogLevel:       workerLogLevel(worker),
 		RequestModules: cloneModules(worker.RequestModules),
 		Hooks:          cloneModules(worker.Hooks),

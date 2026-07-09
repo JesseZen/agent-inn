@@ -66,6 +66,128 @@ func TestWorkerPassesThroughWithNoModulesAndInjectsAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkerRoutesUpstreamRequestThroughProxyURL(t *testing.T) {
+	received := make(chan string, 1)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"source":"proxy"}`))
+	}))
+	defer proxy.Close()
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			ProxyURL:   proxy.URL,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: "http://127.0.0.1:1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://worker.local/v1/responses?x=1", nil)
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, req)
+
+	if res.Code != http.StatusAccepted || res.Body.String() != `{"source":"proxy"}` {
+		t.Fatalf("unexpected worker response: status=%d body=%q", res.Code, res.Body.String())
+	}
+	select {
+	case got := <-received:
+		want := "http://127.0.0.1:1/v1/responses?x=1"
+		if got != want {
+			t.Fatalf("proxy received URL %q, want %q", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("proxy did not receive upstream request")
+	}
+}
+
+func TestWorkerRejectsInvalidProxyURL(t *testing.T) {
+	_, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			ProxyURL:   "localhost:7890",
+			Upstream:   upstream.RuntimeUpstream{BaseURL: "http://127.0.0.1:1"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "proxy_url") {
+		t.Fatalf("expected proxy_url error, got %v", err)
+	}
+}
+
+func TestWorkerKeepsProxyClientFromStartingSnapshot(t *testing.T) {
+	firstReady := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(firstReady)
+		<-releaseFirst
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("first"))
+	}))
+	defer firstProxy.Close()
+	secondProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("second"))
+	}))
+	defer secondProxy.Close()
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			ProxyURL:   firstProxy.URL,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: "http://127.0.0.1:1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan string, 1)
+	go func() {
+		res := httptest.NewRecorder()
+		w.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/responses", nil))
+		result <- res.Body.String()
+	}()
+
+	select {
+	case <-firstReady:
+	case <-time.After(time.Second):
+		t.Fatal("first proxy did not receive request")
+	}
+
+	_, err = w.UpdateRuntime(appruntime.WorkerRuntime{
+		ID:         "cli-openai",
+		Generation: 2,
+		ProxyURL:   secondProxy.URL,
+		Upstream: appruntime.UpstreamRuntime{
+			ID:      "openai",
+			BaseURL: "http://127.0.0.1:1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirst)
+
+	select {
+	case got := <-result:
+		if got != "first" {
+			t.Fatalf("in-flight request used changed proxy client: %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not finish")
+	}
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/responses", nil))
+	if res.Body.String() != "second" {
+		t.Fatalf("new request did not use updated proxy client: %q", res.Body.String())
+	}
+}
+
 func TestWorkerDecompressesEncodedRequestWithoutModules(t *testing.T) {
 	type upstreamRequest struct {
 		Body            string

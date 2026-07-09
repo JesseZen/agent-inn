@@ -219,9 +219,30 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     },
   }
 
+  const proxyAction: DialogSelectOption<string> = {
+    title: "Proxy URL",
+    value: "proxy_url",
+    description: props.worker.proxy_url || "direct",
+    onSelect: async () => {
+      const value = await DialogPrompt.show(dialog, `Proxy URL: ${props.worker.name}`, {
+        placeholder: "http://127.0.0.1:7890",
+        value: props.worker.proxy_url ?? "",
+      })
+      if (value === null) return
+      if (value === (props.worker.proxy_url ?? "")) return
+      try {
+        await sdk.client.patchWorker(props.worker.port, { proxy_url: value })
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Saved ${props.worker.name} proxy_url: ${value || "direct"}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+    },
+  }
+
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, restartAction, stopAction, deleteAction]
+      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 
@@ -231,10 +252,11 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       options={actions()}
       placeholder="Worker actions..."
       footer={
-        <box flexDirection="column" gap={1}>
-          <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""} • launcher: {props.worker.launcher ?? "codex"}</text>
+        <box flexDirection="column">
+          <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
           <text fg={theme.textMuted}>upstream: {props.worker.upstream.name} • protocol: {props.worker.protocol ?? "responses"}</text>
-          <text fg={theme.textMuted}>log level: {props.worker.log_level} • modules: {modules().length} req • {hooks().length} hook</text>
+          <text fg={theme.textMuted}>launcher: {props.worker.launcher ?? "codex"} • log level: {props.worker.log_level}</text>
+          <text fg={theme.textMuted}>proxy: {props.worker.proxy_url || "direct"} • modules: {modules().length} req / {hooks().length} hook</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>
             <box flexDirection="column">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>

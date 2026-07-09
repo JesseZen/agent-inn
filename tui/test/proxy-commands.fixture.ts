@@ -163,7 +163,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
   }
   const calls = {
     createWorker: [] as Array<{ name: string; port?: number; upstream: string; launcher?: string }>,
-    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number }>,
+    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number; proxy_url?: string }>,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
     patchSettings: [] as ProxySettingsPatch[],
@@ -256,13 +256,20 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
 
     if (url.pathname === "/api/workers/6767" && method === "PATCH") {
       if (input.patchWorkerDelayMs) await Bun.sleep(input.patchWorkerDelayMs)
-      const body = JSON.parse(String(init?.body ?? "null")) as { port: number; upstream: string; log_level?: string; launcher?: string }
+      const body = JSON.parse(String(init?.body ?? "null")) as {
+        port: number
+        upstream: string
+        log_level?: string
+        launcher?: string
+        proxy_url?: string
+      }
       calls.patchWorker.push({
         port: 6767,
         upstream: body.upstream,
         log_level: body.log_level,
         ...(body.port !== 6767 ? { next_port: body.port } : {}),
         ...(body.launcher ? { launcher: body.launcher } : {}),
+        ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
       })
       const nextUpstream = providers.get(body.upstream)
       if (nextUpstream) {
@@ -276,6 +283,9 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       }
       if (body.launcher) {
         workers.set(6767, { ...workers.get(6767)!, launcher: body.launcher })
+      }
+      if (body.proxy_url !== undefined) {
+        workers.set(6767, { ...workers.get(6767)!, proxy_url: body.proxy_url })
       }
       if (body.port !== 6767) {
         const worker = { ...workers.get(6767)!, port: body.port }

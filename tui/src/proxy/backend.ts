@@ -46,6 +46,7 @@ export type WorkerConfig = {
   launcher?: string
   port: number
   upstream: string
+  proxy_url?: string
   log_level?: string
   request_modules?: Record<string, ModuleConfig>
   hooks?: Record<string, ModuleConfig>
@@ -69,6 +70,7 @@ export type WorkerSummary = {
   port: number
   role?: string
   launcher?: string
+  proxy_url?: string
   protocol?: ProtocolKind
   upstream: RedactedUpstream
   status: string

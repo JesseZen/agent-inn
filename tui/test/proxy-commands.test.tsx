@@ -595,6 +595,43 @@ test("proxy workers launcher selection returns to worker detail before patch fin
   }
 })
 
+test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("proxy: direct")
+
+    for (let i = 0; i < 6; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
+    expect(app.frame()).toContain("Proxy URL")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused proxy URL prompt")
+    await app.mockInput.typeText("http://127.0.0.1:7890")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchWorker.some((call) => call.proxy_url === "http://127.0.0.1:7890")
+    })
+
+    expect(app.calls.patchWorker).toContainEqual({
+      port: 6767,
+      upstream: "openai",
+      log_level: "simple",
+      proxy_url: "http://127.0.0.1:7890",
+    })
+    expect(app.frame()).toContain("proxy: http://127.0.0.1:7890")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy workers create claudecode worker payload", async () => {
   const app = await mountProxyApp()
 
@@ -1071,6 +1108,40 @@ test("proxy workers editor patches log_level field", async () => {
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers editor preserves proxy URL when patching log_level", async () => {
+  const app = await mountProxyApp({
+    workers: [
+      {
+        name: "app",
+        port: 6767,
+        role: "app",
+        protocol: "chat_completions",
+        upstream: { name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+        status: "running",
+        snapshot_generation: 3,
+        log_level: "simple",
+        proxy_url: "http://proxy.local:7890",
+      },
+    ],
+  })
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("proxy: http://proxy.local:7890")
+
+    await runCommand(app, "dialog.select.submit")
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.patchWorker.some((c) => c.log_level === "detail"))
+    await app.render()
+
+    expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
+    expect(app.frame()).toContain("proxy: http://proxy.local:7890")
   } finally {
     await app.cleanup()
   }

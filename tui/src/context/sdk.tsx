@@ -83,6 +83,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             hooks: WorkerDetail["hooks"]
             log_level: string
             launcher: string
+            proxy_url: string
           }>,
         ) {
           const current = await this.getWorker(port)
@@ -102,6 +103,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
               },
               log_level: patch.log_level ?? current.log_level,
               launcher: patch.launcher ?? current.launcher,
+              ...(patch.proxy_url !== undefined ? { proxy_url: patch.proxy_url } : {}),
             }),
           })
         },

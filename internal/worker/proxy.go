@@ -53,6 +53,10 @@ func New(opts Options) (*Worker, error) {
 		}
 	}
 	snapshot = snapshot.withCompiledUpstream()
+	snapshot, err := snapshot.withHTTPClient(client)
+	if err != nil {
+		return nil, err
+	}
 	return &Worker{
 		snapshots: newSnapshotHolder(snapshot),
 		client:    client,
@@ -66,6 +70,10 @@ func (w *Worker) UpdateRuntime(runtime appruntime.WorkerRuntime) (appruntime.Gen
 		return 0, err
 	}
 	snapshot = snapshot.withCompiledUpstream()
+	snapshot, err = snapshot.withHTTPClient(w.client)
+	if err != nil {
+		return 0, err
+	}
 	w.snapshots.Store(snapshot)
 	w.logger.Info(logging.EventSnapshotReload, "generation", snapshot.Generation)
 	return appruntime.Generation(snapshot.Generation), nil
@@ -73,6 +81,11 @@ func (w *Worker) UpdateRuntime(runtime appruntime.WorkerRuntime) (appruntime.Gen
 
 func (w *Worker) UpdateSnapshot(snapshot RuntimeConfigSnapshot) error {
 	snapshot = snapshot.withCompiledUpstream()
+	var err error
+	snapshot, err = snapshot.withHTTPClient(w.client)
+	if err != nil {
+		return err
+	}
 	if err := snapshot.Validate(); err != nil {
 		return err
 	}
@@ -229,7 +242,11 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		upstreamReq.ContentLength = int64(len(proxyReq.Body))
 	}
 
-	upstreamHTTPResp, err := w.client.Do(upstreamReq)
+	client := snapshot.HTTPClient
+	if client == nil {
+		client = w.client
+	}
+	upstreamHTTPResp, err := client.Do(upstreamReq)
 	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventUpstreamFail,
 			"method", proxyReq.Method,

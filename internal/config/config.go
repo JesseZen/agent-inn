@@ -64,6 +64,7 @@ type WorkerConfig struct {
 	Launcher       string                  `yaml:"launcher,omitempty" json:"launcher,omitempty"`
 	Port           int                     `yaml:"port"`
 	Upstream       string                  `yaml:"upstream"`
+	ProxyURL       string                  `yaml:"proxy_url,omitempty" json:"proxy_url,omitempty"`
 	LogLevel       string                  `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	RequestModules map[string]ModuleConfig `yaml:"request_modules" json:"request_modules,omitempty"`
 	Hooks          map[string]ModuleConfig `yaml:"hooks" json:"hooks,omitempty"`

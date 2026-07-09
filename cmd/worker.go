@@ -35,6 +35,7 @@ type WorkerRuntimeConfig struct {
 	Port       int                                 `json:"port,omitempty"`
 	Role       appruntime.WorkerRole               `json:"role,omitempty"`
 	LogLevel   appruntime.LogLevel                 `json:"log_level,omitempty"`
+	ProxyURL   string                              `json:"proxy_url,omitempty"`
 	Upstream   appruntime.UpstreamRuntime          `json:"upstream"`
 	Plugins    map[string]appruntime.PluginRuntime `json:"plugins,omitempty"`
 	Modules    map[string]module.ModuleConfig      `json:"modules,omitempty"`
@@ -94,6 +95,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	}
 	snapshot := worker.RuntimeConfigSnapshot{
 		Generation: generation,
+		ProxyURL:   cfg.ProxyURL,
 		Upstream: upstream.RuntimeUpstream{
 			Name:      string(cfg.Upstream.ID),
 			BaseURL:   cfg.Upstream.BaseURL,

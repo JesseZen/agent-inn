@@ -69,6 +69,7 @@ type WorkerRuntime struct {
 	ListenPort int                      `json:"listen_port"`
 	Role       WorkerRole               `json:"role,omitempty"`
 	LogLevel   LogLevel                 `json:"log_level,omitempty"`
+	ProxyURL   string                   `json:"proxy_url,omitempty"`
 	Upstream   UpstreamRuntime          `json:"upstream"`
 	Plugins    map[string]PluginRuntime `json:"plugins,omitempty"`
 	Modules    map[string]ModuleConfig  `json:"modules,omitempty"`

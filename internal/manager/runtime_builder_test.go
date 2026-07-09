@@ -30,6 +30,7 @@ func TestRuntimeBuilderBuildsCompleteWorkerRuntime(t *testing.T) {
 				Port:     11199,
 				Role:     "cli",
 				Upstream: "openai",
+				ProxyURL: "http://127.0.0.1:18080",
 				LogLevel: "simple",
 				RequestModules: map[string]config.ModuleConfig{
 					"api_translate": {Enabled: true},
@@ -59,6 +60,7 @@ func TestRuntimeBuilderBuildsCompleteWorkerRuntime(t *testing.T) {
 		ListenPort: 11199,
 		Role:       "cli",
 		LogLevel:   "simple",
+		ProxyURL:   "http://127.0.0.1:18080",
 		Upstream: appruntime.UpstreamRuntime{
 			ID:        "openai",
 			BaseURL:   "https://api.openai.com/v1",
