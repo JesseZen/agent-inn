@@ -21,9 +21,6 @@ const (
 	hostedSessionAcknowledgeCommand = "hosted-session acknowledge"
 	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
 	defaultManagerURL               = "http://127.0.0.1:9090"
-	hostedPopupTitle                = "Hosted Terminal"
-	hostedPopupWidth                = "40%"
-	hostedPopupHeight               = "100%"
 )
 
 type launchRunner interface {
@@ -554,9 +551,7 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 				strings.Contains(binding, "-E") &&
 				strings.Contains(binding, "-x R") &&
 				strings.Contains(binding, "-y 0") &&
-				strings.Contains(binding, hostedPopupWidth) &&
-				strings.Contains(binding, hostedPopupHeight) &&
-				strings.Contains(binding, hostedPopupTitle) &&
+				strings.Contains(binding, manager.TmuxHostedPopupTitle) &&
 				strings.Contains(binding, "hosted-session popup") &&
 				strings.Contains(binding, "--config-dir") &&
 				strings.Contains(binding, configDir)

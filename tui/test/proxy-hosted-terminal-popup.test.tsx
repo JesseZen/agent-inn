@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { Global } from "@agent-inn/core/global"
+import { TextareaRenderable } from "@opentui/core"
 import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalPopupApp, wait } from "./proxy-hosted-terminal.fixture"
 
 afterEach(() => {
@@ -115,6 +116,32 @@ test("popup mode root escape exits the right rail", async () => {
   }
 })
 
+test("popup mode mouse close exits the right rail", async () => {
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Hosted Terminal")
+    })
+    const lines = app.setup.captureCharFrame().split("\n")
+    const row = lines.findIndex((line) => line.includes("Hosted Terminal") && line.includes("esc"))
+    const column = row >= 0 ? lines[row].indexOf("esc") : -1
+    if (row < 0 || column < 0) throw new Error("expected visible popup close affordance")
+
+    await app.setup.mockMouse.click(column, row)
+    await wait(() => app.setup.renderer.isDestroyed)
+
+    expect({ rendererDestroyed: app.setup.renderer.isDestroyed }).toEqual({ rendererDestroyed: true })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("popup mode nested escape returns to the visible right-rail root", async () => {
   let listCalls = 0
   const app = await mountHostedTerminalPopupApp((url) => {
@@ -153,6 +180,138 @@ test("popup mode nested escape returns to the visible right-rail root", async ()
       headerRow: 0,
       rendererDestroyed: false,
       listCalls: 1,
+    })
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode direct-root rename persists the refreshed list without replacing the right rail", async () => {
+  const patches: Array<{ session_id: string; session_label: string }> = []
+  let listCalls = 0
+  let sessions = [{ ...activeHostedSession }]
+  const app = await mountHostedTerminalPopupApp((url, request) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      listCalls += 1
+      return json({ sessions })
+    }
+    if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "PATCH") {
+      patches.push({ session_id: "hs_1", session_label: "solve problem B" })
+      sessions = sessions.map((session) => ({ ...session, session_label: "solve problem B" }))
+      return json(sessions[0])
+    }
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Refresh")
+    })
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressKey("r", { ctrl: true })
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Rename Hosted Session") && app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused hosted session rename prompt")
+    editor.selectAll()
+    await app.setup.mockInput.typeText("solve problem B")
+    await app.setup.renderOnce()
+    const promptLines = app.setup.captureCharFrame().split("\n")
+    const promptRow = promptLines.findIndex((line) => line.includes("submit"))
+    const promptColumn = promptRow >= 0 ? promptLines[promptRow].indexOf("submit") : -1
+    if (promptRow < 0 || promptColumn < 0) throw new Error("expected visible rename submit control")
+    await app.setup.mockMouse.click(promptColumn, promptRow)
+    await wait(() => patches.length === 1 && listCalls === 2)
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    const lines = frame.split("\n")
+    expect({
+      patches,
+      hasPreviousLabel: frame.includes("solve problem A"),
+      headerRow: lines.findIndex((line) => line.includes("Hosted Terminal")),
+      rendererDestroyed: app.setup.renderer.isDestroyed,
+      listCalls,
+      renamedLabelVisible: frame.includes("solve problem B"),
+    }).toEqual({
+      patches: [{ session_id: "hs_1", session_label: "solve problem B" }],
+      hasPreviousLabel: false,
+      headerRow: 0,
+      rendererDestroyed: false,
+      listCalls: 2,
+      renamedLabelVisible: true,
+    })
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode direct-root delete persists the remaining list without replacing the right rail", async () => {
+  const deleteRequests: string[] = []
+  let listCalls = 0
+  let sessions = [
+    { ...activeHostedSession },
+    { ...activeHostedSession, session_id: "hs_2", session_label: "remaining session", status: "stale" as const },
+  ]
+  const app = await mountHostedTerminalPopupApp((url, request) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      listCalls += 1
+      return json({ sessions })
+    }
+    if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "DELETE") {
+      deleteRequests.push("hs_1")
+      sessions = sessions.filter((session) => session.session_id !== "hs_1")
+      return json({ session_id: "hs_1" })
+    }
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Refresh")
+    })
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressKey("d", { ctrl: true })
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Delete solve problem A?")
+    })
+    const confirmLines = app.setup.captureCharFrame().split("\n")
+    const confirmRow = confirmLines.findIndex((line) => line.includes("Confirm"))
+    const confirmColumn = confirmRow >= 0 ? confirmLines[confirmRow].indexOf("Confirm") : -1
+    if (confirmRow < 0 || confirmColumn < 0) throw new Error("expected visible delete confirmation control")
+    await app.setup.mockMouse.click(confirmColumn, confirmRow)
+    await wait(() => deleteRequests.length === 1)
+    await app.setup.renderOnce()
+
+    const frame = app.setup.captureCharFrame()
+    const lines = frame.split("\n")
+    expect({
+      deleteRequests,
+      hasDeletedSession: frame.includes("solve problem A"),
+      headerRow: lines.findIndex((line) => line.includes("Hosted Terminal")),
+      rendererDestroyed: app.setup.renderer.isDestroyed,
+      listCalls,
+      remainingLabelVisible: frame.includes("remaining session"),
+    }).toEqual({
+      deleteRequests: ["hs_1"],
+      hasDeletedSession: false,
+      headerRow: 0,
+      rendererDestroyed: false,
+      listCalls: 1,
+      remainingLabelVisible: true,
     })
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()

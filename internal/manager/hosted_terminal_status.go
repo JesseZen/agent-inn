@@ -18,12 +18,12 @@ const (
 	TmuxAcknowledgeTurnHook          = "after-select-window[90]"
 	TmuxAcknowledgeMouseKey          = "MouseDown1Status"
 	TmuxToggleTodoMouseKey           = "DoubleClick1Status"
+	TmuxHostedPopupTitle             = "Hosted Terminal"
+	TmuxHostedPopupWidth             = "40%"
+	TmuxHostedPopupHeight            = "100%"
 	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
 	tmuxHostedPopupOwnerOption       = "@ainn_hosted_popup_owner"
 	tmuxHostedPopupKeyOption         = "@ainn_hosted_popup_key"
-	hostedPopupTitle                 = "Hosted Terminal"
-	hostedPopupWidth                 = "40%"
-	hostedPopupHeight                = "100%"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 	tmuxHostedPopupStatusRange       = "ainn-sessions"
 )
@@ -189,8 +189,8 @@ func TmuxDisplayHostedPopupCommandForSettings(settings config.Settings, configDi
 	return append(tmuxPrefixForSettings(settings),
 		"display-popup", "-E",
 		"-x", "R", "-y", "0",
-		"-w", hostedPopupWidth, "-h", hostedPopupHeight,
-		"-T", hostedPopupTitle,
+		"-w", TmuxHostedPopupWidth, "-h", TmuxHostedPopupHeight,
+		"-T", TmuxHostedPopupTitle,
 		shellCommand,
 	)
 }
@@ -199,9 +199,9 @@ func tmuxDisplayHostedPopupCommand(configDir string, managerURL string, executab
 	shellCommand := tmuxShellQuote(executable) +
 		" hosted-session popup --config-dir " + tmuxShellQuote(configDir) +
 		" --manager-url " + tmuxShellQuote(managerURL)
-	return "display-popup -E -x R -y 0 -w " + hostedPopupWidth +
-		" -h " + hostedPopupHeight +
-		" -T " + tmuxShellQuote(hostedPopupTitle) +
+	return "display-popup -E -x R -y 0 -w " + TmuxHostedPopupWidth +
+		" -h " + TmuxHostedPopupHeight +
+		" -T " + tmuxShellQuote(TmuxHostedPopupTitle) +
 		" " + shellCommand
 }
 
