@@ -41,6 +41,15 @@ func hostedTestTmuxSettings(socketName string, hostSession string) config.Settin
 	}
 }
 
+func hostedTestTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func hostedTestLaunchCommand(t *testing.T, configDir string, sessionID string, command ...string) []string {
 	t.Helper()
 	exe, err := os.Executable()
@@ -192,7 +201,7 @@ func TestRunLaunchRunsBuiltCommand(t *testing.T) {
 }
 
 func TestRunLaunchUsesClaudeCodeWorkerConfig(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -268,7 +277,7 @@ func TestRunLaunchExplicitExternalWindowMode(t *testing.T) {
 }
 
 func TestRunLaunchExternalWindowUsesDirectExecWithTerminalStreams(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	codexPath := filepath.Join(dir, "codex")
 	if err := os.WriteFile(codexPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
@@ -308,7 +317,7 @@ func TestRunLaunchRejectsInvalidMode(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -384,7 +393,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalStartsWatcherSidecarForAttachedLaunch(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -434,7 +443,7 @@ func TestRunLaunchHostedTerminalStartsWatcherSidecarForAttachedLaunch(t *testing
 }
 
 func TestRunLaunchHostedTerminalNoAttachDoesNotStartWatcherSidecar(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -484,7 +493,7 @@ func TestRunLaunchHostedTerminalNoAttachDoesNotStartWatcherSidecar(t *testing.T)
 }
 
 func TestRunLaunchHostedTerminalEnablesExtendedKeys(t *testing.T) {
-	configDir := t.TempDir()
+	configDir := hostedTestTempDir(t)
 	stateDir := filepath.Join(configDir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
 	var got [][]string
@@ -527,7 +536,7 @@ func TestRunLaunchHostedTerminalEnablesExtendedKeys(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -592,7 +601,7 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 }
 
 func TestRunLaunchHostedTerminalInjectsAbsoluteConfigDir(t *testing.T) {
-	workDir := t.TempDir()
+	workDir := hostedTestTempDir(t)
 	configDir := filepath.Join(workDir, "config")
 	stateDir := filepath.Join(workDir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -646,7 +655,7 @@ func TestRunLaunchHostedTerminalTurnStatusHooksDisabledOrOmittedDoesNotInjectSes
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := hostedTestTempDir(t)
 			configDir := filepath.Join(dir, "config")
 			stateDir := filepath.Join(dir, "state")
 			if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -740,7 +749,7 @@ upstreams:
 }
 
 func TestRunLaunchHostedTerminalKeepsExistingTurnStatusOwner(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -791,7 +800,7 @@ func TestRunLaunchHostedTerminalKeepsExistingTurnStatusOwner(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalRejectsDifferentTurnStatusOwner(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	otherConfigDir := filepath.Join(dir, "other-config")
@@ -841,7 +850,7 @@ func TestRunLaunchHostedTerminalRejectsDifferentTurnStatusOwner(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalRejectsLegacyTurnStatusOwnerMismatch(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	otherConfigDir := filepath.Join(dir, "other-config")
@@ -883,7 +892,7 @@ func TestRunLaunchHostedTerminalRejectsLegacyTurnStatusOwnerMismatch(t *testing.
 }
 
 func TestRunLaunchHostedTerminalRejectsLegacyTodoBindingOwnerMismatch(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	otherConfigDir := filepath.Join(dir, "other-config")
@@ -928,7 +937,7 @@ func TestRunLaunchHostedTerminalRejectsLegacyTodoBindingOwnerMismatch(t *testing
 }
 
 func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -986,7 +995,7 @@ func TestRunLaunchHostedTerminalHostedPopupKeyOmittedOrEmptySkipsBindingInstall(
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := hostedTestTempDir(t)
 			configDir := filepath.Join(dir, "config")
 			stateDir := filepath.Join(dir, "state")
 			writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -1040,7 +1049,7 @@ func TestRunLaunchHostedTerminalHostedPopupKeyOmittedOrEmptySkipsBindingInstall(
 }
 
 func TestRunLaunchHostedTerminalHostedPopupKeyInstallsBinding(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -1109,8 +1118,66 @@ func TestRunLaunchHostedTerminalHostedPopupKeyInstallsBinding(t *testing.T) {
 	}
 }
 
+func TestRunLaunchHostedTerminalHostedPopupUsesResolvedConfigDir(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "real-config")
+	stateDir := filepath.Join(dir, "state")
+	symlinkConfigDir := filepath.Join(dir, "linked-config")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	if err := os.Symlink(configDir, symlinkConfigDir); err != nil {
+		t.Fatal(err)
+	}
+	resolvedConfigDir, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", symlinkConfigDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A", "--no-attach"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	want := [][]string{
+		manager.TmuxSetHostedPopupOwnerCommandForSettings(tmuxSettings, resolvedConfigDir),
+		manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", resolvedConfigDir, defaultManagerURL, hostedSessionExecutable()),
+	}
+	for _, command := range want {
+		if !hostedTestHasCommand(got, command) {
+			t.Fatalf("missing popup install command %#v in %#v", command, got)
+		}
+	}
+	if hostedTestHasCommand(got, manager.TmuxSetHostedPopupOwnerCommandForSettings(tmuxSettings, symlinkConfigDir)) ||
+		hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", symlinkConfigDir, defaultManagerURL, hostedSessionExecutable())) {
+		t.Fatalf("popup install commands should use resolved config dir, got %#v", got)
+	}
+}
+
 func TestRunLaunchHostedTerminalHostedPopupExistingBindingWithoutOwnerFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -1156,7 +1223,7 @@ func TestRunLaunchHostedTerminalHostedPopupExistingBindingWithoutOwnerFails(t *t
 }
 
 func TestRunLaunchHostedTerminalHostedPopupDifferentOwnerFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	otherConfigDir := filepath.Join(dir, "other-config")
@@ -1240,7 +1307,7 @@ func TestManagedTurnStatusConfigDirIgnoresUnrelatedAcknowledgeRootBindings(t *te
 }
 
 func TestRunLaunchHostedTerminalMissingSessionDoesNotTouchTmuxHostSettings(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -1274,7 +1341,7 @@ func TestRunLaunchHostedTerminalMissingSessionDoesNotTouchTmuxHostSettings(t *te
 }
 
 func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -1319,7 +1386,7 @@ func TestRunLaunchHostedTerminalAbortsOnUnexpectedHasSessionError(t *testing.T) 
 }
 
 func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1387,7 +1454,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalSwitchesExistingLegacyNamedWindow(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1448,7 +1515,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingLegacyNamedWindow(t *testing.T) 
 }
 
 func TestRunLaunchHostedTerminalMissingTmux(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	writeLaunchConfig(t, configDir, filepath.Join(dir, "state"), "ainn", "ainn-host", "new-window")
 
@@ -1474,7 +1541,7 @@ func TestRunLaunchHostedTerminalMissingTmux(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1541,7 +1608,7 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1634,7 +1701,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1728,7 +1795,7 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 }
 
 func TestRunLaunchHostedTerminalRejectsStartedStaleSessionWithoutLauncherID(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1777,7 +1844,7 @@ func TestRunLaunchHostedTerminalRejectsStartedStaleSessionWithoutLauncherID(t *t
 }
 
 func TestRunLaunchHostedTerminalReopensStaleClaudeCodeSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -1872,7 +1939,7 @@ upstreams:
 }
 
 func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
@@ -1939,7 +2006,7 @@ func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
@@ -2007,7 +2074,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
@@ -2087,7 +2154,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(
 }
 
 func TestRunLaunchHostedTerminalReuseFirstWindowCapturesNewSessionIDWhenLabelIsAttachSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
@@ -2127,7 +2194,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowCapturesNewSessionIDWhenLabelIsA
 }
 
 func TestRunLaunchHostedTerminalReuseFirstWindowStillUsesNewWindowOnExistingHost(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
@@ -2184,7 +2251,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowStillUsesNewWindowOnExistingHost
 }
 
 func TestRunLaunchHostedTerminalCapturesNewWindowIDWhenLabelIsAttachSession(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
@@ -2226,7 +2293,7 @@ func TestRunLaunchHostedTerminalCapturesNewWindowIDWhenLabelIsAttachSession(t *t
 }
 
 func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "main-tui-window")
@@ -2287,7 +2354,7 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 }
 
 func TestRunLaunchHostedTerminalDeletesNewRecordWhenFreshHostSetupFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")

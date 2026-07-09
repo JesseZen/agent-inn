@@ -116,6 +116,13 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "invalid mode %q\n", *mode)
 		return 2
 	}
+	if *mode == modeHostedTerminal {
+		resolvedConfigDir, err = filepath.EvalSymlinks(resolvedConfigDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to resolve config dir: %v\n", err)
+			return 1
+		}
+	}
 
 	launcher := "codex"
 	var cfg config.Config
