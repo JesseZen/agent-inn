@@ -36,6 +36,18 @@ func TestUsageObserverExtractsSSECompletionUsage(t *testing.T) {
 	}
 }
 
+func TestUsageObserverExtractsCRLFSSEFrames(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: response.in_progress\r\ndata: {\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}\r\n\r\nevent: response.completed\r\ndata: {\"response\":{\"model\":\"gpt-5-mini\"}}\r\n\r\n"))
+	wantUsage := UsageTokens{Known: true, InputTokens: 3, OutputTokens: 2, TotalTokens: 5}
+	if got := observer.Finish(); got != wantUsage {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, wantUsage)
+	}
+	if got := observer.Model(); got != "gpt-5-mini" {
+		t.Fatalf("bad model: got %q want %q", got, "gpt-5-mini")
+	}
+}
+
 func TestExtractUsageMetadataFromJSONIncludesRootModel(t *testing.T) {
 	got := extractUsageMetadataFromJSON([]byte(`{"model":"gpt-5","usage":{"input_tokens":10,"output_tokens":4}}`))
 	want := responseUsageMetadata{
@@ -44,6 +56,18 @@ func TestExtractUsageMetadataFromJSONIncludesRootModel(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestUsageObserverCapturesChatCompletionStreamModelWithoutUsage(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+	wantUsage := UsageTokens{Known: false}
+	if got := observer.Finish(); got != wantUsage {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, wantUsage)
+	}
+	if got := observer.Model(); got != "gpt-4o-mini" {
+		t.Fatalf("bad model: got %q want %q", got, "gpt-4o-mini")
 	}
 }
 
@@ -72,6 +96,21 @@ func TestUsageObserverKeepsSSEUsageWhenCompletedEventAddsModel(t *testing.T) {
 	}
 	if got := observer.Model(); got != "gpt-5-mini" {
 		t.Fatalf("bad model: got %q want %q", got, "gpt-5-mini")
+	}
+}
+
+func TestUsageObserverCombinesAnthropicMessageStartAndDeltaUsage(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: message_start\n"))
+	observer.Observe([]byte("data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":2,\"cache_read_input_tokens\":4}}}\n\n"))
+	observer.Observe([]byte("event: message_delta\n"))
+	observer.Observe([]byte("data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n"))
+	wantUsage := UsageTokens{Known: true, InputTokens: 9, OutputTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 2, TotalTokens: 20}
+	if got := observer.Finish(); got != wantUsage {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, wantUsage)
+	}
+	if got := observer.Model(); got != "claude-sonnet-4-20250514" {
+		t.Fatalf("bad model: got %q want %q", got, "claude-sonnet-4-20250514")
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/jesse/agent-inn/internal/module"
 )
 
 type UsageTokens struct {
@@ -19,6 +21,7 @@ type UsageTokens struct {
 type UsageObserver struct {
 	contentType string
 	buffer      []byte
+	parser      module.SSEParser
 	usage       UsageTokens
 	model       string
 }
@@ -33,21 +36,10 @@ func NewUsageObserver(contentType string) *UsageObserver {
 }
 
 func (u *UsageObserver) Observe(chunk []byte) {
-	if u.usage.Known && u.model != "" {
-		return
-	}
 	if strings.Contains(u.contentType, "text/event-stream") {
-		u.buffer = append(u.buffer, chunk...)
-		for {
-			end := bytes.Index(u.buffer, []byte("\n\n"))
-			if end < 0 {
-				return
-			}
-			u.processSSEEvent(string(u.buffer[:end]))
-			u.buffer = u.buffer[end+2:]
-			if u.usage.Known && u.model != "" {
-				return
-			}
+		events, _ := u.parser.Push(chunk, false)
+		for _, event := range events {
+			u.processSSEEvent(event)
 		}
 	}
 	if strings.Contains(u.contentType, "json") {
@@ -56,11 +48,11 @@ func (u *UsageObserver) Observe(chunk []byte) {
 }
 
 func (u *UsageObserver) Finish() UsageTokens {
-	if u.usage.Known && u.model != "" {
-		return u.usage
-	}
-	if strings.Contains(u.contentType, "text/event-stream") && len(u.buffer) > 0 {
-		u.processSSEEvent(string(u.buffer))
+	if strings.Contains(u.contentType, "text/event-stream") {
+		events, _ := u.parser.Push(nil, true)
+		for _, event := range events {
+			u.processSSEEvent(event)
+		}
 	}
 	if strings.Contains(u.contentType, "json") {
 		metadata := extractUsageMetadataFromJSON(u.buffer)
@@ -74,24 +66,22 @@ func (u *UsageObserver) Model() string {
 	return u.model
 }
 
-func (u *UsageObserver) processSSEEvent(event string) {
-	var eventName string
-	var data []string
-	for _, line := range strings.Split(event, "\n") {
-		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		}
-		if strings.HasPrefix(line, "data:") {
-			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		}
-	}
-	payload := strings.Join(data, "\n")
-	if eventName != "response.completed" && !strings.Contains(payload, `"usage"`) {
+func (u *UsageObserver) processSSEEvent(event module.SSEEvent) {
+	if event.Done {
 		return
 	}
-	metadata := extractUsageMetadataFromJSON([]byte(payload))
+	metadata := extractUsageMetadataFromJSON([]byte(event.Data))
 	if metadata.Usage.Known {
-		u.usage = metadata.Usage
+		if event.Event == "message_delta" && u.usage.Known {
+			u.usage.InputTokens += metadata.Usage.InputTokens
+			u.usage.OutputTokens += metadata.Usage.OutputTokens
+			u.usage.CacheReadTokens += metadata.Usage.CacheReadTokens
+			u.usage.CacheWriteTokens += metadata.Usage.CacheWriteTokens
+			u.usage.ReasoningTokens += metadata.Usage.ReasoningTokens
+			u.usage.TotalTokens += metadata.Usage.TotalTokens
+		} else {
+			u.usage = metadata.Usage
+		}
 	}
 	if metadata.Model != "" {
 		u.model = metadata.Model
@@ -117,6 +107,14 @@ func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
 			usage, ok = mapField(response, "usage")
 			if model == "" {
 				model, _ = stringField(response, "model")
+			}
+		}
+	}
+	if !ok {
+		if message, messageOK := mapField(root, "message"); messageOK {
+			usage, ok = mapField(message, "usage")
+			if model == "" {
+				model, _ = stringField(message, "model")
 			}
 		}
 	}
