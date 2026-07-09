@@ -82,6 +82,7 @@ test("proxy batch create flow launches each hosted variant", async () => {
       await app.render()
       return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
     })
+    expect(app.frame()).not.toContain("app")
     await app.mockInput.typeText("cli-openrouter")
     await runCommand(app, "dialog.select.submit")
 

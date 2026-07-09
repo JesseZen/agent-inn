@@ -74,12 +74,14 @@ export function DialogBatch() {
     dialog.push(() => (
       <DialogSelect
         title="Choose worker"
-        options={sync.data.workers.map((worker) => ({
-          title: worker.name,
-          value: worker,
-          description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
-          category: worker.status === "running" ? "Running" : "Stopped",
-        }))}
+        options={sync.data.workers
+          .filter((worker) => (worker.role ?? "cli") === "cli")
+          .map((worker) => ({
+            title: worker.name,
+            value: worker,
+            description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
+            category: worker.status === "running" ? "Running" : "Stopped",
+          }))}
         placeholder="Search workers..."
         onSelect={(option) => {
           void createBatchForWorker(option.value)

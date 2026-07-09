@@ -56,8 +56,8 @@ func TestManagerAPICreatesBatchWithHostedSessionsAndWorktrees(t *testing.T) {
 		SourceDirectory: "/repo",
 		CreatedAt:       got.CreatedAt,
 		Variants: []BatchVariant{
-			{ID: "variant_1", Index: 1, HostedSessionID: "hs_1", SessionLabel: "fix scroll #1", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "1")},
-			{ID: "variant_2", Index: 2, HostedSessionID: "hs_2", SessionLabel: "fix scroll #2", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "2")},
+			{ID: "variant_1", Index: 1, HostedSessionID: "hs_1", SessionLabel: "fix scroll batch_1 #1", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "1")},
+			{ID: "variant_2", Index: 2, HostedSessionID: "hs_2", SessionLabel: "fix scroll batch_1 #2", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "2")},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -99,6 +99,46 @@ func TestManagerAPIBatchCreateRejectsInvalidCount(t *testing.T) {
 		if res.Code != http.StatusBadRequest {
 			t.Fatalf("count %d: unexpected status %d: %s", count, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestManagerAPICreatesBatchesWithDuplicateTitles(t *testing.T) {
+	m, dir := newBatchAPITestManager(t)
+	first := createBatchForAPITest(t, m)
+	second := createBatchForAPITest(t, m)
+
+	want := []BatchRun{
+		{
+			ID:              "batch_1",
+			Title:           "fix scroll",
+			Prompt:          "Fix scroll",
+			WorkerName:      "codex-app",
+			WorkerPort:      6767,
+			Model:           "gpt-5.5",
+			SourceDirectory: "/repo",
+			CreatedAt:       first.CreatedAt,
+			Variants: []BatchVariant{
+				{ID: "variant_1", Index: 1, HostedSessionID: "hs_1", SessionLabel: "fix scroll batch_1 #1", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "1")},
+				{ID: "variant_2", Index: 2, HostedSessionID: "hs_2", SessionLabel: "fix scroll batch_1 #2", WorktreeDir: filepath.Join(dir, "worktrees", "batch_1", "2")},
+			},
+		},
+		{
+			ID:              "batch_2",
+			Title:           "fix scroll",
+			Prompt:          "Fix scroll",
+			WorkerName:      "codex-app",
+			WorkerPort:      6767,
+			Model:           "gpt-5.5",
+			SourceDirectory: "/repo",
+			CreatedAt:       second.CreatedAt,
+			Variants: []BatchVariant{
+				{ID: "variant_1", Index: 1, HostedSessionID: "hs_3", SessionLabel: "fix scroll batch_2 #1", WorktreeDir: filepath.Join(dir, "worktrees", "batch_2", "1")},
+				{ID: "variant_2", Index: 2, HostedSessionID: "hs_4", SessionLabel: "fix scroll batch_2 #2", WorktreeDir: filepath.Join(dir, "worktrees", "batch_2", "2")},
+			},
+		},
+	}
+	if !reflect.DeepEqual([]BatchRun{first, second}, want) {
+		t.Fatalf("batches mismatch:\n got %#v\nwant %#v", []BatchRun{first, second}, want)
 	}
 }
 
@@ -201,6 +241,89 @@ func TestManagerAPIDeleteKeepsBatchWhenHostedSessionCleanupFails(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listed, []BatchRun{created}) {
 		t.Fatalf("batches mismatch: %#v", listed)
+	}
+}
+
+func TestManagerAPIDeleteRetriesAfterPartialHostedSessionCleanup(t *testing.T) {
+	m, dir := newBatchAPITestManager(t)
+	created := createBatchForAPITest(t, m)
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(dir))
+	err := registry.withLockedFile(func(file *hostedSessionFile) error {
+		session := file.Sessions[created.Variants[1].HostedSessionID]
+		session.TmuxWindowID = "@12"
+		file.Sessions[created.Variants[1].HostedSessionID] = session
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removeErr := errors.New("tmux kill failed")
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "list-windows") {
+				return "@12\t" + created.Variants[1].SessionLabel + "\n", nil
+			}
+			if strings.Contains(joined, "kill-window") {
+				return "", removeErr
+			}
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/batches/"+created.ID, nil))
+	if res.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+
+	partialSessions, err := NewHostedSessionRegistry(HostedSessionRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPartialSessions := []HostedSessionRecord{
+		{
+			SessionID:    created.Variants[1].HostedSessionID,
+			SessionLabel: created.Variants[1].SessionLabel,
+			WorkerName:   created.WorkerName,
+			WorkerPort:   created.WorkerPort,
+			Workspace:    created.Variants[1].WorktreeDir,
+			Model:        created.Model,
+			TmuxWindowID: "@12",
+			CreatedAt:    partialSessions[0].CreatedAt,
+			LastOpenedAt: partialSessions[0].LastOpenedAt,
+		},
+	}
+	if !reflect.DeepEqual(partialSessions, wantPartialSessions) {
+		t.Fatalf("hosted sessions after failed delete mismatch:\n got %#v\nwant %#v", partialSessions, wantPartialSessions)
+	}
+
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return nil
+	}
+
+	retry := httptest.NewRecorder()
+	m.ServeHTTP(retry, httptest.NewRequest(http.MethodDelete, "http://manager.local/api/batches/"+created.ID, nil))
+	if retry.Code != http.StatusOK {
+		t.Fatalf("unexpected retry status %d: %s", retry.Code, retry.Body.String())
+	}
+
+	batches, err := NewBatchRegistry(BatchRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewHostedSessionRegistry(HostedSessionRegistryPath(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(batches, []BatchRun{}) {
+		t.Fatalf("batches mismatch: %#v", batches)
+	}
+	if !reflect.DeepEqual(sessions, []HostedSessionRecord{}) {
+		t.Fatalf("hosted sessions mismatch: %#v", sessions)
 	}
 }
 

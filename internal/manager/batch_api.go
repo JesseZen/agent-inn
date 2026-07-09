@@ -95,9 +95,9 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 
 	variants := make([]BatchVariant, 0, count)
 	createdSessionIDs := make([]string, 0, count)
-	labelBase := title
-	if strings.TrimSpace(payload.Title) == "" {
-		labelBase = batch.ID
+	labelBase := batch.ID
+	if strings.TrimSpace(payload.Title) != "" {
+		labelBase = fmt.Sprintf("%s %s", title, batch.ID)
 	}
 	for i := 1; i <= count; i++ {
 		worktreeDir := filepath.Join(expandHomePath(cfg.Settings.StateDir), "worktrees", batch.ID, fmt.Sprintf("%d", i))
@@ -190,6 +190,12 @@ func (m *Manager) handleDeleteBatch(rw http.ResponseWriter, batchID string) {
 	cfg, _ := m.syncConfigFromStore()
 	for _, variant := range batch.Variants {
 		if variant.HostedSessionID != "" {
+			if _, ok, err := m.hostedSessions.Get(variant.HostedSessionID); err != nil {
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			} else if !ok {
+				continue
+			}
 			if err := m.hostedSessions.RemoveForSettings(variant.HostedSessionID, cfg.Settings, hostedTMuxRunnerFactory()); err != nil {
 				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 				return
