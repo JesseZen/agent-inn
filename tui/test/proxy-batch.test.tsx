@@ -139,6 +139,50 @@ test("proxy batch create flow launches each hosted variant", async () => {
   }
 })
 
+test("proxy batch create flow waits for tmux window before pasting prompt", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const app = await mountProxyApp({ batchHostedSessionWindowMode: "missing" })
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+    await app.mockInput.typeText("cli-openrouter")
+    await runCommand(app, "dialog.select.submit")
+
+    await submitPrompt(app)
+    await submitPrompt(app, "no window")
+    await submitPrompt(app, "1")
+    await submitPrompt(app, "Fix scroll")
+    await submitPrompt(app)
+
+    await wait(async () => {
+      await app.render()
+      return app.calls.getHostedSession.length === 1 && app.frame().includes("Batch: no window")
+    })
+
+    expect(launchCalls).toEqual([
+      expect.objectContaining({
+        workspace: `${directory}/.worktrees/no-window-1`,
+        sessionID: "batch_1_session_1",
+      }),
+    ])
+    expect(app.calls.getHostedSession).toEqual(["batch_1_session_1"])
+    expect(pasteCalls).toEqual([])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("batch winner action selects the highlighted variant", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()

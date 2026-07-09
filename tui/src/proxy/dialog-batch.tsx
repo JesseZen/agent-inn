@@ -62,12 +62,11 @@ export function DialogBatch() {
 
     if (!prompt) return
     const session = await sdk.client.getHostedSession(variant.hosted_session_id)
-    const tmuxWindowID = (session as { tmux_window_id?: string }).tmux_window_id
-    if (!tmuxWindowID) return
+    if (!session.tmux_window_id) return
     await pasteHostedPrompt({
       prompt,
       tmuxSocketName: settings.settings.terminal.tmux.socket_name,
-      tmuxWindowID,
+      tmuxWindowID: session.tmux_window_id,
     })
   }
 
@@ -134,11 +133,12 @@ export function DialogBatch() {
       options={options()}
       placeholder="Search batches..."
       onSelect={(option) => {
-        if (option.value.type === "create") {
+        const selected = option.value
+        if (selected.type === "create") {
           createBatch()
           return
         }
-        dialog.replace(() => <DialogBatchRun batch={option.value.batch} />)
+        dialog.replace(() => <DialogBatchRun batch={selected.batch} />)
       }}
     />
   )

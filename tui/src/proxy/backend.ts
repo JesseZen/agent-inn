@@ -129,6 +129,7 @@ export type HostedSessionRecord = {
   workspace?: string
   model?: string
   add_dirs?: string[]
+  tmux_window_id?: string
   launcher_session_id?: string
   turn_state?: HostedTurnState
   turn_state_reason?: string

@@ -46,11 +46,13 @@ type ProxyHarnessInput = {
   workers?: WorkerSummary[]
   upstreams?: RedactedUpstream[]
   batches?: BatchRun[]
+  batchHostedSessionWindowMode?: "present" | "missing"
   patchWorkerDelayMs?: number
   settings?: ProxySettingsPatch
 }
 
 function createProxyHarness(input: ProxyHarnessInput = {}) {
+  const batchHostedSessionWindowMode = input.batchHostedSessionWindowMode ?? "present"
   const providers = new Map<string, RedactedUpstream>(
     (input.upstreams ?? [
       {
@@ -477,7 +479,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const variants = Array.from({ length: body.count }, (_, index) => {
         const number = index + 1
         const hostedSessionID = `${batchID}_session_${number}`
-        ;(hostedSessions as Array<HostedSessionSummary & { tmux_window_id?: string }>).push({
+        hostedSessions.push({
           session_id: hostedSessionID,
           session_label: `${body.title} ${number}`,
           worker_name: body.worker_name,
@@ -487,7 +489,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           created_at: "2026-07-09T00:00:00Z",
           last_opened_at: "2026-07-09T00:00:00Z",
           status: "active",
-          tmux_window_id: `@${number}`,
+          ...(batchHostedSessionWindowMode === "present" ? { tmux_window_id: `@${number}` } : {}),
         })
         return {
           id: `variant_${number}`,
