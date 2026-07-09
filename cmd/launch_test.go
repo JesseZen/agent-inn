@@ -113,15 +113,20 @@ func hostedTestPopupBindingInstallCommands(t *testing.T, settings config.Setting
 	}
 	commands := [][]string{
 		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
-		manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir),
-		hostedTestPopupMouseBindingCommand(t, settings, configDir, managerURL, manager.TmuxHostedPopupMouseModeAcknowledge),
 	}
 	if key != "" {
 		commands = append(commands,
 			manager.TmuxHostedPopupKeyCommandForSettings(settings),
 			manager.TmuxListHostedPopupBindingCommandForSettings(settings, key),
+			manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir),
+			hostedTestPopupMouseBindingCommand(t, settings, configDir, managerURL, manager.TmuxHostedPopupMouseModeAcknowledge),
 			manager.TmuxSetHostedPopupKeyCommandForSettings(settings, key),
 			manager.TmuxHostedPopupBindingCommandForSettings(settings, key, configDir, managerURL, exe),
+		)
+	} else {
+		commands = append(commands,
+			manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir),
+			hostedTestPopupMouseBindingCommand(t, settings, configDir, managerURL, manager.TmuxHostedPopupMouseModeAcknowledge),
 		)
 	}
 	return commands
@@ -1302,6 +1307,43 @@ func TestRunLaunchHostedTerminalHostedPopupExistingBindingWithoutOwnerFails(t *t
 	}
 	if hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
 		t.Fatalf("existing binding conflict should not install popup binding: %#v", got)
+	}
+}
+
+func TestInstallTmuxHostedPopupBindingEmptyOwnerUserBindingFailsBeforeWrites(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+			return "", nil
+		}
+		if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
+			return "", nil
+		}
+		if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+			return "bind-key -T prefix H display-message user-binding\n", nil
+		}
+		return "", nil
+	})
+
+	err := installTmuxHostedPopupBinding(runner, tmuxSettings, configDir, hostedSessionExecutable())
+	if err == nil {
+		t.Fatal("expected existing popup binding without owner to fail")
+	}
+	if !strings.Contains(err.Error(), "hosted popup") || !strings.Contains(err.Error(), "H") {
+		t.Fatalf("expected popup binding conflict, got %q", err.Error())
+	}
+	want := [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings),
+		manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got commands %#v, want %#v", got, want)
 	}
 }
 

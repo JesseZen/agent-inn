@@ -525,6 +525,47 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 	if owner != "" && owner != configDir {
 		return fmt.Errorf("tmux hosted popup binding is owned by config dir %q, current config dir is %q; use a unique tmux socket/session for test instances", owner, configDir)
 	}
+
+	ownedKey := ""
+	if key != "" {
+		keyOut, err := runner.Run(manager.TmuxHostedPopupKeyCommandForSettings(settings))
+		if err != nil {
+			return fmt.Errorf("inspect tmux hosted popup key owner: %w", err)
+		}
+		ownedKey = strings.TrimSpace(keyOut)
+
+		bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, key))
+		if err != nil {
+			if !strings.HasSuffix(strings.TrimSpace(err.Error()), "unknown key: "+key) {
+				return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
+			}
+			bindingOut = ""
+		}
+		binding := strings.TrimSpace(bindingOut)
+		if binding != "" && owner == "" {
+			return fmt.Errorf("tmux hosted popup key %q already has a binding and no AINN owner; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+		}
+		if binding != "" && ownedKey != key {
+			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+		}
+		if binding != "" {
+			ownedBinding := strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
+				strings.Contains(binding, "display-popup") &&
+				strings.Contains(binding, "-E") &&
+				strings.Contains(binding, "-x R") &&
+				strings.Contains(binding, "-y 0") &&
+				strings.Contains(binding, hostedPopupWidth) &&
+				strings.Contains(binding, hostedPopupHeight) &&
+				strings.Contains(binding, hostedPopupTitle) &&
+				strings.Contains(binding, "hosted-session popup") &&
+				strings.Contains(binding, "--config-dir") &&
+				strings.Contains(binding, configDir)
+			if !ownedBinding {
+				return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
+			}
+		}
+	}
+
 	if owner == "" {
 		if _, err := runner.Run(manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir)); err != nil {
 			return fmt.Errorf("set tmux hosted popup owner: %w", err)
@@ -544,43 +585,6 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 	}
 	if key == "" {
 		return nil
-	}
-
-	keyOut, err := runner.Run(manager.TmuxHostedPopupKeyCommandForSettings(settings))
-	if err != nil {
-		return fmt.Errorf("inspect tmux hosted popup key owner: %w", err)
-	}
-	ownedKey := strings.TrimSpace(keyOut)
-
-	bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, key))
-	if err != nil {
-		if !strings.HasSuffix(strings.TrimSpace(err.Error()), "unknown key: "+key) {
-			return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
-		}
-		bindingOut = ""
-	}
-	binding := strings.TrimSpace(bindingOut)
-	if binding != "" && owner == "" {
-		return fmt.Errorf("tmux hosted popup key %q already has a binding and no AINN owner; choose a different hosted_popup_key or use a unique tmux socket/session", key)
-	}
-	if binding != "" && ownedKey != key {
-		return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
-	}
-	if binding != "" {
-		ownedBinding := strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
-			strings.Contains(binding, "display-popup") &&
-			strings.Contains(binding, "-E") &&
-			strings.Contains(binding, "-x R") &&
-			strings.Contains(binding, "-y 0") &&
-			strings.Contains(binding, hostedPopupWidth) &&
-			strings.Contains(binding, hostedPopupHeight) &&
-			strings.Contains(binding, hostedPopupTitle) &&
-			strings.Contains(binding, "hosted-session popup") &&
-			strings.Contains(binding, "--config-dir") &&
-			strings.Contains(binding, configDir)
-		if !ownedBinding {
-			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
-		}
 	}
 	if ownedKey != key {
 		if _, err := runner.Run(manager.TmuxSetHostedPopupKeyCommandForSettings(settings, key)); err != nil {
