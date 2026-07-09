@@ -17,26 +17,34 @@ import (
 )
 
 const (
-	MetricsRangeToday   = "today"
-	MetricsRangeLast24H = "last_24h"
+	MetricsRangeToday   MetricsRangeName = "today"
+	MetricsRangeLast24H MetricsRangeName = "last_24h"
 )
 
+type MetricsRangeName string
+
 type MetricsRecord struct {
-	Timestamp     time.Time          `json:"timestamp"`
-	Worker        string             `json:"worker"`
-	Port          int                `json:"port"`
-	Upstream      string             `json:"upstream,omitempty"`
-	Model         string             `json:"model,omitempty"`
-	Method        string             `json:"method"`
-	Path          string             `json:"path"`
-	Status        int                `json:"status"`
-	DurationMS    int64              `json:"duration_ms"`
-	ResponseBytes int64              `json:"response_bytes"`
-	Usage         worker.UsageTokens `json:"usage"`
+	Timestamp        time.Time `json:"timestamp"`
+	Worker           string    `json:"worker"`
+	Port             int       `json:"port"`
+	Upstream         string    `json:"upstream,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Method           string    `json:"method"`
+	Path             string    `json:"path"`
+	Status           int       `json:"status"`
+	DurationMS       int64     `json:"duration_ms"`
+	ResponseBytes    int64     `json:"response_bytes"`
+	UsageKnown       bool      `json:"usage_known"`
+	InputTokens      int64     `json:"input_tokens"`
+	OutputTokens     int64     `json:"output_tokens"`
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	ReasoningTokens  int64     `json:"reasoning_tokens"`
+	TotalTokens      int64     `json:"total_tokens"`
 }
 
 type MetricsQuery struct {
-	Range    string
+	Range    MetricsRangeName
 	Worker   string
 	Upstream string
 	Model    string
@@ -45,9 +53,9 @@ type MetricsQuery struct {
 }
 
 type MetricsRange struct {
-	Name  string    `json:"name"`
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
+	Name  MetricsRangeName `json:"name"`
+	Start time.Time        `json:"start"`
+	End   time.Time        `json:"end"`
 }
 
 type MetricsTotals struct {
@@ -69,7 +77,7 @@ type WorkerMetricsAggregate struct {
 	Port     int                    `json:"port"`
 	Status   string                 `json:"status"`
 	Upstream string                 `json:"upstream,omitempty"`
-	Metrics  worker.MetricsSnapshot `json:"metrics"`
+	Live     worker.MetricsSnapshot `json:"live"`
 	Totals   MetricsTotals          `json:"totals"`
 }
 
@@ -105,8 +113,14 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return json.NewEncoder(file).Encode(record)
+	if err := json.NewEncoder(file).Encode(record); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return s.CleanupRetention()
 }
 
 func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (MetricsQueryResponse, error) {
@@ -125,7 +139,7 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			Port:     summary.Port,
 			Status:   summary.Status,
 			Upstream: summary.Upstream.Name,
-			Metrics:  summary.Metrics,
+			Live:     summary.Metrics,
 		}
 	}
 
@@ -161,13 +175,13 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			}
 			durationByWorker[record.Worker] += record.DurationMS
 			aggregate.Totals.ResponseBytes += record.ResponseBytes
-			if record.Usage.Known {
-				aggregate.Totals.InputTokens += record.Usage.InputTokens
-				aggregate.Totals.OutputTokens += record.Usage.OutputTokens
-				aggregate.Totals.CacheReadTokens += record.Usage.CacheReadTokens
-				aggregate.Totals.CacheWriteTokens += record.Usage.CacheWriteTokens
-				aggregate.Totals.ReasoningTokens += record.Usage.ReasoningTokens
-				aggregate.Totals.TotalTokens += record.Usage.TotalTokens
+			if record.UsageKnown {
+				aggregate.Totals.InputTokens += record.InputTokens
+				aggregate.Totals.OutputTokens += record.OutputTokens
+				aggregate.Totals.CacheReadTokens += record.CacheReadTokens
+				aggregate.Totals.CacheWriteTokens += record.CacheWriteTokens
+				aggregate.Totals.ReasoningTokens += record.ReasoningTokens
+				aggregate.Totals.TotalTokens += record.TotalTokens
 			} else {
 				aggregate.Totals.UnknownUsageRequests++
 			}
@@ -229,7 +243,7 @@ func (s *metricsStore) metricsDir() string {
 	return filepath.Join(expandHomePath(s.settings.StateDir), "metrics")
 }
 
-func (s *metricsStore) resolveRange(name string) MetricsRange {
+func (s *metricsStore) resolveRange(name MetricsRangeName) MetricsRange {
 	if name == "" {
 		name = MetricsRangeToday
 	}
@@ -338,17 +352,23 @@ func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetri
 
 	if store != nil {
 		_ = store.Record(MetricsRecord{
-			Timestamp:     event.Timestamp,
-			Worker:        name,
-			Port:          port,
-			Upstream:      upstreamName,
-			Model:         event.Model,
-			Method:        event.Method,
-			Path:          event.Path,
-			Status:        event.Status,
-			DurationMS:    event.DurationMS,
-			ResponseBytes: event.ResponseBytes,
-			Usage:         event.Usage,
+			Timestamp:        event.Timestamp,
+			Worker:           name,
+			Port:             port,
+			Upstream:         upstreamName,
+			Model:            event.Model,
+			Method:           event.Method,
+			Path:             event.Path,
+			Status:           event.Status,
+			DurationMS:       event.DurationMS,
+			ResponseBytes:    event.ResponseBytes,
+			UsageKnown:       event.Usage.Known,
+			InputTokens:      event.Usage.InputTokens,
+			OutputTokens:     event.Usage.OutputTokens,
+			CacheReadTokens:  event.Usage.CacheReadTokens,
+			CacheWriteTokens: event.Usage.CacheWriteTokens,
+			ReasoningTokens:  event.Usage.ReasoningTokens,
+			TotalTokens:      event.Usage.TotalTokens,
 		})
 	}
 	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": name, "port": port, "metrics": snapshot})

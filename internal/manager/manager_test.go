@@ -150,6 +150,9 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
+	if !strings.Contains(res.Body.String(), `"live":`) || strings.Contains(res.Body.String(), `"metrics":`) {
+		t.Fatalf("metrics API should expose live snapshot as live only: %s", res.Body.String())
+	}
 	var got MetricsQueryResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -163,7 +166,7 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 				Port:     6767,
 				Status:   "running",
 				Upstream: "openai",
-				Metrics:  live,
+				Live:     live,
 				Totals: MetricsTotals{
 					Requests:      1,
 					AvgLatencyMS:  120,
@@ -222,6 +225,19 @@ func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 	}
 	if gotWorker != "app" || gotPort != 6767 || !reflect.DeepEqual(gotMetrics, wantMetrics) {
 		t.Fatalf("bad metrics event: worker=%q port=%d metrics=%#v", gotWorker, gotPort, gotMetrics)
+	}
+
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Event
+	if err := json.Unmarshal(eventJSON, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	gotWorker, gotPort, gotMetrics, ok = decoded.AsMetricsUpdated()
+	if !ok || gotWorker != "app" || gotPort != 6767 || !reflect.DeepEqual(gotMetrics, wantMetrics) {
+		t.Fatalf("decoded metrics event accessor failed: worker=%q port=%d metrics=%#v ok=%v", gotWorker, gotPort, gotMetrics, ok)
 	}
 }
 

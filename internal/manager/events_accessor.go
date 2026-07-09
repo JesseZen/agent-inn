@@ -1,6 +1,10 @@
 package manager
 
-import "github.com/jesse/agent-inn/internal/worker"
+import (
+	"encoding/json"
+
+	"github.com/jesse/agent-inn/internal/worker"
+)
 
 // payloadInt 从 any 中提取 int，兼容 JSON 反序列化后的 float64。
 func payloadInt(value any) int {
@@ -137,6 +141,19 @@ func (e Event) AsMetricsUpdated() (workerName string, port int, metrics worker.M
 	}
 	workerName, _ = e.Payload["worker"].(string)
 	port = payloadInt(e.Payload["port"])
-	metrics, _ = e.Payload["metrics"].(worker.MetricsSnapshot)
-	return workerName, port, metrics, true
+	switch raw := e.Payload["metrics"].(type) {
+	case worker.MetricsSnapshot:
+		return workerName, port, raw, true
+	case map[string]any:
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return workerName, port, worker.MetricsSnapshot{}, false
+		}
+		if err := json.Unmarshal(data, &metrics); err != nil {
+			return workerName, port, worker.MetricsSnapshot{}, false
+		}
+		return workerName, port, metrics, true
+	default:
+		return workerName, port, worker.MetricsSnapshot{}, false
+	}
 }

@@ -40,7 +40,7 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := MetricsQuery{
-		Range:    r.URL.Query().Get("range"),
+		Range:    MetricsRangeName(r.URL.Query().Get("range")),
 		Worker:   r.URL.Query().Get("worker"),
 		Upstream: r.URL.Query().Get("upstream"),
 		Model:    r.URL.Query().Get("model"),
