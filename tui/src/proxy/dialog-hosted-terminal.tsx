@@ -244,6 +244,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     <DialogSelect
       title="Hosted Terminal"
       onClose={props.onClose}
+      locked={mode === "popup" && dialog.stack.length > 0}
       options={options()}
       placeholder="Select hosted session..."
       actions={[
