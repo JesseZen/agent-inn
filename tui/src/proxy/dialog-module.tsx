@@ -6,7 +6,7 @@ import { useSDK, type WorkerDetail, type WorkerSummary } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 
-type ModuleKey = "enabled" | "model" | "api_format" | "config_path" | "state_dir"
+type ModuleKey = "enabled" | "model" | "api_format" | "config_path" | "state_dir" | "blocked_tools"
 
 type ModuleField = {
   key: ModuleKey
@@ -22,6 +22,15 @@ const MODULE_FIELDS: Record<string, ModuleField[]> = {
     { key: "state_dir", title: "State Dir", placeholder: "~/.ainn" },
   ],
 }
+
+const TOOL_FILTER_TOOLS = [
+  { value: "image_generation", description: "OpenAI image generation" },
+  { value: "web_search_preview", description: "OpenAI web search" },
+  { value: "file_search", description: "OpenAI file search" },
+  { value: "code_interpreter", description: "OpenAI code interpreter" },
+  { value: "computer_use_preview", description: "OpenAI computer use" },
+  { value: "function", description: "Function tools" },
+]
 
 export function DialogModulePicker(props: { worker: WorkerSummary }) {
   const sdk = useSDK()
@@ -112,6 +121,33 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
       ]
     }
     const fields = MODULE_FIELDS[props.moduleName] ?? []
+    const toolFields: DialogSelectOption<ModuleKey>[] =
+      props.moduleName === "tool_filter"
+        ? [
+            {
+              title: "Blocked Tools",
+              value: "blocked_tools",
+              description: describeBlockedTools(cfg.params ?? {}),
+              category: "Fields",
+              onSelect: async () => {
+                dialog.push(() => (
+                  <DialogSelect
+                    title={`Blocked Tools: ${props.worker.name}`}
+                    options={toolFilterToolOptions(draft().params ?? {}, async (tool) => {
+                      const params = {
+                        ...(draft().params ?? {}),
+                        blocked_tools: toggledBlockedTools(draft().params ?? {}, tool),
+                      }
+                      await patchModule({ enabled: draft().enabled, params })
+                    })}
+                    placeholder="Select a tool..."
+                    footer={<EscHint dialog={dialog} />}
+                  />
+                ))
+              },
+            },
+          ]
+        : []
     return [
       {
         title: cfg.enabled ? "Disable" : "Enable",
@@ -122,6 +158,7 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
           await saveModule({ enabled: !cfg.enabled, params: cfg.params })
         },
       },
+      ...toolFields,
       ...fields.map((field) => ({
         title: field.title,
         value: field.key,
@@ -139,7 +176,7 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
     ]
   })
 
-  async function saveModule(next: { enabled: boolean; params?: Record<string, unknown> }) {
+  async function patchModule(next: { enabled: boolean; params?: Record<string, unknown> }) {
     try {
       const result = await sdk.client.patchModule(props.worker.port, props.moduleName, next)
       setDraft({
@@ -148,11 +185,17 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
       })
       await sync.bootstrap({ fatal: false })
       toast.show({ message: `Saved ${props.moduleName}`, variant: "success" })
-      dialog.pop()
-      dialog.pop()
+      return true
     } catch (err) {
       toast.error(err)
+      return false
     }
+  }
+
+  async function saveModule(next: { enabled: boolean; params?: Record<string, unknown> }) {
+    if (!(await patchModule(next))) return
+    dialog.pop()
+    dialog.pop()
   }
 
   return (
@@ -169,6 +212,7 @@ function describeModule(name: string, params: Record<string, unknown>) {
   if (name === "model_override") return String(params.model ?? "—")
   if (name === "api_translate") return String(params.api_format ?? "—")
   if (name === "config_patch") return [String(params.config_path ?? "—"), String(params.state_dir ?? "—")].join(" • ")
+  if (name === "tool_filter") return describeBlockedTools(params)
   return "—"
 }
 
@@ -187,4 +231,48 @@ function availabilityDescription(worker: WorkerSummary, name: string, params: Re
 function describeField(params: Record<string, unknown>, key: string) {
   const value = params[key]
   return value === undefined || value === "" ? "—" : String(value)
+}
+
+function toolFilterToolOptions(
+  params: Record<string, unknown>,
+  onToggle: (tool: string) => Promise<void>,
+): DialogSelectOption<string>[] {
+  const blocked = blockedToolList(params)
+  const known = new Set(TOOL_FILTER_TOOLS.map((tool) => tool.value))
+  const custom = blocked.filter((tool) => !known.has(tool)).map((tool) => ({ value: tool, description: "Custom tool" }))
+  return [...TOOL_FILTER_TOOLS, ...custom].map((tool) => {
+    const selected = blocked.includes(tool.value)
+    return {
+      title: `${selected ? "✓" : "○"} ${tool.value}`,
+      value: tool.value,
+      description: selected ? `filtered • ${tool.description}` : `allowed • ${tool.description}`,
+      category: "Tools",
+      onSelect: async () => {
+        await onToggle(tool.value)
+      },
+    }
+  })
+}
+
+function describeBlockedTools(params: Record<string, unknown>) {
+  const blocked = blockedToolList(params)
+  return blocked.length === 0 ? "—" : blocked.join(", ")
+}
+
+function toggledBlockedTools(params: Record<string, unknown>, tool: string) {
+  const current = blockedToolList(params)
+  const selected = new Set(current)
+  if (selected.has(tool)) {
+    selected.delete(tool)
+  } else {
+    selected.add(tool)
+  }
+  const knownOrder = TOOL_FILTER_TOOLS.map((item) => item.value)
+  return [...knownOrder.filter((name) => selected.has(name)), ...current.filter((name) => selected.has(name) && !knownOrder.includes(name))]
+}
+
+function blockedToolList(params: Record<string, unknown>) {
+  const value = params.blocked_tools
+  if (!Array.isArray(value)) return []
+  return value.filter((tool): tool is string => typeof tool === "string" && tool.trim() !== "").map((tool) => tool.trim())
 }

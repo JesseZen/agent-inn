@@ -343,7 +343,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
 
     if (url.pathname === "/api/workers/6767/modules/tool_filter" && method === "PATCH") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { enabled: boolean }
+      const body = JSON.parse(String(init?.body ?? "null")) as { enabled: boolean; params?: Record<string, unknown> }
       calls.patchModule.push({ port: 6767, module: "tool_filter", body })
       workers.set(6767, {
         ...workers.get(6767)!,
@@ -358,7 +358,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         module: {
           name: "tool_filter",
           enabled: body.enabled,
-          params: undefined,
+          params: body.params,
         },
       })
     }

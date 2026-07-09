@@ -754,6 +754,83 @@ test("proxy workers module action patches module through module API", async () =
   }
 })
 
+test("proxy tool filter module picks blocked tools", async () => {
+  const app = await mountProxyApp({
+    workers: [
+      {
+        name: "app",
+        port: 6767,
+        role: "app",
+        protocol: "responses",
+        upstream: { name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+        status: "running",
+        snapshot_generation: 3,
+        log_level: "simple",
+        modules: {
+          tool_filter: { enabled: true, params: { blocked_tools: ["image_generation"] } },
+        },
+        hooks: {},
+        module_support: {
+          tool_filter: { protocols: ["responses"], capabilities: ["tool_calls"] },
+        },
+      },
+    ],
+  })
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("Manage Modules")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Modules & Hooks: app")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Module: app")
+    })
+
+    expect(app.frame()).toContain("Blocked Tools")
+    expect(app.frame()).toContain("image_generation")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Blocked Tools: app")
+    })
+
+    expect(app.frame()).toContain("✓ image_generation")
+    expect(app.frame()).toContain("○ web_search_preview")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.patchModule.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("✓ web_search_preview")
+    })
+
+    expect(app.calls.patchModule).toEqual([
+      {
+        port: 6767,
+        module: "tool_filter",
+        body: {
+          enabled: true,
+          params: { blocked_tools: ["image_generation", "web_search_preview"] },
+        },
+      },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy workers module view shows lifecycle hooks separately", async () => {
   const app = await mountProxyApp()
 

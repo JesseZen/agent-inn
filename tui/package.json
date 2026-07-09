@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "bun run src/index.tsx",
+    "dev": "bun run src/cli.ts",
     "test": "bun test --timeout 30000 --only-failures",
     "typecheck": "tsc --noEmit"
   },
