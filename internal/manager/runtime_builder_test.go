@@ -249,6 +249,25 @@ func TestRuntimeBuilderReadsModelOverrideAnthropicProtocolSupport(t *testing.T) 
 	}
 }
 
+func TestRuntimeBuilderReadsToolFilterProtocolSupport(t *testing.T) {
+	cfg := runtimeBuilderConfig()
+	worker := cfg.Workers["cli-openai"]
+	worker.RequestModules["tool_filter"] = config.ModuleConfig{Enabled: true}
+	cfg.Workers["cli-openai"] = worker
+
+	got, err := (RuntimeBuilder{}).Build(cfg, "cli-openai", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := appruntime.ModuleProtocolSupport{
+		Protocols:    []appruntime.ProtocolKind{appruntime.ProtocolResponses},
+		Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls},
+	}
+	if !reflect.DeepEqual(got.Plugins["tool_filter"].ProtocolSupport, want) {
+		t.Fatalf("bad tool_filter support:\ngot  %#v\nwant %#v", got.Plugins["tool_filter"].ProtocolSupport, want)
+	}
+}
+
 func TestRuntimeBuilderRejectsExternalPluginMissingManifest(t *testing.T) {
 	cfg := runtimeBuilderConfig()
 	cfg.Plugins["external_filter"] = config.PluginDefinition{
