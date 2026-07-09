@@ -102,12 +102,20 @@ type workerMetricSource struct {
 }
 
 func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
-	cfg := config.Config{Settings: settings}
-	cfg.ApplyDefaults()
 	if clock == nil {
 		clock = time.Now
 	}
-	return &metricsStore{settings: cfg.Settings, clock: clock}
+	store := &metricsStore{clock: clock}
+	store.UpdateSettings(settings)
+	return store
+}
+
+func (s *metricsStore) UpdateSettings(settings config.Settings) {
+	cfg := config.Config{Settings: settings}
+	cfg.ApplyDefaults()
+	s.mu.Lock()
+	s.settings = cfg.Settings
+	s.mu.Unlock()
 }
 
 func (s *metricsStore) Record(record MetricsRecord) error {
@@ -136,6 +144,9 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 }
 
 func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (MetricsQueryResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	resolved := s.resolveRange(query.Range)
 	response := MetricsQueryResponse{Range: resolved}
 	aggregates := map[string]*WorkerMetricsAggregate{}

@@ -15,7 +15,6 @@ import (
 
 type WorkerSpawn struct {
 	Port           int
-	Upstream       string
 	Args           []string
 	RuntimeJSON    []byte
 	LogWriter      io.Writer
@@ -245,7 +244,6 @@ func (m *Manager) BuildWorkerSpawn(workerName string) (WorkerSpawn, error) {
 	}
 	return WorkerSpawn{
 		Port:        runtime.ListenPort,
-		Upstream:    string(runtime.Upstream.ID),
 		Args:        []string{"worker", "--port", fmt.Sprintf("%d", runtime.ListenPort), "--config-fd", "3"},
 		RuntimeJSON: payload,
 	}, nil

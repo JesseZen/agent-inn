@@ -114,8 +114,13 @@ export function DialogMetrics() {
       footer: `:${worker.port} ${worker.status}`,
       category: "Workers",
       onSelect: async () => {
-        const detail = await sdk.client.getWorker(worker.port)
-        dialog.replace(() => <DialogWorkerStatus worker={detail} />)
+        try {
+          const detail = await sdk.client.getWorker(worker.port)
+          if (disposed) return
+          dialog.replace(() => <DialogWorkerStatus worker={detail} />)
+        } catch (err) {
+          if (!disposed) toast.error(err)
+        }
       },
     })),
   ])

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -239,6 +241,198 @@ func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkerMetricsRecordsUsageFromCompressedUpstreamResponses(t *testing.T) {
+	const model = "gpt-5-mini"
+	wantMetrics := struct {
+		Model string
+		Usage UsageTokens
+	}{
+		Model: model,
+		Usage: UsageTokens{Known: true, InputTokens: 11, OutputTokens: 7, CacheReadTokens: 4, ReasoningTokens: 2, TotalTokens: 18},
+	}
+	responses := []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{
+			name:        "json",
+			contentType: "application/json",
+			body:        `{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-5-mini","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}`,
+		},
+		{
+			name:        "sse",
+			contentType: "text/event-stream",
+			body:        "data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-mini\",\"choices\":[]}\n\ndata: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\ndata: [DONE]\n\n",
+		},
+	}
+	for _, response := range responses {
+		for _, encoding := range []string{"gzip", "deflate", "zstd"} {
+			t.Run(response.name+"/"+encoding, func(t *testing.T) {
+				compressed := compressProxyResponse(t, encoding, []byte(response.body))
+				upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if got := r.Header.Get("Accept-Encoding"); got != encoding {
+						t.Fatalf("unexpected accept encoding %q", got)
+					}
+					w.Header().Set("Content-Type", response.contentType)
+					w.Header().Set("Content-Encoding", encoding)
+					w.Header().Set("X-Upstream-Response", "preserved")
+					w.WriteHeader(http.StatusCreated)
+					midpoint := len(compressed) / 2
+					_, _ = w.Write(compressed[:midpoint])
+					w.(http.Flusher).Flush()
+					_, _ = w.Write(compressed[midpoint:])
+				}))
+				defer upstreamServer.Close()
+
+				var metrics bytes.Buffer
+				workerInstance, err := New(Options{
+					Snapshot: RuntimeConfigSnapshot{
+						Generation: 1,
+						Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+					},
+					MetricsWriter: &metrics,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
+				req.Header.Set("Accept-Encoding", encoding)
+				res := httptest.NewRecorder()
+				workerInstance.ServeHTTP(res, req)
+
+				gotDelivery := struct {
+					Status          int
+					ContentType     string
+					ContentEncoding string
+					Marker          string
+					Body            []byte
+					Flushed         bool
+				}{
+					Status:          res.Code,
+					ContentType:     res.Header().Get("Content-Type"),
+					ContentEncoding: res.Header().Get("Content-Encoding"),
+					Marker:          res.Header().Get("X-Upstream-Response"),
+					Body:            res.Body.Bytes(),
+					Flushed:         res.Flushed,
+				}
+				wantDelivery := struct {
+					Status          int
+					ContentType     string
+					ContentEncoding string
+					Marker          string
+					Body            []byte
+					Flushed         bool
+				}{
+					Status:          http.StatusCreated,
+					ContentType:     response.contentType,
+					ContentEncoding: encoding,
+					Marker:          "preserved",
+					Body:            compressed,
+					Flushed:         true,
+				}
+				if !reflect.DeepEqual(gotDelivery, wantDelivery) {
+					t.Fatalf("compressed response delivery changed:\ngot  %#v\nwant %#v", gotDelivery, wantDelivery)
+				}
+
+				var event RequestMetricEvent
+				if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+					t.Fatal(err)
+				}
+				gotMetrics := struct {
+					Model string
+					Usage UsageTokens
+				}{event.Model, event.Usage}
+				if gotMetrics != wantMetrics {
+					t.Fatalf("bad compressed metrics event:\ngot  %#v\nwant %#v", gotMetrics, wantMetrics)
+				}
+			})
+		}
+	}
+}
+
+func TestWorkerMetricsPreservesResponseWhenDecompressionFails(t *testing.T) {
+	body := []byte("not a gzip stream")
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write(body)
+	}))
+	defer upstreamServer.Close()
+
+	var metrics bytes.Buffer
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+		MetricsWriter: &metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`))
+	req.Header.Set("Accept-Encoding", "gzip")
+	res := httptest.NewRecorder()
+	workerInstance.ServeHTTP(res, req)
+
+	gotDelivery := struct {
+		Status          int
+		ContentEncoding string
+		Body            []byte
+	}{res.Code, res.Header().Get("Content-Encoding"), res.Body.Bytes()}
+	wantDelivery := struct {
+		Status          int
+		ContentEncoding string
+		Body            []byte
+	}{http.StatusAccepted, "gzip", body}
+	if !reflect.DeepEqual(gotDelivery, wantDelivery) {
+		t.Fatalf("decode failure changed proxy delivery:\ngot  %#v\nwant %#v", gotDelivery, wantDelivery)
+	}
+
+	var event RequestMetricEvent
+	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Model != "" || event.Usage != (UsageTokens{}) {
+		t.Fatalf("decode failure should leave usage unknown: %#v", event)
+	}
+}
+
+func compressProxyResponse(t *testing.T, encoding string, body []byte) []byte {
+	t.Helper()
+	var compressed bytes.Buffer
+	var writer io.WriteCloser
+	switch encoding {
+	case "gzip":
+		writer = gzip.NewWriter(&compressed)
+	case "deflate":
+		var err error
+		writer, err = flate.NewWriter(&compressed, flate.DefaultCompression)
+		if err != nil {
+			t.Fatal(err)
+		}
+	case "zstd":
+		var err error
+		writer, err = zstd.NewWriter(&compressed)
+		if err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unsupported test encoding %q", encoding)
+	}
+	if _, err := writer.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return compressed.Bytes()
 }
 
 func TestWorkerSerializesConcurrentMetricsWrites(t *testing.T) {

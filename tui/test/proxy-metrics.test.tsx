@@ -177,3 +177,59 @@ test("proxy status cancels queued refreshes when the dialog closes", async () =>
     await app.cleanup()
   }
 })
+
+test("proxy status stays closed when worker selection finishes after disposal", async () => {
+  const app = await mountProxyApp()
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics") && app.frame().includes("app")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    app.api.ui.dialog.clear()
+
+    await Bun.sleep(METRICS_REFRESH_DELAY_MS)
+    await app.render()
+    expect({
+      depth: app.api.ui.dialog.depth,
+      workerDetailOpen: app.frame().includes("app (:6767)"),
+    }).toEqual({
+      depth: 0,
+      workerDetailOpen: false,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy status reports worker selection errors while mounted", async () => {
+  const app = await mountProxyApp({
+    metricsResponder: (range) => {
+      const response = metricsResponse(range, 20)
+      response.workers[0].port = 9999
+      return response
+    },
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics") && app.frame().includes(":9999")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("unexpected request: /api/workers/9999")
+    })
+  } finally {
+    await app.cleanup()
+  }
+})

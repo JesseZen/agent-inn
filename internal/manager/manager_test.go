@@ -410,6 +410,112 @@ func TestManagerLogsMetricsPersistenceFailureAndPublishesUpdate(t *testing.T) {
 	}
 }
 
+func TestManagerConfigSyncKeepsMetricsStoreDuringConcurrentPersistence(t *testing.T) {
+	const (
+		recordCount      = 32
+		expiredFileCount = 256
+		expiredAgeDays   = 60
+		retentionDays    = 7
+	)
+	stateDir := t.TempDir()
+	metricsDir := filepath.Join(stateDir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	for i := 0; i < expiredFileCount; i++ {
+		path := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -expiredAgeDays-i)))
+		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir, Metrics: config.MetricsSettings{RetentionDays: 30}},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+	initialStore := m.metricsStore
+
+	start := make(chan struct{})
+	errors := make(chan error, recordCount*2)
+	var wg sync.WaitGroup
+	for i := 0; i < recordCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			m.mu.RLock()
+			store := m.metricsStore
+			m.mu.RUnlock()
+			errors <- store.Record(MetricsRecord{
+				Timestamp:   now,
+				Worker:      "app",
+				Port:        6767,
+				Upstream:    "openai",
+				Status:      http.StatusOK,
+				UsageKnown:  true,
+				TotalTokens: 1,
+			})
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < recordCount; i++ {
+			nextRetentionDays := retentionDays + i%2
+			m.store.Update(func(cfg *config.Config) {
+				cfg.Settings.Metrics.RetentionDays = nextRetentionDays
+			})
+			m.syncConfigFromStore()
+			m.mu.RLock()
+			store := m.metricsStore
+			m.mu.RUnlock()
+			errors <- store.CleanupRetention()
+		}
+	}()
+	close(start)
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("concurrent metrics persistence failed: %v", err)
+		}
+	}
+
+	m.mu.RLock()
+	store := m.metricsStore
+	m.mu.RUnlock()
+	if store != initialStore {
+		t.Fatal("config sync replaced the manager metrics store")
+	}
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{
+		Name: "app", Port: 6767, Status: "running", Upstream: upstream.RedactedUpstream{Name: "openai"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startOfDay := startOfLocalDay(now)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: startOfDay, End: startOfDay.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Upstream: "openai", Totals: MetricsTotals{Requests: recordCount, TotalTokens: recordCount}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad metrics after config sync:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerRecordsWorkerMetricsUsingEventUpstreamAfterRuntimeChange(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)

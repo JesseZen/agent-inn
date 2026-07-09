@@ -22,7 +22,13 @@ import (
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
-const headerRequestID = "X-Request-Id"
+const (
+	headerRequestID         = "X-Request-Id"
+	contentEncodingGzip     = "gzip"
+	contentEncodingDeflate  = "deflate"
+	contentEncodingZstd     = "zstd"
+	proxyResponseBufferSize = 32 * 1024
+)
 
 type Worker struct {
 	snapshots      *snapshotHolder
@@ -289,10 +295,11 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		return responseCopyResult{}, err
 	}
 	rawObserver := NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type"))
-	upstreamHTTPResp.Body = &usageObservingReadCloser{
-		ReadCloser: upstreamHTTPResp.Body,
-		observer:   rawObserver,
-	}
+	upstreamHTTPResp.Body = newUsageObservingReadCloser(
+		upstreamHTTPResp.Body,
+		upstreamHTTPResp.Header.Get("Content-Encoding"),
+		rawObserver,
+	)
 	proxyResp := &module.ProxyResponse{
 		StatusCode:  upstreamHTTPResp.StatusCode,
 		Headers:     upstreamHTTPResp.Header.Clone(),
@@ -334,18 +341,18 @@ func readRequestBody(r *http.Request) ([]byte, string, error) {
 	var reader io.Reader = r.Body
 	switch strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding"))) {
 	case "", "identity":
-	case "gzip":
+	case contentEncodingGzip:
 		gz, err := gzip.NewReader(r.Body)
 		if err != nil {
 			return nil, "", err
 		}
 		defer gz.Close()
 		reader = gz
-	case "deflate":
+	case contentEncodingDeflate:
 		fl := flate.NewReader(r.Body)
 		defer fl.Close()
 		reader = fl
-	case "zstd":
+	case contentEncodingZstd:
 		zr, err := zstd.NewReader(r.Body)
 		if err != nil {
 			return nil, "", err
@@ -366,15 +373,89 @@ type responseCopyResult struct {
 
 type usageObservingReadCloser struct {
 	io.ReadCloser
-	observer *UsageObserver
+	observer      *UsageObserver
+	encodedWriter *io.PipeWriter
+	decodeDone    chan struct{}
+	finishOnce    sync.Once
+}
+
+func newUsageObservingReadCloser(body io.ReadCloser, contentEncoding string, observer *UsageObserver) *usageObservingReadCloser {
+	result := &usageObservingReadCloser{ReadCloser: body, observer: observer}
+	encoding := strings.ToLower(strings.TrimSpace(contentEncoding))
+	if encoding != contentEncodingGzip && encoding != contentEncodingDeflate && encoding != contentEncodingZstd {
+		return result
+	}
+	encodedReader, encodedWriter := io.Pipe()
+	result.encodedWriter = encodedWriter
+	result.decodeDone = make(chan struct{})
+	go observeDecodedUsage(encodedReader, encoding, observer, result.decodeDone)
+	return result
 }
 
 func (r *usageObservingReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	if n > 0 {
-		r.observer.Observe(p[:n])
+		if r.encodedWriter == nil {
+			r.observer.Observe(p[:n])
+		} else {
+			_, _ = r.encodedWriter.Write(p[:n])
+		}
+	}
+	if err != nil {
+		r.finishDecoding()
 	}
 	return n, err
+}
+
+func (r *usageObservingReadCloser) Close() error {
+	r.finishDecoding()
+	return r.ReadCloser.Close()
+}
+
+func (r *usageObservingReadCloser) finishDecoding() {
+	r.finishOnce.Do(func() {
+		if r.encodedWriter == nil {
+			return
+		}
+		_ = r.encodedWriter.Close()
+		<-r.decodeDone
+	})
+}
+
+func observeDecodedUsage(encodedReader *io.PipeReader, encoding string, observer *UsageObserver, done chan<- struct{}) {
+	defer close(done)
+	defer encodedReader.Close()
+	var reader io.Reader
+	switch encoding {
+	case contentEncodingGzip:
+		decoded, err := gzip.NewReader(encodedReader)
+		if err != nil {
+			return
+		}
+		defer decoded.Close()
+		reader = decoded
+	case contentEncodingDeflate:
+		decoded := flate.NewReader(encodedReader)
+		defer decoded.Close()
+		reader = decoded
+	case contentEncodingZstd:
+		decoded, err := zstd.NewReader(encodedReader)
+		if err != nil {
+			return
+		}
+		defer decoded.Close()
+		reader = decoded
+	}
+	buf := make([]byte, proxyResponseBufferSize)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			observer.Observe(buf[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) (responseCopyResult, error) {
@@ -394,7 +475,7 @@ func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module
 	}
 
 	flusher, _ := rw.(http.Flusher)
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, proxyResponseBufferSize)
 	for {
 		select {
 		case <-ctx.Done():

@@ -566,7 +566,7 @@ func (m *Manager) syncConfigFromStore() (config.Config, config.Status) {
 	m.config = cfg
 	m.configStatus = status
 	m.portIndex = buildPortIndex(cfg.Workers)
-	m.metricsStore = newMetricsStore(cfg.Settings, func() time.Time { return m.clock() })
+	m.metricsStore.UpdateSettings(cfg.Settings)
 	m.mu.Unlock()
 	return cfg, status
 }
