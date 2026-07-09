@@ -66,6 +66,65 @@ func TestHostedTurnWatcherPollOnceMarksInterruptedTurn(t *testing.T) {
 	}
 }
 
+func TestHostedTurnWatcherPollOncePreservesTodoMarker(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+		UserMarker:   HostedUserMarkerTodo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", filepath.Join(stateDir, "codex.jsonl"), "turn_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(running.TurnTranscriptPath, []byte(`{"type":"turn.completed","turn_id":"turn_1","status":"success"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	watcher := newHostedTurnWatcher(settings, registry, hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		gotCalls = append(gotCalls, append([]string{}, args...))
+		return "", nil
+	}))
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := running
+	want.TurnState = HostedTurnStateDone
+	want.TurnTranscriptPath = ""
+	want.TurnID = ""
+	if !ok || !reflect.DeepEqual(updated, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, want)
+	}
+	wantCalls := [][]string{
+		TmuxActiveWindowDetailsCommandForSettings(settings),
+		TmuxHostedTurnStatusCommandForRecord(settings, want),
+	}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
+	}
+}
+
 func TestHostedTurnWatcherPollOnceMarksEventMsgTurnAborted(t *testing.T) {
 	stateDir := t.TempDir()
 	settings := config.Settings{
