@@ -22,8 +22,8 @@ const (
 	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
 	defaultManagerURL               = "http://127.0.0.1:9090"
 	hostedPopupTitle                = "Hosted Terminal"
-	hostedPopupWidth                = "80%"
-	hostedPopupHeight               = "70%"
+	hostedPopupWidth                = "40%"
+	hostedPopupHeight               = "100%"
 )
 
 type launchRunner interface {

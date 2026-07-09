@@ -1196,7 +1196,7 @@ func TestRunLaunchHostedTerminalHostedPopupExistingAinnBindingAllowsTmuxNormaliz
 					return "H\n", nil
 				}
 				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
-					return "bind-key -T prefix H display-popup -E -T \"Hosted Terminal\" -h \"70%\" -w \"80%\" -x R -y 0 '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n", nil
+					return "bind-key -T prefix H display-popup -E -T \"Hosted Terminal\" -h \"100%\" -w \"40%\" -x R -y 0 '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n", nil
 				}
 				if len(args) > 3 && args[3] == "select-window" {
 					return "", errors.New("can't find window")

@@ -22,8 +22,8 @@ const (
 	tmuxHostedPopupOwnerOption       = "@ainn_hosted_popup_owner"
 	tmuxHostedPopupKeyOption         = "@ainn_hosted_popup_key"
 	hostedPopupTitle                 = "Hosted Terminal"
-	hostedPopupWidth                 = "80%"
-	hostedPopupHeight                = "70%"
+	hostedPopupWidth                 = "40%"
+	hostedPopupHeight                = "100%"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 	tmuxHostedPopupStatusRange       = "ainn-sessions"
 )

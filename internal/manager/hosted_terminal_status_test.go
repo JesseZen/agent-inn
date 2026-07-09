@@ -392,13 +392,13 @@ func TestTmuxHostedPopupOwnerCommandsForSettings(t *testing.T) {
 func TestTmuxHostedPopupCommandsForSettings(t *testing.T) {
 	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
 	gotDisplay := TmuxDisplayHostedPopupCommandForSettings(settings, "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin")
-	wantDisplay := []string{"tmux", "-L", "ainn-test", "display-popup", "-E", "-x", "R", "-y", "0", "-w", "80%", "-h", "70%", "-T", "Hosted Terminal", "'/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
+	wantDisplay := []string{"tmux", "-L", "ainn-test", "display-popup", "-E", "-x", "R", "-y", "0", "-w", "40%", "-h", "100%", "-T", "Hosted Terminal", "'/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
 	if !reflect.DeepEqual(gotDisplay, wantDisplay) {
 		t.Fatalf("got %#v, want %#v", gotDisplay, wantDisplay)
 	}
 
 	gotBinding := TmuxHostedPopupBindingCommandForSettings(settings, "H", "/tmp/ainn config", "http://127.0.0.1:19090", "/tmp/ainn bin")
-	wantBinding := []string{"tmux", "-L", "ainn-test", "bind-key", "-T", "prefix", "H", "display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
+	wantBinding := []string{"tmux", "-L", "ainn-test", "bind-key", "-T", "prefix", "H", "display-popup -E -x R -y 0 -w 40% -h 100% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'"}
 	if !reflect.DeepEqual(gotBinding, wantBinding) {
 		t.Fatalf("got %#v, want %#v", gotBinding, wantBinding)
 	}
@@ -410,7 +410,7 @@ func TestTmuxHostedPopupMouseBindingCommandForSettingsSelectMode(t *testing.T) {
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"bind-key", "-T", "root", "MouseDown1Status",
-		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t =\"",
+		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 40% -h 100% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t =\"",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -426,7 +426,7 @@ func TestTmuxHostedPopupMouseBindingCommandForSettingsAcknowledgeMode(t *testing
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"bind-key", "-T", "root", "MouseDown1Status",
-		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t = ; run-shell -b -t = \\\"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\\\"\"",
+		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 40% -h 100% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t = ; run-shell -b -t = \\\"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\\\"\"",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
