@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onMount } from "solid-js"
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { Global } from "@agent-inn/core/global"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
@@ -14,6 +14,7 @@ import { launchProxySession, pasteHostedPrompt, type HostedTerminalAttachMode } 
 
 const minBatchVariantCount = 1
 const maxBatchVariantCount = 8
+const batchSessionRefreshIntervalMs = 500
 
 type BatchListOption =
   | {
@@ -173,8 +174,13 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
   const sessionStates = createMemo(() => new Map(sessions().map((session) => [session.session_id, session.turn_state ?? "idle"])))
 
-  onMount(async () => {
-    setSessions(await sdk.client.listHostedSessions())
+  onMount(() => {
+    const refreshSessions = () => {
+      void sdk.client.listHostedSessions().then(setSessions)
+    }
+    refreshSessions()
+    const interval = setInterval(refreshSessions, batchSessionRefreshIntervalMs)
+    onCleanup(() => clearInterval(interval))
   })
 
   const options = createMemo<DialogSelectOption<BatchVariant>[]>(() =>

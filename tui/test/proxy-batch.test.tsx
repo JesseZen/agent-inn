@@ -368,6 +368,63 @@ test("batch detail shows only hosted turn confirmation states", async () => {
   }
 })
 
+test("batch detail refreshes when a CLI confirms the prompt", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const batch = {
+    id: "batch_1",
+    title: "fix scroll",
+    worker_name: "cli-openrouter",
+    worker_port: 11199,
+    source_directory: directory,
+    created_at: "2026-07-09T00:00:00Z",
+    variants: [
+      {
+        id: "variant_1",
+        index: 1,
+        hosted_session_id: "session_1",
+        session_label: "fix scroll batch_1 #1",
+        worktree_dir: `${directory}/.worktrees/fix-scroll-1`,
+      },
+    ],
+  }
+  const app = await mountProxyApp({ batches: [batch] })
+  app.hostedSessions.push({
+    session_id: "session_1",
+    session_label: "fix scroll batch_1 #1",
+    worker_name: "cli-openrouter",
+    worker_port: 11199,
+    status: "active",
+    turn_state: "idle",
+    created_at: "2026-07-09T00:00:00Z",
+    last_opened_at: "2026-07-09T00:00:00Z",
+  })
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("waiting for CLI confirmation")
+    })
+
+    app.hostedSessions[0].turn_state = "running"
+
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("running")
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("batch detail deletes all variants after confirmation", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
