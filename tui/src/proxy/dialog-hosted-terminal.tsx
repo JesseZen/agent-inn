@@ -188,6 +188,15 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     }
   }
 
+  async function markSessionUnread(session: HostedSessionSummary) {
+    try {
+      await sdk.client.markHostedSessionUnread(session.session_id)
+      await refreshSessions()
+    } catch (err) {
+      await DialogAlert.show(dialog, "Mark hosted session unread failed", String(err instanceof Error ? err.message : err))
+    }
+  }
+
   return (
     <DialogSelect
       title="Hosted Terminal"
@@ -219,6 +228,24 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           onTrigger: (option) => {
             if (option.value.type !== "session") return
             void duplicateSession(option.value.session)
+          },
+        },
+        {
+          command: "session.mark_unread",
+          title: "unread",
+          hidden: (option) => {
+            if (option?.value.type !== "session") return true
+            const session = option.value.session
+            const terminal =
+              session.turn_state === "done" ||
+              session.turn_state === "failed" ||
+              session.turn_state === "interrupted"
+            if (!terminal || !session.turn_generation) return true
+            return (session.turn_acknowledged_generation ?? 0) < session.turn_generation
+          },
+          onTrigger: (option) => {
+            if (option.value.type !== "session") return
+            void markSessionUnread(option.value.session)
           },
         },
         {

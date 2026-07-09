@@ -30,4 +30,5 @@ const (
 	EventConfigPatch    = "config.patch"
 	EventRootStart      = "root.start"
 	EventRootStop       = "root.stop"
+	EventHostedTurnPoll = "hosted_turn.poll"
 )

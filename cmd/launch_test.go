@@ -22,6 +22,14 @@ func tmuxExtendedKeysSocketCommand(socketPath string) []string {
 	return []string{"tmux", "-S", socketPath, "set-option", "-s", "extended-keys", "always", ";", "set-option", "-s", "extended-keys-format", "csi-u", ";", "set-option", "-s", "terminal-features[3]", "xterm*:extkeys"}
 }
 
+func tmuxResetMainWindowStatusCommand(socketName string, hostSession string) []string {
+	return []string{"tmux", "-L", socketName, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format"}
+}
+
+func tmuxResetMainWindowStatusSocketCommand(socketPath string, hostSession string) []string {
+	return []string{"tmux", "-S", socketPath, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format"}
+}
+
 func hostedTestTmuxSettings(socketName string, hostSession string) config.Settings {
 	return config.Settings{
 		Terminal: config.TerminalSettings{

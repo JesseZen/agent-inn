@@ -215,6 +215,11 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             method: "POST",
           })
         },
+        async markHostedSessionUnread(sessionID: string) {
+          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}/mark-unread`, {
+            method: "POST",
+          })
+        },
         async deleteHostedSession(sessionID: string) {
           return request<{ session_id: string }>(`/api/hosted-sessions/${sessionID}`, {
             method: "DELETE",

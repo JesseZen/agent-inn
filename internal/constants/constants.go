@@ -26,3 +26,9 @@ const (
 	HostedTurnStateFailed      = "failed"
 	HostedTurnStateInterrupted = "interrupted"
 )
+
+// HostedTurnReason* are persisted as hosted terminal turn_state_reason values.
+const (
+	HostedTurnReasonCodexTaskFailed = "codex_task_failed"
+	HostedTurnReasonUserInterrupt   = "user_interrupt"
+)

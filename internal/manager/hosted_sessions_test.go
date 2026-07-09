@@ -148,6 +148,144 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 	}
 }
 
+func TestHostedSessionRegistryMarkTurnStatePreservesInterrupted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := registry.MarkTurnState(created.SessionID, HostedTurnStateInterrupted, "user_interrupt", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done, err := registry.MarkTurnState(created.SessionID, HostedTurnStateDone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := running
+	want.TurnState = HostedTurnStateInterrupted
+	want.TurnStateReason = "user_interrupt"
+	if !reflect.DeepEqual(interrupted, want) {
+		t.Fatalf("got %#v, want %#v", interrupted, want)
+	}
+	if !reflect.DeepEqual(done, want) {
+		t.Fatalf("done should not overwrite interrupted state:\ngot  %#v\nwant %#v", done, want)
+	}
+}
+
+func TestHostedSessionRegistryMarkTurnStateWithWatchRegistersActiveTurn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "launcher-1", "/tmp/codex.jsonl", "turn_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.TurnState = HostedTurnStateRunning
+	want.TurnGeneration = 1
+	want.LauncherSessionID = "launcher-1"
+	want.TurnTranscriptPath = "/tmp/codex.jsonl"
+	want.TurnID = "turn_1"
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+
+	watched, err := registry.WatchedTurns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWatched := []HostedTurnWatch{{
+		SessionID:         created.SessionID,
+		TurnGeneration:    1,
+		TranscriptPath:    "/tmp/codex.jsonl",
+		TurnID:            "turn_1",
+		LauncherSessionID: "launcher-1",
+		TmuxWindowID:      "@12",
+		TurnState:         HostedTurnStateRunning,
+		SessionSnapshot:   want,
+	}}
+	if !reflect.DeepEqual(watched, wantWatched) {
+		t.Fatalf("got %#v, want %#v", watched, wantWatched)
+	}
+}
+
+func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.CompleteWatchedTurn(created.SessionID, firstTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatalf("stale watcher should not update session: %#v", got)
+	}
+	persisted, found, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !reflect.DeepEqual(persisted, secondTurn) {
+		t.Fatalf("got %#v found=%v, want %#v", persisted, found, secondTurn)
+	}
+
+	got, ok, err = registry.CompleteWatchedTurn(created.SessionID, secondTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := secondTurn
+	want.TurnState = HostedTurnStateInterrupted
+	want.TurnStateReason = "user_interrupt"
+	want.TurnTranscriptPath = ""
+	want.TurnID = ""
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
 func TestHostedSessionRegistryAcknowledgeTurnByWindowIDMarksCompletedTurnRead(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -213,6 +351,35 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowNameMarksLegacyCompletedTur
 	want.TurnAcknowledgedGeneration = running.TurnGeneration
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryMarkTurnUnreadMarksCompletedTurnUnread(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "worker",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := registry.MarkTurnUnread(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.TurnAcknowledgedGeneration = 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 

@@ -85,6 +85,13 @@
 - **grep**：`grep worker.restart ~/.ainn/logs/ainn.log`
 - **用途**：看 worker 重启了多少次；配合 health.fail 可以看出是健康检查触发的自动重启
 
+#### `hosted_turn.poll`
+- **触发**：Hosted terminal turn watcher 轮询 Codex transcript 时发生错误
+- **字段**：`error`
+- **LEVEL**：WARN
+- **grep**：`grep hosted_turn.poll ~/.ainn/logs/ainn.log`
+- **用途**：排查绿色/蓝色 tab 状态没有按 transcript 纠偏的问题；常见原因是 transcript JSONL 损坏、文件权限异常或 tmux 状态更新失败
+
 ---
 
 ### manager.health（健康探测）
@@ -184,6 +191,27 @@ grep request.done ~/.ainn/logs/worker-<port>.log | grep -vE 'dur=[0-9]\.'
 
 # 看有没有 request.start 但没有 request.done（开启 detail 模式后可见）
 ```
+
+### Hosted terminal tab 一直显示 running
+
+```bash
+# 1. 先确认 hook 是否安装
+./ainn hooks status
+
+# 2. 确认 hosted session 记录里的 turn 状态
+cat ~/.ainn/hosted-terminal-sessions.json
+
+# 3. Codex 场景再检查 session 记录里的 turn_transcript_path 对应 JSONL
+#    搜对应 turn_id 的 task_complete，last_agent_message=null 表示失败完成
+grep '"task_complete"' <transcript_path> | tail -20
+
+# 4. 看 manager watcher 是否轮询 transcript 时报错
+grep hosted_turn.poll ~/.ainn/logs/ainn.log | tail -20
+```
+
+**判断原则**：`UserPromptSubmit` 只表示 turn 已开始；`Stop` 表示 launcher 认为已结束；Claude 的 `StopFailure` 表示 API 错误结束；Codex 没有等价失败 hook，因此 AINN 优先记录 hook input 中的 `transcript_path` 和 `turn_id`，缺失时由 manager turn watcher 通过 `launcher_session_id` 反查 transcript 并补充判定 failed/interrupted 结果。若 tab 长时间停在蓝色 running，优先检查对应 launcher 是否没有写出 terminal 事件，或 session 记录里的 `launcher_session_id` 是否无法匹配到 `~/.codex/sessions` 下的 JSONL。
+
+如果 running 的父会话被 subagent 结束事件标成绿色 done，检查 hook input 是否带 `agent_id`、`agent_transcript_path` 或 `hook_event_name=SubagentStop`；这类 subagent payload 不应修改父 hosted session 状态。
 
 ### 配置没生效
 

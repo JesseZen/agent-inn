@@ -118,6 +118,8 @@ export type ProxySettingsResponse = {
   status: ProxyConfigStatus
 }
 
+export type HostedTurnState = "idle" | "running" | "done" | "failed" | "interrupted"
+
 export type HostedSessionRecord = {
   session_id: string
   session_label: string
@@ -127,6 +129,10 @@ export type HostedSessionRecord = {
   model?: string
   add_dirs?: string[]
   launcher_session_id?: string
+  turn_state?: HostedTurnState
+  turn_state_reason?: string
+  turn_generation?: number
+  turn_acknowledged_generation?: number
   created_at: string
   last_opened_at: string
 }

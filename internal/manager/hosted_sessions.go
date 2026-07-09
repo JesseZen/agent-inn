@@ -50,6 +50,8 @@ type HostedSessionRecord struct {
 	TurnStateReason            string    `json:"turn_state_reason,omitempty"`
 	TurnGeneration             int       `json:"turn_generation,omitempty"`
 	TurnAcknowledgedGeneration int       `json:"turn_acknowledged_generation,omitempty"`
+	TurnTranscriptPath         string    `json:"turn_transcript_path,omitempty"`
+	TurnID                     string    `json:"turn_id,omitempty"`
 	CreatedAt                  time.Time `json:"created_at"`
 	LastOpenedAt               time.Time `json:"last_opened_at"`
 }
@@ -57,6 +59,17 @@ type HostedSessionRecord struct {
 type HostedSessionSummary struct {
 	HostedSessionRecord
 	Status string `json:"status"`
+}
+
+type HostedTurnWatch struct {
+	SessionID         string
+	TurnGeneration    int
+	TranscriptPath    string
+	TurnID            string
+	LauncherSessionID string
+	TmuxWindowID      string
+	TurnState         string
+	SessionSnapshot   HostedSessionRecord
 }
 
 func (r *HostedSessionRegistry) Summaries() ([]HostedSessionSummary, error) {
@@ -349,6 +362,10 @@ func (r *HostedSessionRegistry) RenameForSettings(sessionID string, sessionLabel
 }
 
 func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string, launcherSessionID string) (HostedSessionRecord, error) {
+	return r.MarkTurnStateWithWatch(sessionID, state, reason, launcherSessionID, "", "")
+}
+
+func (r *HostedSessionRegistry) MarkTurnStateWithWatch(sessionID string, state string, reason string, launcherSessionID string, transcriptPath string, turnID string) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
@@ -358,6 +375,8 @@ func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, re
 		if state == HostedTurnStateRunning {
 			session.TurnGeneration++
 			session.TurnStateReason = ""
+			session.TurnTranscriptPath = strings.TrimSpace(transcriptPath)
+			session.TurnID = strings.TrimSpace(turnID)
 		}
 		if state == HostedTurnStateDone &&
 			(session.TurnState == HostedTurnStateFailed || session.TurnState == HostedTurnStateInterrupted) {
@@ -375,6 +394,74 @@ func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, re
 		return nil
 	})
 	return updated, err
+}
+
+func (r *HostedSessionRegistry) CompleteWatchedTurn(sessionID string, turnGeneration int, state string, reason string) (HostedSessionRecord, bool, error) {
+	var updated HostedSessionRecord
+	applied := false
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok || session.TurnGeneration != turnGeneration {
+			return nil
+		}
+		if session.TurnState != HostedTurnStateRunning && session.TurnState != HostedTurnStateDone {
+			return nil
+		}
+		if state == HostedTurnStateDone &&
+			(session.TurnState == HostedTurnStateFailed || session.TurnState == HostedTurnStateInterrupted) {
+			updated = session
+			return nil
+		}
+		session.TurnState = state
+		session.TurnStateReason = strings.TrimSpace(reason)
+		session.TurnTranscriptPath = ""
+		session.TurnID = ""
+		file.Sessions[sessionID] = session
+		updated = session
+		applied = true
+		return nil
+	})
+	return updated, applied, err
+}
+
+func (r *HostedSessionRegistry) WatchedTurns() ([]HostedTurnWatch, error) {
+	var watched []HostedTurnWatch
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		for _, session := range file.Sessions {
+			if session.TurnGeneration <= 0 {
+				continue
+			}
+			if session.TurnState != HostedTurnStateRunning && session.TurnState != HostedTurnStateDone {
+				continue
+			}
+			hasExplicitWatch := session.TurnTranscriptPath != "" && session.TurnID != ""
+			hasLauncherWatch := session.TurnTranscriptPath == "" && session.TurnID == "" && session.LauncherSessionID != ""
+			if !hasExplicitWatch && !hasLauncherWatch {
+				continue
+			}
+			watched = append(watched, HostedTurnWatch{
+				SessionID:         session.SessionID,
+				TurnGeneration:    session.TurnGeneration,
+				TranscriptPath:    session.TurnTranscriptPath,
+				TurnID:            session.TurnID,
+				LauncherSessionID: session.LauncherSessionID,
+				TmuxWindowID:      session.TmuxWindowID,
+				TurnState:         session.TurnState,
+				SessionSnapshot:   session,
+			})
+		}
+		sort.Slice(watched, func(i, j int) bool {
+			if watched[i].TranscriptPath == watched[j].TranscriptPath {
+				if watched[i].TurnID == watched[j].TurnID {
+					return watched[i].SessionID < watched[j].SessionID
+				}
+				return watched[i].TurnID < watched[j].TurnID
+			}
+			return watched[i].TranscriptPath < watched[j].TranscriptPath
+		})
+		return nil
+	})
+	return watched, err
 }
 
 func (r *HostedSessionRegistry) AcknowledgeTurnByWindow(windowID string, windowName string) (HostedSessionRecord, bool, error) {
@@ -396,6 +483,27 @@ func (r *HostedSessionRegistry) AcknowledgeTurnByWindow(windowID string, windowN
 		return nil
 	})
 	return updated, found, err
+}
+
+func (r *HostedSessionRegistry) MarkTurnUnread(sessionID string) (HostedSessionRecord, error) {
+	var updated HostedSessionRecord
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		session, ok := file.Sessions[sessionID]
+		if !ok {
+			return fmt.Errorf("hosted session %q not found", sessionID)
+		}
+		if !isHostedTurnTerminalState(session.TurnState) {
+			return fmt.Errorf("hosted session %q turn state %q cannot be marked unread", sessionID, session.TurnState)
+		}
+		if session.TurnGeneration <= 0 {
+			return fmt.Errorf("hosted session %q turn generation %d cannot be marked unread", sessionID, session.TurnGeneration)
+		}
+		session.TurnAcknowledgedGeneration = 0
+		file.Sessions[sessionID] = session
+		updated = session
+		return nil
+	})
+	return updated, err
 }
 
 func isHostedTurnTerminalState(state string) bool {

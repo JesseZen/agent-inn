@@ -25,6 +25,7 @@ type rootManager interface {
 	StartConfiguredWorkers() error
 	StartHealthMonitor(interval time.Duration) func()
 	StartUpstreamProber(interval time.Duration) func()
+	StartHostedTurnWatcher(interval time.Duration) func()
 }
 
 type rootServer interface {
@@ -183,6 +184,8 @@ var rootRunner = func(opts RootOptions) error {
 	defer stopHealthMonitor()
 	stopUpstreamProber := mgr.StartUpstreamProber(0)
 	defer stopUpstreamProber()
+	stopHostedTurnWatcher := mgr.StartHostedTurnWatcher(0)
+	defer stopHostedTurnWatcher()
 	addr := constants.LocalhostAddr + ":" + strconv.Itoa(opts.ManagerPort)
 	server := rootServerFactory(addr, mgr)
 	errCh := make(chan error, 1)

@@ -116,6 +116,14 @@ func TmuxSelectMainWindowCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings), "select-window", "-t", tmuxMainWindowTargetForSettings(settings))
 }
 
+func TmuxResetMainWindowStatusCommandForSettings(settings config.Settings) []string {
+	target := tmuxMainWindowTargetForSettings(settings)
+	return append(tmuxPrefixForSettings(settings),
+		"set-window-option", "-t", target, "-u", "window-status-format", ";",
+		"set-window-option", "-t", target, "-u", "window-status-current-format",
+	)
+}
+
 // TmuxAttachCommand returns the argv that attaches to the AINN host session.
 func TmuxAttachCommand() []string {
 	return TmuxAttachCommandForSettings(defaultTmuxSettings())

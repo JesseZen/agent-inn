@@ -366,6 +366,163 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	}
 }
 
+func TestManagerAPIMarksHostedSessionUnread(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	m := New(Config{Config: config.Config{Settings: settings}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "cli-openai",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			gotCalls = append(gotCalls, append([]string{}, args...))
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions/"+created.SessionID+"/mark-unread", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.TurnAcknowledgedGeneration = 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+	persisted, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected hosted session %q", created.SessionID)
+	}
+	if !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	}
+	wantCalls := [][]string{TmuxHostedTurnStatusCommandForRecord(settings, want)}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
+	}
+}
+
+func TestManagerAPIMarkHostedSessionUnreadRejectsRunningTurn(t *testing.T) {
+	stateDir := t.TempDir()
+	m := New(Config{Config: config.Config{Settings: config.Settings{StateDir: stateDir}}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:   "solve problem A",
+		WorkerName:     "cli-openai",
+		WorkerPort:     11199,
+		TmuxWindowID:   "@12",
+		TurnState:      HostedTurnStateRunning,
+		TurnGeneration: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			t.Fatalf("unexpected tmux call: %#v", args)
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions/"+created.SessionID+"/mark-unread", nil))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	wantError := map[string]string{"error": `hosted session "` + created.SessionID + `" turn state "running" cannot be marked unread`}
+	if !reflect.DeepEqual(got, wantError) {
+		t.Fatalf("got %#v, want %#v", got, wantError)
+	}
+	persisted, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected hosted session %q", created.SessionID)
+	}
+	if !reflect.DeepEqual(persisted, created) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, created)
+	}
+}
+
+func TestManagerAPIMarksWindowlessHostedSessionUnreadWithoutTmux(t *testing.T) {
+	stateDir := t.TempDir()
+	m := New(Config{Config: config.Config{Settings: config.Settings{StateDir: stateDir}}})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "cli-openai",
+		WorkerPort:                 11199,
+		TurnState:                  HostedTurnStateDone,
+		TurnGeneration:             3,
+		TurnAcknowledgedGeneration: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			t.Fatalf("unexpected tmux call: %#v", args)
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions/"+created.SessionID+"/mark-unread", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.TurnAcknowledgedGeneration = 0
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerAPIRenamesStaleHostedSession(t *testing.T) {
 	stateDir := t.TempDir()
 	settings := config.Settings{StateDir: stateDir}

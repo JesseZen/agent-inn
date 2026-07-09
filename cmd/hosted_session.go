@@ -1,48 +1,20 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/manager"
 )
 
 var hostedSessionMarkInput io.Reader = os.Stdin
-
-const (
-	codexTranscriptPollInterval = 500 * time.Millisecond
-	codexTranscriptWatchTimeout = 24 * time.Hour
-	codexTranscriptMaxLineBytes = 10 * 1024 * 1024
-	codexTaskFailedReason       = "codex_task_failed"
-)
-
-var hostedSessionWatchStarter = func(configDir string, sessionID string, transcriptPath string, turnID string, turnGeneration int) error {
-	cmd := exec.Command(hostedSessionExecutable(),
-		"hosted-session", "watch-turn",
-		"--config-dir", configDir,
-		"--session-id", sessionID,
-		"--transcript-path", transcriptPath,
-		"--turn-id", turnID,
-		"--turn-generation", strconv.Itoa(turnGeneration),
-	)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
-}
 
 func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -54,8 +26,6 @@ func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedSessionMark(args[1:], stdout, stderr)
 	case "acknowledge":
 		return runHostedSessionAcknowledge(args[1:], stdout, stderr)
-	case "watch-turn":
-		return runHostedSessionWatchTurn(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown hosted-session subcommand %q\n", args[0])
 		return 2
@@ -91,9 +61,12 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 	}
 	if *captureLauncherSessionID {
 		var payload struct {
-			SessionID      string `json:"session_id"`
-			TranscriptPath string `json:"transcript_path"`
-			TurnID         string `json:"turn_id"`
+			HookEventName       string `json:"hook_event_name"`
+			SessionID           string `json:"session_id"`
+			TranscriptPath      string `json:"transcript_path"`
+			TurnID              string `json:"turn_id"`
+			AgentID             string `json:"agent_id"`
+			AgentTranscriptPath string `json:"agent_transcript_path"`
 		}
 		if err := json.NewDecoder(hostedSessionMarkInput).Decode(&payload); err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -101,19 +74,18 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 				return 2
 			}
 		}
-		*launcherSessionID = payload.SessionID
+		if payload.AgentID != "" || payload.AgentTranscriptPath != "" || payload.HookEventName == "SubagentStart" || payload.HookEventName == "SubagentStop" {
+			return 0
+		}
+		*launcherSessionID = strings.TrimSpace(payload.SessionID)
 		if *watchCodexTurn {
 			transcriptPath = strings.TrimSpace(payload.TranscriptPath)
 			turnID = strings.TrimSpace(payload.TurnID)
 			if transcriptPath == "" || turnID == "" {
-				fmt.Fprintln(stderr, "hosted-session mark --watch-codex-turn requires transcript_path and turn_id in hook input")
-				return 2
+				transcriptPath = ""
+				turnID = ""
 			}
 		}
-	}
-	if *watchCodexTurn && (transcriptPath == "" || turnID == "") {
-		fmt.Fprintln(stderr, "hosted-session mark --watch-codex-turn requires transcript_path and turn_id in hook input")
-		return 2
 	}
 
 	cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
@@ -122,7 +94,7 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
-	session, err := registry.MarkTurnState(*sessionID, *state, *reason, *launcherSessionID)
+	session, err := registry.MarkTurnStateWithWatch(*sessionID, *state, *reason, *launcherSessionID, transcriptPath, turnID)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to mark hosted session: %v\n", err)
 		return 1
@@ -142,12 +114,6 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
 		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
 		return 1
-	}
-	if *watchCodexTurn {
-		if err := hostedSessionWatchStarter(*configDir, *sessionID, transcriptPath, turnID, session.TurnGeneration); err != nil {
-			fmt.Fprintf(stderr, "failed to start codex turn watcher: %v\n", err)
-			return 1
-		}
 	}
 	return 0
 }
@@ -186,113 +152,6 @@ func runHostedSessionAcknowledge(args []string, stdout io.Writer, stderr io.Writ
 	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
 		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
 		return 1
-	}
-	return 0
-}
-
-func runHostedSessionWatchTurn(args []string, stdout io.Writer, stderr io.Writer) int {
-	flags := flag.NewFlagSet("hosted-session watch-turn", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	configDir := flags.String("config-dir", expandHome(config.DefaultConfigDir), "config directory")
-	sessionID := flags.String("session-id", "", "hosted session id")
-	transcriptPath := flags.String("transcript-path", "", "launcher transcript path")
-	turnID := flags.String("turn-id", "", "launcher turn id")
-	turnGeneration := flags.Int("turn-generation", 0, "hosted turn generation")
-	if err := flags.Parse(args); err != nil {
-		return 2
-	}
-	*sessionID = strings.TrimSpace(*sessionID)
-	*transcriptPath = strings.TrimSpace(*transcriptPath)
-	*turnID = strings.TrimSpace(*turnID)
-	if *sessionID == "" || *transcriptPath == "" || *turnID == "" || *turnGeneration <= 0 {
-		fmt.Fprintln(stderr, "hosted-session watch-turn requires --session-id, --transcript-path, --turn-id, and --turn-generation")
-		return 2
-	}
-
-	cfg, err := config.LoadFile(filepath.Join(*configDir, config.ConfigFileName))
-	if err != nil {
-		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
-		return 1
-	}
-	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
-	deadline := time.Now().Add(codexTranscriptWatchTimeout)
-	for time.Now().Before(deadline) {
-		session, ok, err := registry.Get(*sessionID)
-		if err != nil {
-			fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
-			return 1
-		}
-		if !ok || session.TurnGeneration != *turnGeneration {
-			return 0
-		}
-		if session.TurnState != manager.HostedTurnStateRunning && session.TurnState != manager.HostedTurnStateDone {
-			return 0
-		}
-
-		file, err := os.Open(*transcriptPath)
-		if err == nil {
-			scanner := bufio.NewScanner(file)
-			scanner.Buffer(nil, codexTranscriptMaxLineBytes)
-			for scanner.Scan() {
-				var event struct {
-					Type    string `json:"type"`
-					Payload struct {
-						Type             string          `json:"type"`
-						TurnID           string          `json:"turn_id"`
-						LastAgentMessage json.RawMessage `json:"last_agent_message"`
-					} `json:"payload"`
-				}
-				if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-					_ = file.Close()
-					fmt.Fprintf(stderr, "failed to parse codex transcript: %v\n", err)
-					return 1
-				}
-				if event.Type != "event_msg" || event.Payload.Type != "task_complete" || event.Payload.TurnID != *turnID {
-					continue
-				}
-				state := manager.HostedTurnStateDone
-				reason := ""
-				lastAgentMessage := strings.TrimSpace(string(event.Payload.LastAgentMessage))
-				if lastAgentMessage == "" || lastAgentMessage == "null" {
-					state = manager.HostedTurnStateFailed
-					reason = codexTaskFailedReason
-				}
-				session, err = registry.MarkTurnState(*sessionID, state, reason, "")
-				if err != nil {
-					_ = file.Close()
-					fmt.Fprintf(stderr, "failed to mark hosted session: %v\n", err)
-					return 1
-				}
-				if session.TmuxWindowID != "" {
-					runner := launchRunnerFactory(io.Discard, stderr)
-					if state == manager.HostedTurnStateDone {
-						session, err = acknowledgeHostedSessionDoneIfCurrent(cfg.Settings, registry, session, runner)
-						if err != nil {
-							_ = file.Close()
-							fmt.Fprintf(stderr, "failed to acknowledge active hosted session: %v\n", err)
-							return 1
-						}
-					}
-					if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
-						_ = file.Close()
-						fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
-						return 1
-					}
-				}
-				_ = file.Close()
-				return 0
-			}
-			if err := scanner.Err(); err != nil {
-				_ = file.Close()
-				fmt.Fprintf(stderr, "failed to read codex transcript: %v\n", err)
-				return 1
-			}
-			_ = file.Close()
-		} else if !os.IsNotExist(err) {
-			fmt.Fprintf(stderr, "failed to open codex transcript: %v\n", err)
-			return 1
-		}
-		time.Sleep(codexTranscriptPollInterval)
 	}
 	return 0
 }

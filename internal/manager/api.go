@@ -175,6 +175,31 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 		writeJSON(rw, http.StatusCreated, session)
 		return
 	}
+	if strings.HasSuffix(id, "/mark-unread") {
+		id = strings.TrimSuffix(id, "/mark-unread")
+		if id == "" || r.Method != http.MethodPost {
+			http.NotFound(rw, r)
+			return
+		}
+		cfg, _ := m.syncConfigFromStore()
+		session, err := m.hostedSessions.MarkTurnUnread(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeJSON(rw, http.StatusNotFound, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		if session.TmuxWindowID != "" {
+			if _, err := hostedTMuxRunnerFactory().Run(TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+		}
+		writeJSON(rw, http.StatusOK, session)
+		return
+	}
 	session, ok, err := m.hostedSessions.Get(id)
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
