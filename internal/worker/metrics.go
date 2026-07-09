@@ -28,6 +28,9 @@ type MetricsSnapshot struct {
 	AvgLatencyMS         int64
 	InputTokens          int64
 	OutputTokens         int64
+	CacheReadTokens      int64
+	CacheWriteTokens     int64
+	ReasoningTokens      int64
 	TotalTokens          int64
 	UnknownUsageRequests int64
 }
@@ -47,6 +50,9 @@ type metricsBucket struct {
 	responseBytes        int64
 	inputTokens          int64
 	outputTokens         int64
+	cacheReadTokens      int64
+	cacheWriteTokens     int64
+	reasoningTokens      int64
 	totalTokens          int64
 	unknownUsageRequests int64
 }
@@ -66,9 +72,7 @@ func (m *MetricsTracker) Finish(event RequestMetricEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.inFlight > 0 {
-		m.inFlight--
-	}
+	m.inFlight--
 
 	second := event.Timestamp.Unix()
 	bucket := &m.buckets[second%MetricsWindowSeconds]
@@ -85,6 +89,9 @@ func (m *MetricsTracker) Finish(event RequestMetricEvent) {
 	if event.Usage.Known {
 		bucket.inputTokens += event.Usage.InputTokens
 		bucket.outputTokens += event.Usage.OutputTokens
+		bucket.cacheReadTokens += event.Usage.CacheReadTokens
+		bucket.cacheWriteTokens += event.Usage.CacheWriteTokens
+		bucket.reasoningTokens += event.Usage.ReasoningTokens
 		bucket.totalTokens += event.Usage.TotalTokens
 	} else {
 		bucket.unknownUsageRequests++
@@ -110,6 +117,9 @@ func (m *MetricsTracker) Snapshot() MetricsSnapshot {
 		durationMS += bucket.durationMS
 		snapshot.InputTokens += bucket.inputTokens
 		snapshot.OutputTokens += bucket.outputTokens
+		snapshot.CacheReadTokens += bucket.cacheReadTokens
+		snapshot.CacheWriteTokens += bucket.cacheWriteTokens
+		snapshot.ReasoningTokens += bucket.reasoningTokens
 		snapshot.TotalTokens += bucket.totalTokens
 		snapshot.UnknownUsageRequests += bucket.unknownUsageRequests
 	}

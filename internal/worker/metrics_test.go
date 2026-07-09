@@ -20,12 +20,16 @@ func TestMetricsTrackerRecordsWindowSnapshot(t *testing.T) {
 		DurationMS:    250,
 		ResponseBytes: 512,
 		Usage: UsageTokens{
-			Known:        true,
-			InputTokens:  100,
-			OutputTokens: 40,
-			TotalTokens:  140,
+			Known:            true,
+			InputTokens:      100,
+			OutputTokens:     40,
+			CacheReadTokens:  30,
+			CacheWriteTokens: 20,
+			ReasoningTokens:  10,
+			TotalTokens:      200,
 		},
 	})
+	tracker.Start()
 	tracker.Finish(RequestMetricEvent{
 		Timestamp:  now,
 		Method:     http.MethodPost,
@@ -41,11 +45,14 @@ func TestMetricsTrackerRecordsWindowSnapshot(t *testing.T) {
 		Requests:             2,
 		Errors:               1,
 		RPM:                  2,
-		TPM:                  140,
+		TPM:                  200,
 		AvgLatencyMS:         500,
 		InputTokens:          100,
 		OutputTokens:         40,
-		TotalTokens:          140,
+		CacheReadTokens:      30,
+		CacheWriteTokens:     20,
+		ReasoningTokens:      10,
+		TotalTokens:          200,
 		UnknownUsageRequests: 1,
 	}
 	if got := tracker.Snapshot(); got != want {
@@ -66,10 +73,13 @@ func TestMetricsTrackerExpiresOldBuckets(t *testing.T) {
 		Status:     http.StatusTooManyRequests,
 		DurationMS: 250,
 		Usage: UsageTokens{
-			Known:        true,
-			InputTokens:  100,
-			OutputTokens: 40,
-			TotalTokens:  140,
+			Known:            true,
+			InputTokens:      100,
+			OutputTokens:     40,
+			CacheReadTokens:  30,
+			CacheWriteTokens: 20,
+			ReasoningTokens:  10,
+			TotalTokens:      200,
 		},
 	})
 
