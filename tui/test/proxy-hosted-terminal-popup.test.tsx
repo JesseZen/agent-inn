@@ -61,7 +61,7 @@ test("popup mode renders hosted terminal picker without home route", async () =>
     await wait(async () => {
       await app.setup.renderOnce()
       const frame = app.setup.captureCharFrame()
-      return frame.includes("Hosted Terminal") && frame.includes("Create new session") && frame.includes("solve problem A")
+      return frame.includes("Hosted Terminal") && frame.includes("Refresh") && frame.includes("Create new session")
     })
 
     expect(app.setup.captureCharFrame()).not.toContain("Ask anything")
@@ -124,8 +124,15 @@ test("popup mode does not render provider setup with empty providers", async () 
   }
 })
 
-test("popup mode opens existing hosted session with setup only then exits", async () => {
+test("popup mode opens existing hosted session with setup only and stays open", async () => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
+  let listCalls = 0
+  const popupSession = {
+    ...activeHostedSession,
+    session_id: "hs_popup",
+    worker_name: "test",
+    session_label: "popup task",
+  }
 
   mock.module("node:child_process", () => ({
     spawn(cmd: string, args: string[]) {
@@ -148,37 +155,46 @@ test("popup mode opens existing hosted session with setup only then exits", asyn
       return json({
         workers: [defaultWorker],
       })
-    if (url.pathname === "/api/hosted-sessions")
+    if (url.pathname === "/api/hosted-sessions") {
+      listCalls += 1
       return json({
-        sessions: [activeHostedSession],
+        sessions: [popupSession],
       })
+    }
     return undefined
   })
 
   try {
     await wait(async () => {
       await app.setup.renderOnce()
-      return app.setup.captureCharFrame().includes("solve problem A")
+      return app.setup.captureCharFrame().includes("Refresh")
     })
     app.setup.mockInput.pressArrow("down")
     app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
     app.setup.mockInput.pressEnter()
-    await wait(() => app.setup.renderer.isDestroyed)
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return listCalls === 2
+    })
 
     expect(spawns).toEqual([
       {
-        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
-        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_1"],
+        cmd: "ainn",
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test", "--config-dir", Global.Path.config, "--session-id", "hs_popup"],
       },
     ])
+    expect(app.setup.renderer.isDestroyed).toBe(false)
+    expect(listCalls).toBe(2)
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     await app.cleanup()
   }
 })
 
-test("popup mode duplicates hosted session with setup only then exits", async () => {
+test("popup mode duplicates hosted session with setup only and stays open", async () => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
+  let listCalls = 0
 
   mock.module("node:child_process", () => ({
     spawn(cmd: string, args: string[]) {
@@ -202,10 +218,12 @@ test("popup mode duplicates hosted session with setup only then exits", async ()
       return json({
         workers: [defaultWorker],
       })
-    if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
+      listCalls += 1
       return json({
         sessions: [activeHostedSession],
       })
+    }
     if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
       duplicateCalls += 1
       return json({
@@ -220,28 +238,35 @@ test("popup mode duplicates hosted session with setup only then exits", async ()
   try {
     await wait(async () => {
       await app.setup.renderOnce()
-      return app.setup.captureCharFrame().includes("solve problem A")
+      return app.setup.captureCharFrame().includes("Refresh")
     })
     app.setup.mockInput.pressArrow("down")
     app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
     app.setup.mockInput.pressKey("y", { ctrl: true })
-    await wait(() => app.setup.renderer.isDestroyed)
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return listCalls === 2
+    })
 
     expect(duplicateCalls).toBe(1)
     expect(spawns).toEqual([
       {
-        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
+        cmd: "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_dup"],
       },
     ])
+    expect(app.setup.renderer.isDestroyed).toBe(false)
+    expect(listCalls).toBe(2)
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     await app.cleanup()
   }
 })
 
-test("popup mode creates hosted session with setup only then exits", async () => {
+test("popup mode creates hosted session with setup only and returns to root", async () => {
   const spawns: Array<{ cmd: string; args: string[] }> = []
+  let listCalls = 0
 
   mock.module("node:child_process", () => ({
     spawn(cmd: string, args: string[]) {
@@ -264,10 +289,12 @@ test("popup mode creates hosted session with setup only then exits", async () =>
       return json({
         workers: [defaultWorker],
       })
-    if (url.pathname === "/api/hosted-sessions")
+    if (url.pathname === "/api/hosted-sessions") {
+      listCalls += 1
       return json({
         sessions: [],
       })
+    }
     return undefined
   })
 
@@ -276,6 +303,7 @@ test("popup mode creates hosted session with setup only then exits", async () =>
       await app.setup.renderOnce()
       return app.setup.captureCharFrame().includes("Create new session")
     })
+    app.setup.mockInput.pressArrow("down")
     app.setup.mockInput.pressEnter()
     await wait(async () => {
       await app.setup.renderOnce()
@@ -292,14 +320,79 @@ test("popup mode creates hosted session with setup only then exits", async () =>
       return app.setup.captureCharFrame().includes("Create Hosted Session")
     })
     app.setup.mockInput.pressEnter()
-    await wait(() => app.setup.renderer.isDestroyed)
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return listCalls >= 2 && frame.includes("Hosted Terminal") && !frame.includes("Create Hosted Session")
+    })
 
     expect(spawns).toEqual([
       {
-        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
+        cmd: "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-label", "test-cli 1", "--cd", directory],
       },
     ])
+    expect(app.setup.renderer.isDestroyed).toBe(false)
+    expect(listCalls).toBeGreaterThanOrEqual(2)
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode mouse refresh refetches sessions without launching", async () => {
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  let listCalls = 0
+
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      const child = {
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") queueMicrotask(() => handler(0))
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions") {
+      listCalls += 1
+      return json({
+        sessions: [activeHostedSession],
+      })
+    }
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Refresh")
+    })
+    const lines = app.setup.captureCharFrame().split("\n")
+    const row = lines.findIndex((line) => line.includes("Refresh"))
+    const column = row >= 0 ? lines[row].indexOf("Refresh") : -1
+    if (row < 0 || column < 0) throw new Error("expected visible Refresh row")
+
+    await app.setup.mockMouse.click(column, row)
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return listCalls === 2
+    })
+
+    expect(spawns).toEqual([])
+    expect(app.setup.renderer.isDestroyed).toBe(false)
+    expect(listCalls).toBe(2)
   } finally {
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     await app.cleanup()

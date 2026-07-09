@@ -9,7 +9,6 @@ import { launchProxySession, setupHostedTerminalSession, type ProxyLaunchOptions
 import { rebindHostedSession } from "./hosted-session-rebind"
 import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
-import { useExit } from "../context/exit"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
 import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
 import { Global } from "@agent-inn/core/global"
@@ -25,6 +24,9 @@ type HostedTerminalOption =
       type: "delete"
     }
   | {
+      type: "refresh"
+    }
+  | {
       type: "session"
       session: HostedSessionSummary
     }
@@ -38,19 +40,15 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   const dialog = useDialog()
   const sync = useSync()
   const project = useProject()
-  const exit = useExit()
   const workerFrecency = useWorkerFrecency()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
   const mode = props.mode ?? "dialog"
+  const executable = mode === "popup" ? undefined : import.meta.env?.AINN_EXECUTABLE || undefined
   const workerSections = createMemo(() => workerFrecency.sections(sync.data.workers))
 
   async function openHostedTerminal(opts: ProxyLaunchOptions) {
     if (mode === "popup") return setupHostedTerminalSession(opts)
     return launchProxySession(opts)
-  }
-
-  function finishPopup() {
-    if (mode === "popup") exit()
   }
 
   async function refreshSessions() {
@@ -62,6 +60,16 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   })
 
   const options = createMemo<DialogSelectOption<HostedTerminalOption>[]>(() => [
+    ...(mode === "popup"
+      ? [
+          {
+            title: "Refresh",
+            value: { type: "refresh" as const },
+            description: "Reload hosted sessions",
+            category: "Action",
+          },
+        ]
+      : []),
     {
       title: "Create new session",
       value: { type: "create" },
@@ -128,7 +136,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           try {
             const settings = await sdk.client.getSettings()
             const launched = await openHostedTerminal({
-              executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+              executable,
               workerPort: worker.port,
               profile: worker.id,
               configDir: Global.Path.config,
@@ -140,11 +148,6 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             if (launched) workerFrecency.record(worker.id)
-            if (launched) workerFrecency.record(worker.id)
-            if (mode === "popup") {
-              finishPopup()
-              return
-            }
             await refreshSessions()
             dialog.pop()
           } catch (err) {
@@ -207,7 +210,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       const duplicatedWorkerID = sessionWorkerID(duplicated)
       const settings = await sdk.client.getSettings()
       const launched = await openHostedTerminal({
-        executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+        executable,
         workerPort: duplicated.worker_port,
         profile: duplicatedWorkerID,
         configDir: Global.Path.config,
@@ -218,11 +221,6 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         tmuxHostSession: settings.settings.terminal.tmux.host_session,
       })
       if (launched) workerFrecency.record(duplicatedWorkerID)
-      if (launched) workerFrecency.record(duplicatedWorkerID)
-      if (mode === "popup") {
-        finishPopup()
-        return
-      }
       await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, "Duplicate hosted session failed", String(err instanceof Error ? err.message : err))
@@ -313,6 +311,10 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         },
       ]}
       onSelect={(option) => {
+        if (option.value.type === "refresh") {
+          void refreshSessions()
+          return
+        }
         if (option.value.type === "create") {
           void createSession()
           return
@@ -331,7 +333,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         void sdk.client.getSettings().then(async (settings) => {
           try {
             const launched = await openHostedTerminal({
-              executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+              executable,
               workerPort: session.worker_port,
               profile: currentWorkerID,
               configDir: Global.Path.config,
@@ -342,8 +344,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               tmuxHostSession: settings.settings.terminal.tmux.host_session,
             })
             if (launched) workerFrecency.record(currentWorkerID)
-            if (launched) workerFrecency.record(currentWorkerID)
-            finishPopup()
+            if (mode === "popup") await refreshSessions()
           } catch (err) {
             await DialogAlert.show(dialog, "Open hosted session failed", String(err instanceof Error ? err.message : err))
           }
