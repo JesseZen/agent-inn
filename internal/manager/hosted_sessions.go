@@ -31,6 +31,8 @@ const (
 	HostedTurnStateInterrupted = constants.HostedTurnStateInterrupted
 )
 
+const HostedUserMarkerTodo = "todo"
+
 type HostedSessionRegistry struct {
 	path string
 	lock string
@@ -52,6 +54,7 @@ type HostedSessionRecord struct {
 	TurnAcknowledgedGeneration int       `json:"turn_acknowledged_generation,omitempty"`
 	TurnTranscriptPath         string    `json:"turn_transcript_path,omitempty"`
 	TurnID                     string    `json:"turn_id,omitempty"`
+	UserMarker                 string    `json:"user_marker,omitempty"`
 	CreatedAt                  time.Time `json:"created_at"`
 	LastOpenedAt               time.Time `json:"last_opened_at"`
 }
@@ -477,6 +480,29 @@ func (r *HostedSessionRegistry) AcknowledgeTurnByWindow(windowID string, windowN
 				session.TurnAcknowledgedGeneration = session.TurnGeneration
 				file.Sessions[sessionID] = session
 			}
+			updated = session
+			return nil
+		}
+		return nil
+	})
+	return updated, found, err
+}
+
+func (r *HostedSessionRegistry) ToggleUserMarkerByWindow(windowID string, windowName string) (HostedSessionRecord, bool, error) {
+	var updated HostedSessionRecord
+	found := false
+	err := r.withLockedFile(func(file *hostedSessionFile) error {
+		for sessionID, session := range file.Sessions {
+			if session.TmuxWindowID != windowID && session.TmuxWindowID != windowName {
+				continue
+			}
+			found = true
+			if session.UserMarker == HostedUserMarkerTodo {
+				session.UserMarker = ""
+			} else {
+				session.UserMarker = HostedUserMarkerTodo
+			}
+			file.Sessions[sessionID] = session
 			updated = session
 			return nil
 		}

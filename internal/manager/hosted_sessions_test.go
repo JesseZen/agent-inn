@@ -354,6 +354,105 @@ func TestHostedSessionRegistryAcknowledgeTurnByWindowNameMarksLegacyCompletedTur
 	}
 }
 
+func TestHostedSessionRegistryToggleUserMarkerByWindowIDPersistsTodo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	toggled, ok, err := registry.ToggleUserMarkerByWindow("@12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.UserMarker = HostedUserMarkerTodo
+	if !ok || !reflect.DeepEqual(toggled, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", toggled, ok, want)
+	}
+
+	persisted, found, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !reflect.DeepEqual(persisted, want) {
+		t.Fatalf("got %#v found=%v, want %#v", persisted, found, want)
+	}
+
+	cleared, ok, err := registry.ToggleUserMarkerByWindow("@12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(cleared, created) {
+		t.Fatalf("got %#v ok=%v, want %#v", cleared, ok, created)
+	}
+}
+
+func TestHostedSessionRegistryToggleUserMarkerByWindowNameMatchesLegacyRecord(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "worker 1",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "ainn:worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.ToggleUserMarkerByWindow("@12", "ainn:worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.UserMarker = HostedUserMarkerTodo
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryToggleUserMarkerByWindowNoopsForNonHostedWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := registry.ToggleUserMarkerByWindow("@99", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || !reflect.DeepEqual(got, HostedSessionRecord{}) {
+		t.Fatalf("got %#v ok=%v, want no match", got, ok)
+	}
+	persisted, found, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || !reflect.DeepEqual(persisted, created) {
+		t.Fatalf("got %#v found=%v, want %#v", persisted, found, created)
+	}
+}
+
 func TestHostedSessionRegistryMarkTurnUnreadMarksCompletedTurnUnread(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
