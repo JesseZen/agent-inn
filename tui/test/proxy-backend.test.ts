@@ -3,9 +3,11 @@ import type { WorkerDetail } from "../src/proxy/backend"
 
 test("worker detail keeps request modules and lifecycle hooks separate", () => {
   const worker: WorkerDetail = {
+    id: "app",
     name: "app",
+    upstream_id: "openai",
     port: 6767,
-    upstream: { name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
+    upstream: { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
     protocol: "chat_completions",
     status: "running",
     snapshot_generation: 3,

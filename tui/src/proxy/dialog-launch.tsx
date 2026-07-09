@@ -11,6 +11,13 @@ import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 import { Global } from "@agent-inn/core/global"
 import { useSDK } from "../context/sdk"
 import { useWorkerFrecency } from "./worker-frecency-context"
+import type { WorkerSummary } from "./backend"
+
+export function resolveExternalLaunchTarget(workers: WorkerSummary[], workerID: string) {
+  const worker = workers.find((item) => item.id === workerID)
+  if (!worker) return
+  return { worker, workerPort: worker.port, profile: worker.id }
+}
 
 export function DialogLaunch() {
   const dialog = useDialog()
@@ -47,7 +54,7 @@ function DialogExternalWindowLaunch() {
     const sections = workerFrecency.sections(sync.data.workers.filter((worker) => worker.role === "cli"))
     const toOption = (worker: (typeof sections.recent)[number], category: string) => ({
       title: worker.name,
-      value: worker.name,
+      value: worker.id,
       description: `:${worker.port} • ${worker.upstream.name}`,
       category,
     })
@@ -60,9 +67,10 @@ function DialogExternalWindowLaunch() {
     ]
   })
 
-  async function launch(workerName: string) {
-    const worker = sync.data.workers.find((item) => item.name === workerName)
-    if (!worker) return
+  async function launch(workerID: string) {
+    const target = resolveExternalLaunchTarget(sync.data.workers, workerID)
+    if (!target) return
+    const { worker, workerPort, profile } = target
     const basePath = project.instance.directory() || sync.path.directory
     const workspace = await DialogPrompt.show(dialog, "Launch Worker", {
       placeholder: "Workspace directory",
@@ -79,8 +87,8 @@ function DialogExternalWindowLaunch() {
     dialog.clear()
     const settings = await sdk.client.getSettings()
     const command = createProxyLaunchCommand({
-      workerPort: worker.port,
-      profile: worker.name,
+      workerPort,
+      profile,
       configDir: Global.Path.config,
       workspace: workspace || undefined,
     })
@@ -89,8 +97,8 @@ function DialogExternalWindowLaunch() {
     try {
       const launched = await launchProxySession({
         executable: import.meta.env?.AINN_EXECUTABLE || undefined,
-        workerPort: worker.port,
-        profile: worker.name,
+        workerPort,
+        profile,
         configDir: Global.Path.config,
         workspace: workspace || undefined,
         opener: settings.settings.terminal.opener,
@@ -99,7 +107,7 @@ function DialogExternalWindowLaunch() {
         await DialogAlert.show(dialog, "Launch Command", rendered)
         return
       }
-      workerFrecency.record(worker.name)
+      workerFrecency.record(profile)
       await DialogAlert.show(dialog, "Launch", "Opened a new worker session.")
     } catch (err) {
       await DialogAlert.show(dialog, "Launch failed", String(err instanceof Error ? err.message : err))

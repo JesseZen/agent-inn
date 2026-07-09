@@ -6,11 +6,11 @@ import { promptOffsetWidth } from "../src/prompt/display"
 import type { WorkerSummary, RedactedUpstream } from "../src/proxy/backend"
 
 function makeUpstream(name: string, hasKey = true): RedactedUpstream {
-  return { name, base_url: `https://${name}.example.com/v1`, has_api_key: hasKey }
+  return { id: name, name, base_url: `https://${name}.example.com/v1`, has_api_key: hasKey }
 }
 
 function makeWorker(name: string, upstream: RedactedUpstream, status = "running"): WorkerSummary {
-  return { name, port: 10000, upstream, status, snapshot_generation: 1, log_level: "simple" }
+  return { id: name, name, upstream_id: upstream.id, port: 10000, upstream, status, snapshot_generation: 1, log_level: "simple" }
 }
 
 function sortCells(cells: Array<{ x: number; y: number; char: string }>) {

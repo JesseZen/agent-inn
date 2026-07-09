@@ -26,17 +26,17 @@ export const { use: useWorkerFrecency, provider: WorkerFrecencyProvider } = crea
       const entries = parseWorkerFrecency(await readText(filePath).catch(() => ""))
       setStore(
         "data",
-        Object.fromEntries(entries.map((entry) => [entry.name, { frequency: entry.frequency, lastOpen: entry.lastOpen }])),
+        Object.fromEntries(entries.map((entry) => [entry.id, { frequency: entry.frequency, lastOpen: entry.lastOpen }])),
       )
       if (entries.length > 0) writeText(filePath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n").catch(() => {})
       setStore("ready", true)
     })
 
-    function record(workerName: string) {
-      const entry = recordWorkerFrecency(workerName, store.data)
+    function record(workerID: string) {
+      const entry = recordWorkerFrecency(workerID, store.data)
       const nextData = {
         ...store.data,
-        [workerName]: { frequency: entry.frequency, lastOpen: entry.lastOpen },
+        [workerID]: { frequency: entry.frequency, lastOpen: entry.lastOpen },
       }
       setStore("data", nextData)
       appendText(filePath, JSON.stringify(entry) + "\n").catch(() => {})
@@ -45,7 +45,7 @@ export const { use: useWorkerFrecency, provider: WorkerFrecencyProvider } = crea
       const entries = trimWorkerFrecency(nextData)
       setStore(
         "data",
-        Object.fromEntries(entries.map((entry) => [entry.name, { frequency: entry.frequency, lastOpen: entry.lastOpen }])),
+        Object.fromEntries(entries.map((entry) => [entry.id, { frequency: entry.frequency, lastOpen: entry.lastOpen }])),
       )
       writeText(filePath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n").catch(() => {})
     }
@@ -54,7 +54,7 @@ export const { use: useWorkerFrecency, provider: WorkerFrecencyProvider } = crea
       get ready() {
         return store.ready
       },
-      sections<T extends Pick<WorkerSummary, "name">>(workers: T[]) {
+      sections<T extends Pick<WorkerSummary, "id">>(workers: T[]) {
         return launchWorkerSections(workers, store.data)
       },
       record,

@@ -2,10 +2,12 @@ import type { Agent, Model, Path, Project, Provider } from "@agent-inn/sdk/v2"
 import type { EventSource } from "../context/sdk"
 
 export type RedactedUpstream = {
+  id: string
   name: string
-  base_url: string
+  base_url?: string
   has_api_key: boolean
   api_format?: string
+  missing?: boolean
 }
 
 export type UpstreamProbeResult = {
@@ -53,6 +55,7 @@ export type WorkerConfig = {
 }
 
 export type UpstreamProfile = {
+  name?: string
   base_url: string
   api_key?: string
   api_format?: string
@@ -66,7 +69,9 @@ export type ProxyConfig = {
 }
 
 export type WorkerSummary = {
+  id: string
   name: string
+  upstream_id: string
   port: number
   role?: string
   launcher?: string
@@ -244,15 +249,15 @@ function createModel(providerID: string): Model {
 
 export function toAinnUpstreams(upstreams: RedactedUpstream[]): Provider[] {
   return upstreams.map((upstream) => {
-    const model = createModel(upstream.name)
+    const model = createModel(upstream.id)
     return {
-      id: upstream.name,
+      id: upstream.id,
       name: upstream.name,
       source: "config",
       env: [],
       key: "",
       options: {
-        base_url: upstream.base_url,
+        base_url: upstream.base_url ?? "",
         api_format: upstream.api_format,
         has_api_key: upstream.has_api_key,
       },

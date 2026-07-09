@@ -18,6 +18,10 @@ const LAUNCHERS = ["codex", "claudecode"] as const
 type Launcher = (typeof LAUNCHERS)[number]
 const REDACTED_PROXY_URL_VALUE = "******"
 
+function upstreamLabel(worker: WorkerSummary) {
+  return worker.upstream.missing ? `missing upstream: ${worker.upstream_id}` : worker.upstream.name
+}
+
 export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: boolean }) {
   const { theme } = useTheme()
   const dialog = useDialog()
@@ -35,6 +39,32 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       .filter(Boolean)
       .join(" • "),
   )
+
+  const renameAction: DialogSelectOption<string> = {
+    title: "Rename Worker",
+    value: "rename",
+    description: props.worker.id,
+    onSelect: async () => {
+      const value = await DialogPrompt.show(dialog, `Rename: ${props.worker.name}`, {
+        placeholder: "Worker display name",
+        value: props.worker.name,
+      })
+      if (value === null) return
+      const name = value.trim()
+      if (!name) {
+        toast.show({ message: "Worker name is required", variant: "error" })
+        return
+      }
+      if (name === props.worker.name) return
+      try {
+        await sdk.client.patchWorker(props.worker.id, { name })
+        await sync.bootstrap({ fatal: false })
+        toast.show({ message: `Renamed worker ${name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+    },
+  }
 
   const logLevelAction: DialogSelectOption<string> = {
     title: "Log Level",
@@ -65,7 +95,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       if (!next) return
       if (next === props.worker.log_level) return
       try {
-        await sdk.client.patchWorker(props.worker.port, { log_level: next })
+        await sdk.client.patchWorker(props.worker.id, { log_level: next })
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Saved ${props.worker.name} log_level: ${next}`, variant: "success" })
       } catch (err) {
@@ -77,7 +107,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   const switchAction: DialogSelectOption<string> = {
     title: "Switch Upstream",
     value: "switch",
-    description: props.worker.upstream.name,
+    description: upstreamLabel(props.worker),
     onSelect: () => dialog.push(() => <DialogUpstreamPicker worker={props.worker} />),
   }
 
@@ -93,7 +123,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     value: "modules",
     description: `${modules().length} req • ${hooks().length} hook`,
     onSelect: async () => {
-      const worker = await sdk.client.getWorker(props.worker.port)
+      const worker = await sdk.client.getWorker(props.worker.id)
       dialog.push(() => <DialogModulePicker worker={worker} />)
     },
   }
@@ -104,7 +134,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     description: `:${props.worker.port}`,
     onSelect: async () => {
       try {
-        await sdk.client.restartWorker(props.worker.port)
+        await sdk.client.restartWorker(props.worker.id)
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Restarted ${props.worker.name}`, variant: "success" })
       } catch (err) {
@@ -120,7 +150,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     description: `:${props.worker.port}`,
     onSelect: async () => {
       try {
-        await sdk.client.stopWorker(props.worker.port)
+        await sdk.client.stopWorker(props.worker.id)
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Stopped ${props.worker.name}`, variant: "success" })
       } catch (err) {
@@ -145,7 +175,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         return
       }
       try {
-        await sdk.client.deleteWorker(props.worker.port)
+        await sdk.client.deleteWorker(props.worker.id)
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Deleted ${props.worker.name}`, variant: "success" })
       } catch (err) {
@@ -185,7 +215,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       if (!next) return
       if (next === current) return
       try {
-        await sdk.client.patchWorker(props.worker.port, { launcher: next })
+        await sdk.client.patchWorker(props.worker.id, { launcher: next })
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Saved ${props.worker.name} launcher: ${next}`, variant: "success" })
       } catch (err) {
@@ -211,7 +241,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       }
       if (next === props.worker.port) return
       try {
-        await sdk.client.patchWorker(props.worker.port, { port: next })
+        await sdk.client.patchWorker(props.worker.id, { port: next })
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Saved ${props.worker.name} port: ${next}`, variant: "success" })
       } catch (err) {
@@ -239,7 +269,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       if (redacted && (!dirty || value === REDACTED_PROXY_URL_VALUE)) return
       if (!redacted && value === current) return
       try {
-        await sdk.client.patchWorker(props.worker.port, { proxy_url: value })
+        await sdk.client.patchWorker(props.worker.id, { proxy_url: value })
         await sync.bootstrap({ fatal: false })
         toast.show({ message: `Saved ${props.worker.name} proxy_url: ${value || "direct"}`, variant: "success" })
       } catch (err) {
@@ -250,7 +280,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
 
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, restartAction, stopAction, deleteAction]
+      ? [renameAction, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 
@@ -262,7 +292,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       footer={
         <box flexDirection="column">
           <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
-          <text fg={theme.textMuted}>upstream: {props.worker.upstream.name} • protocol: {props.worker.protocol ?? "responses"}</text>
+          <text fg={theme.textMuted}>upstream: {upstreamLabel(props.worker)} • protocol: {props.worker.protocol ?? "responses"}</text>
           <text fg={theme.textMuted}>launcher: {props.worker.launcher ?? "codex"} • log level: {props.worker.log_level}</text>
           <text fg={theme.textMuted}>proxy: {props.worker.proxy_url || "direct"} • modules: {modules().length} req / {hooks().length} hook</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>

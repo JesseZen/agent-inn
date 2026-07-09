@@ -444,7 +444,39 @@ test("proxy workers detail exposes worker status and scoped actions", async () =
     expect(app.frame()).toContain("Manage Modules")
     expect(app.frame()).toContain("View Logs")
     expect(app.frame()).toContain("Launcher")
+    for (let i = 0; i < 6; i++) {
+      await runCommand(app, "dialog.select.next")
+    }
     expect(app.frame()).toContain("Port")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers detail renames worker display name", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("Rename Worker")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused worker rename prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("Codex Main")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchWorker.some((call) => "name" in call && call.name === "Codex Main")
+    })
+
+    expect(app.calls.patchWorker).toContainEqual({ id: "app", name: "Codex Main" })
+    expect(app.frame()).toContain("Codex Main")
   } finally {
     await app.cleanup()
   }
@@ -475,6 +507,7 @@ test("proxy workers nested select esc click returns to worker detail", async () 
 
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Log Level: app")
 
@@ -509,7 +542,7 @@ test("proxy workers launcher subselect escape returns to worker detail", async (
 
   try {
     await openWorkerDetail(app)
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       await runCommand(app, "dialog.select.next")
     }
     await runCommand(app, "dialog.select.submit")
@@ -539,6 +572,7 @@ test("proxy workers log level selection returns to worker detail before patch fi
 
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Log Level: app")
 
@@ -568,7 +602,7 @@ test("proxy workers launcher selection returns to worker detail before patch fin
 
   try {
     await openWorkerDetail(app)
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       await runCommand(app, "dialog.select.next")
     }
     await runCommand(app, "dialog.select.submit")
@@ -602,7 +636,7 @@ test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
     await openWorkerDetail(app)
     expect(app.frame()).toContain("proxy: direct")
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       await runCommand(app, "dialog.select.next")
     }
     expect(app.frame()).toContain("Proxy URL")
@@ -617,7 +651,7 @@ test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
       await app.render()
-      return app.calls.patchWorker.some((call) => call.proxy_url === "http://127.0.0.1:7890")
+      return app.calls.patchWorker.some((call) => "proxy_url" in call && call.proxy_url === "http://127.0.0.1:7890")
     })
 
     expect(app.calls.patchWorker).toContainEqual({
@@ -654,9 +688,9 @@ test("proxy workers proxy URL prompt does not prefill redacted credential URL", 
 		await openWorkerDetail(app)
 		expect(app.frame()).toContain("proxy: http://127.0.0.1:7890")
 
-		for (let i = 0; i < 6; i++) {
-			await runCommand(app, "dialog.select.next")
-		}
+			for (let i = 0; i < 7; i++) {
+				await runCommand(app, "dialog.select.next")
+			}
 		expect(app.frame()).toContain("Proxy URL")
 		await runCommand(app, "dialog.select.submit")
 		await wait(async () => {
@@ -675,8 +709,24 @@ test("proxy workers proxy URL prompt does not prefill redacted credential URL", 
 	}
 })
 
-test("proxy workers create claudecode worker payload", async () => {
-	const app = await mountProxyApp()
+test("proxy workers create claudecode worker payload with stable upstream ID", async () => {
+	const app = await mountProxyApp({
+    upstreams: [
+      {
+        id: "openai",
+        name: "OpenAI Display",
+        base_url: "https://api.openai.com/v1",
+        has_api_key: true,
+      },
+      {
+        id: "anthropic",
+        name: "Anthropic Display",
+        base_url: "https://api.anthropic.com/v1",
+        has_api_key: true,
+        api_format: "anthropic",
+      },
+    ],
+  })
 
   try {
     await runCommand(app, "proxy.workers")
@@ -751,13 +801,14 @@ test("proxy workers detail shows claudecode launcher and anthropic protocol", as
   }
 })
 
-test("proxy workers module action patches module through module API", async () => {
-  const app = await mountProxyApp()
+test("proxy workers module action patches module through stable worker ID route", async () => {
+  const app = await mountProxyApp({ strictModuleWorkerIDs: true })
 
   try {
     await openWorkerDetail(app)
     expect(app.frame()).toContain("Manage Modules")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
@@ -767,6 +818,8 @@ test("proxy workers module action patches module through module API", async () =
     })
 
     app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(() => app.calls.getWorkerRoute.length === 2)
+    expect(app.calls.getWorkerRoute).toEqual(["app", "app"])
     await wait(async () => {
       await app.render()
       return app.frame().includes("Edit Module: app")
@@ -774,6 +827,7 @@ test("proxy workers module action patches module through module API", async () =
 
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.patchModule.length === 1)
+    expect(app.calls.patchModuleRoute).toEqual(["app"])
 
     expect(app.calls.patchModule).toEqual([
       {
@@ -824,6 +878,7 @@ test("proxy tool filter module picks blocked tools", async () => {
     await openWorkerDetail(app)
     expect(app.frame()).toContain("Manage Modules")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
@@ -883,6 +938,7 @@ test("proxy workers module view shows lifecycle hooks separately", async () => {
 
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await wait(async () => {
       await app.render()
@@ -908,6 +964,7 @@ test("proxy workers module view does not open unavailable candidate module edito
   const app = await mountProxyApp()
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
@@ -938,6 +995,7 @@ test("proxy workers module view opens configured unavailable module editor and a
   const app = await mountProxyApp()
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
@@ -1027,7 +1085,7 @@ test("proxy workers detail deletes worker config after confirmation", async () =
 
     expect(app.calls.deleteWorker).toEqual([6767])
     await runCommand(app, "proxy.workers")
-    expect(app.frame()).not.toContain("app")
+    expect(app.frame()).not.toContain("app :6767")
   } finally {
     await app.cleanup()
   }
@@ -1038,6 +1096,7 @@ test("proxy workers detail view logs action opens worker logs", async () => {
 
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
@@ -1219,12 +1278,13 @@ test("proxy workers editor patches log_level field", async () => {
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("app (:6767)")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Log Level: app")
 
     await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(() => app.calls.patchWorker.some((c) => c.log_level === "detail"))
+    await wait(() => app.calls.patchWorker.some((c) => "log_level" in c && c.log_level === "detail"))
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
@@ -1254,10 +1314,11 @@ test("proxy workers editor preserves proxy URL when patching log_level", async (
     await openWorkerDetail(app)
     expect(app.frame()).toContain("proxy: http://proxy.local:7890")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(() => app.calls.patchWorker.some((c) => c.log_level === "detail"))
+    await wait(() => app.calls.patchWorker.some((c) => "log_level" in c && c.log_level === "detail"))
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "detail" }])
@@ -1276,7 +1337,7 @@ test("proxy workers editor patches launcher field", async () => {
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("app (:6767)")
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       await runCommand(app, "dialog.select.next")
     }
     await runCommand(app, "dialog.select.submit")
@@ -1284,7 +1345,7 @@ test("proxy workers editor patches launcher field", async () => {
 
     await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
-    await wait(() => app.calls.patchWorker.some((c) => c.launcher === "claudecode"))
+    await wait(() => app.calls.patchWorker.some((c) => "launcher" in c && c.launcher === "claudecode"))
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "simple", launcher: "claudecode" }])
@@ -1302,7 +1363,7 @@ test("proxy workers editor patches port field", async () => {
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("app (:6767)")
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       await runCommand(app, "dialog.select.next")
     }
     await runCommand(app, "dialog.select.submit")
@@ -1316,7 +1377,7 @@ test("proxy workers editor patches port field", async () => {
     editor.selectAll()
     await app.mockInput.typeText("11200")
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
-    await wait(() => app.calls.patchWorker.some((c) => c.next_port === 11200))
+    await wait(() => app.calls.patchWorker.some((c) => "next_port" in c && c.next_port === 11200))
     await app.render()
 
     expect(app.calls.patchWorker).toEqual([{ port: 6767, upstream: "openai", log_level: "simple", next_port: 11200 }])

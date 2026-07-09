@@ -6,6 +6,8 @@ import { Global } from "@agent-inn/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
+import { resolveExternalLaunchTarget } from "../src/proxy/dialog-launch"
+import { createProxyLaunchCommand } from "../src/proxy/launch"
 import { DialogPrompt } from "../src/ui/dialog-prompt"
 
 async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
@@ -15,6 +17,42 @@ async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
     await Bun.sleep(10)
   }
 }
+
+test("external launch resolves a duplicate display name by worker id", () => {
+  const upstream = { id: "upstream-test", name: "Test Upstream", has_api_key: false }
+  const alpha = {
+    id: "alpha-id",
+    name: "Shared CLI",
+    upstream_id: upstream.id,
+    port: 1234,
+    role: "cli",
+    upstream,
+    status: "running",
+    snapshot_generation: 0,
+    log_level: "info",
+  }
+  const beta = {
+    id: "beta-id",
+    name: "Shared CLI",
+    upstream_id: upstream.id,
+    port: 5678,
+    role: "cli",
+    upstream,
+    status: "running",
+    snapshot_generation: 0,
+    log_level: "info",
+  }
+
+  const target = resolveExternalLaunchTarget([alpha, beta], "beta-id")
+
+  expect({
+    target,
+    command: createProxyLaunchCommand({ workerPort: target!.workerPort, profile: target!.profile }),
+  }).toEqual({
+    target: { worker: beta, workerPort: 5678, profile: "beta-id" },
+    command: ["ainn", "launch", "--worker", "5678", "--profile", "beta-id"],
+  })
+})
 
 test("launch dialog enables directory completion with current project directory", async () => {
   const promptCalls: any[] = []

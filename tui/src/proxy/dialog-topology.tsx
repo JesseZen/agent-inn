@@ -63,9 +63,10 @@ export function DialogTopology() {
     const upstream = node.data as RedactedUpstream
     dialog.push(() => (
       <DialogUpstreamEditor
-        name={upstream.name}
+        id={upstream.id}
         draft={{
-          base_url: upstream.base_url,
+          name: upstream.name,
+          base_url: upstream.base_url ?? "",
           api_key: "",
           api_format: upstream.api_format ?? "",
           has_api_key: upstream.has_api_key,

@@ -68,8 +68,8 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async listWorkers() {
           return request<{ workers: WorkerSummary[] }>("/api/workers").then((result) => result.workers)
         },
-        async getWorker(port: number) {
-          return request<WorkerDetail>(`/api/workers/${port}`)
+        async getWorker(id: string | number) {
+          return request<WorkerDetail>(`/api/workers/${encodeURIComponent(String(id))}`)
         },
         async createWorker(input: { name: string; port?: number; upstream: string; launcher?: string }) {
           return request<WorkerSummary>("/api/workers", {
@@ -79,10 +79,12 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           })
         },
         async patchWorker(
-          port: number,
+          id: string | number,
           patch: Partial<{
+            name: string
             port: number
             upstream: string
+            upstream_id: string
             request_modules: WorkerDetail["modules"]
             hooks: WorkerDetail["hooks"]
             log_level: string
@@ -90,13 +92,14 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             proxy_url: string
           }>,
         ) {
-          const current = await this.getWorker(port)
-          return request<WorkerSummary>(`/api/workers/${port}`, {
+          const current = await this.getWorker(id)
+          return request<WorkerSummary>(`/api/workers/${encodeURIComponent(String(id))}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
+              name: patch.name ?? current.name,
               port: patch.port ?? current.port,
-              upstream: patch.upstream ?? current.upstream.name,
+              upstream_id: patch.upstream_id ?? patch.upstream ?? current.upstream_id,
               request_modules: {
                 ...(current.modules ?? {}),
                 ...(patch.request_modules ?? {}),
@@ -111,28 +114,31 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             }),
           })
         },
-        async restartWorker(port: number) {
-          return request<{ worker: string; status: string }>(`/api/workers/${port}/restart`, {
+        async restartWorker(id: string | number) {
+          return request<{ worker: string; status: string }>(`/api/workers/${encodeURIComponent(String(id))}/restart`, {
             method: "POST",
           })
         },
-        async stopWorker(port: number) {
-          return request<{ worker: string; status: string }>(`/api/workers/${port}`, {
+        async stopWorker(id: string | number) {
+          return request<{ worker: string; status: string }>(`/api/workers/${encodeURIComponent(String(id))}`, {
             method: "DELETE",
           })
         },
-        async deleteWorker(port: number) {
-          return request<{ worker: string }>(`/api/workers/${port}/config`, {
+        async deleteWorker(id: string | number) {
+          return request<{ worker: string }>(`/api/workers/${encodeURIComponent(String(id))}/config`, {
             method: "DELETE",
           })
         },
-        async toggleModule(port: number, moduleName: string) {
-          return request<{ worker: string; module: string; enabled: boolean }>(`/api/workers/${port}/modules/${moduleName}/toggle`, {
-            method: "POST",
-          })
+        async toggleModule(id: string, moduleName: string) {
+          return request<{ worker: string; module: string; enabled: boolean }>(
+            `/api/workers/${encodeURIComponent(String(id))}/modules/${moduleName}/toggle`,
+            {
+              method: "POST",
+            },
+          )
         },
         async patchModule(
-          port: number,
+          id: string,
           moduleName: string,
           cfg: {
             enabled: boolean
@@ -140,7 +146,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           },
         ) {
           return request<{ worker: string; port: number; module: { name: string; enabled: boolean; params?: Record<string, unknown> } }>(
-            `/api/workers/${port}/modules/${moduleName}`,
+            `/api/workers/${encodeURIComponent(String(id))}/modules/${moduleName}`,
             {
               method: "PATCH",
               headers: { "content-type": "application/json" },
@@ -159,15 +165,15 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             Object.values(result.upstreams ?? {}),
           )
         },
-        async patchUpstream(name: string, profile: { base_url?: string; api_key?: string; api_format?: string }) {
-          return request(`/api/upstreams/${name}`, {
+        async patchUpstream(id: string, profile: { name?: string; base_url?: string; api_key?: string; api_format?: string }) {
+          return request(`/api/upstreams/${encodeURIComponent(id)}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(profile),
           })
         },
-        async deleteUpstream(name: string) {
-          return request<{ upstream: string }>(`/api/upstreams/${name}`, {
+        async deleteUpstream(id: string) {
+          return request<{ upstream: string }>(`/api/upstreams/${encodeURIComponent(id)}`, {
             method: "DELETE",
           })
         },

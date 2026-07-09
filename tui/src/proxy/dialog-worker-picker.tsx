@@ -3,6 +3,10 @@ import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useSync } from "../context/sync"
 import type { WorkerSummary } from "../context/sdk"
 
+function upstreamLabel(worker: WorkerSummary) {
+  return worker.upstream.missing ? `missing upstream: ${worker.upstream_id}` : worker.upstream.name
+}
+
 export function DialogWorkerPicker(props: {
   title: string
   placeholder: string
@@ -14,11 +18,11 @@ export function DialogWorkerPicker(props: {
 
   const options = createMemo<DialogSelectOption<number>[]>(() => {
     const recentWorkers = props.recentWorkers ?? []
-    const recentNames = new Set(recentWorkers.map((worker) => worker.name))
+    const recentIDs = new Set(recentWorkers.map((worker) => worker.id))
     const toOption = (worker: WorkerSummary, category: string) => ({
       title: worker.name,
       value: worker.port,
-      description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
+      description: `:${worker.port} • ${upstreamLabel(worker)} • ${worker.status}`,
       category,
       onSelect: () => props.onSelect(worker),
     })
@@ -26,7 +30,7 @@ export function DialogWorkerPicker(props: {
     return [
       ...recentWorkers.map((worker) => toOption(worker, "Recent")),
       ...(props.workers ?? sync.data.workers)
-        .filter((worker) => !recentNames.has(worker.name))
+        .filter((worker) => !recentIDs.has(worker.id))
         .map((worker) => toOption(worker, worker.status === "running" ? "Running" : "Stopped")),
     ]
   })

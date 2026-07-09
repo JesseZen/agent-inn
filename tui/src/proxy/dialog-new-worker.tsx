@@ -51,7 +51,7 @@ function UpstreamStep(props: { name: string; launcher: Launcher }) {
   const options = createMemo<DialogSelectOption<string>[]>(() =>
     sync.data.upstreams.map((p) => ({
       title: p.name,
-      value: p.name,
+      value: p.id,
       description: `${p.base_url}${p.has_api_key ? "" : " (no key)"}`,
     })),
   )

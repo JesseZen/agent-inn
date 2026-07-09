@@ -65,10 +65,12 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const encoder = new TextEncoder()
-    const oldUpstream = { name: "openai", base_url: "https://old.example/v1", has_api_key: true }
-    const newUpstream = { name: "openai", base_url: "https://new.example/v1", has_api_key: true, api_format: "responses" }
+    const oldUpstream = { id: "openai", name: "openai", base_url: "https://old.example/v1", has_api_key: true }
+    const newUpstream = { id: "openai", name: "openai", base_url: "https://new.example/v1", has_api_key: true, api_format: "responses" }
     const oldWorker = {
+      id: "app",
       name: "app",
+      upstream_id: "openai",
       port: 6767,
       role: "app",
       upstream: oldUpstream,
@@ -139,9 +141,11 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const encoder = new TextEncoder()
-    const upstream = { name: "openai", base_url: "https://api.example/v1", has_api_key: true }
+    const upstream = { id: "openai", name: "openai", base_url: "https://api.example/v1", has_api_key: true }
     const worker = {
+      id: "app",
       name: "app",
+      upstream_id: "openai",
       port: 6767,
       role: "app",
       upstream,
@@ -194,9 +198,11 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const encoder = new TextEncoder()
-    const upstream = { name: "openai", base_url: "https://api.example/v1", has_api_key: true }
+    const upstream = { id: "openai", name: "openai", base_url: "https://api.example/v1", has_api_key: true }
     const worker = {
+      id: "app",
       name: "app",
+      upstream_id: "openai",
       port: 6767,
       role: "app",
       upstream,
@@ -245,9 +251,11 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     const encoder = new TextEncoder()
-    const upstream = { name: "openai", base_url: "https://api.example/v1", has_api_key: true }
+    const upstream = { id: "openai", name: "openai", base_url: "https://api.example/v1", has_api_key: true }
     const worker = {
+      id: "app",
       name: "app",
+      upstream_id: "openai",
       port: 6767,
       role: "app",
       upstream,

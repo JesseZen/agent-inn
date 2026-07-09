@@ -1,7 +1,7 @@
 import type { WorkerSummary } from "./backend"
 
 export type WorkerFrecency = { frequency: number; lastOpen: number }
-export type WorkerFrecencyEntry = WorkerFrecency & { name: string }
+export type WorkerFrecencyEntry = WorkerFrecency & { id: string }
 
 export const WORKER_FRECENCY_FILE_NAME = "launch-worker-frecency.jsonl"
 export const MAX_WORKER_FRECENCY_ENTRIES = 100
@@ -20,14 +20,17 @@ export function parseWorkerFrecency(text: string) {
     .filter(Boolean)
     .map((line) => {
       try {
-        return JSON.parse(line) as WorkerFrecencyEntry
+        const entry = JSON.parse(line) as WorkerFrecency & { id?: string; name?: string }
+        const id = entry.id ?? entry.name
+        if (!id) return undefined
+        return { id, frequency: entry.frequency, lastOpen: entry.lastOpen }
       } catch {
         return undefined
       }
     })
     .filter((line): line is WorkerFrecencyEntry => line !== undefined)
     .reduce<Record<string, WorkerFrecencyEntry>>((result, entry) => {
-      result[entry.name] = entry
+      result[entry.id] = entry
       return result
     }, {})
 
@@ -36,29 +39,29 @@ export function parseWorkerFrecency(text: string) {
     .slice(0, MAX_WORKER_FRECENCY_ENTRIES)
 }
 
-export function recordWorkerFrecency(name: string, data: Record<string, WorkerFrecency>, now = Date.now()) {
+export function recordWorkerFrecency(id: string, data: Record<string, WorkerFrecency>, now = Date.now()) {
   return {
-    name,
-    frequency: (data[name]?.frequency ?? 0) + 1,
+    id,
+    frequency: (data[id]?.frequency ?? 0) + 1,
     lastOpen: now,
   }
 }
 
 export function trimWorkerFrecency(data: Record<string, WorkerFrecency>) {
   return Object.entries(data)
-    .map(([name, entry]) => ({ name, frequency: entry.frequency, lastOpen: entry.lastOpen }))
+    .map(([id, entry]) => ({ id, frequency: entry.frequency, lastOpen: entry.lastOpen }))
     .sort((a, b) => b.lastOpen - a.lastOpen)
     .slice(0, MAX_WORKER_FRECENCY_ENTRIES)
 }
 
-export function sortLaunchWorkers<T extends Pick<WorkerSummary, "name">>(
+export function sortLaunchWorkers<T extends Pick<WorkerSummary, "id">>(
   workers: T[],
   data: Record<string, WorkerFrecency>,
   now = Date.now(),
 ) {
   return workers
     .map((worker, index) => {
-      const entry = data[worker.name]
+      const entry = data[worker.id]
       const score = calculateWorkerFrecency(entry, now)
       return {
         worker,
@@ -75,20 +78,20 @@ export function sortLaunchWorkers<T extends Pick<WorkerSummary, "name">>(
     .map((item) => item.worker)
 }
 
-export function launchWorkerSections<T extends Pick<WorkerSummary, "name">>(
+export function launchWorkerSections<T extends Pick<WorkerSummary, "id">>(
   workers: T[],
   data: Record<string, WorkerFrecency>,
   now = Date.now(),
 ) {
   const recent = sortLaunchWorkers(
-    workers.filter((worker) => (data[worker.name]?.frequency ?? 0) > 0),
+    workers.filter((worker) => (data[worker.id]?.frequency ?? 0) > 0),
     data,
     now,
   ).slice(0, WORKER_FRECENCY_RECENT_LIMIT)
-  const recentNames = new Set(recent.map((worker) => worker.name))
+  const recentIDs = new Set(recent.map((worker) => worker.id))
 
   return {
     recent,
-    rest: workers.filter((worker) => !recentNames.has(worker.name)),
+    rest: workers.filter((worker) => !recentIDs.has(worker.id)),
   }
 }

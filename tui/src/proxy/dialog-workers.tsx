@@ -7,6 +7,10 @@ import { useToast } from "../ui/toast"
 import { showNewWorkerDialog } from "./dialog-new-worker"
 import { DialogWorkerStatus } from "./dialog-worker-status"
 
+function upstreamLabel(worker: { upstream: { name: string; missing?: boolean }; upstream_id: string }) {
+  return worker.upstream.missing ? `missing upstream: ${worker.upstream_id}` : worker.upstream.name
+}
+
 export function DialogWorkers() {
   const sync = useSync()
   const dialog = useDialog()
@@ -17,8 +21,8 @@ export function DialogWorkers() {
     { title: "Create New Worker", value: "create", description: "Add a worker", category: "Actions" },
     ...sync.data.workers.map((w) => ({
       title: w.name,
-      value: `edit:${w.port}`,
-      description: `:${w.port} • ${w.launcher ?? "codex"} • ${w.upstream.name} • ${w.status}`,
+      value: `edit:${w.id}`,
+      description: `:${w.port} • ${w.launcher ?? "codex"} • ${upstreamLabel(w)} • ${w.status}`,
       category: "Workers",
     })),
   ])
@@ -33,8 +37,8 @@ export function DialogWorkers() {
           void showNewWorkerDialog(dialog as never, sdk.client as never, toast as never)
           return
         }
-        const port = Number(opt.value.slice("edit:".length))
-        const worker = sync.data.workers.find((w) => w.port === port)
+        const id = opt.value.slice("edit:".length)
+        const worker = sync.data.workers.find((w) => w.id === id)
         if (!worker) return
         dialog.push(() => <DialogWorkerStatus worker={worker} management />)
       }}

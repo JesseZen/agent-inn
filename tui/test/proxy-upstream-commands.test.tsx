@@ -11,6 +11,7 @@ test("proxy workers switch upstream action updates worker provider and reflects 
     expect(app.frame()).toContain("Switch Upstream")
 
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Switch Upstream: app")
 
@@ -31,6 +32,7 @@ test("proxy workers switch upstream selection returns to worker detail", async (
 
   try {
     await openWorkerDetail(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Switch Upstream: app")
@@ -58,9 +60,11 @@ test("proxy workers current upstream selection returns to worker detail", async 
   try {
     await openWorkerDetail(app)
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Switch Upstream: app")
 
+    await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
@@ -71,6 +75,50 @@ test("proxy workers current upstream selection returns to worker detail", async 
     expect(app.frame()).toContain("app (:6767)")
     expect(app.frame()).toContain("Switch Upstream")
     expect(app.frame()).not.toContain("Switch Upstream: app")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy workers show missing upstream and can switch to valid upstream", async () => {
+  const app = await mountProxyApp({
+    workers: [
+      {
+        id: "app",
+        name: "app",
+        upstream_id: "missing-openai",
+        port: 6767,
+        role: "app",
+        protocol: "chat_completions",
+        upstream: { id: "missing-openai", name: "missing-openai", has_api_key: false, missing: true },
+        status: "running",
+        snapshot_generation: 3,
+        log_level: "simple",
+      },
+    ],
+  })
+
+  try {
+    await runCommand(app, "proxy.workers")
+    expect(app.frame()).toContain("missing upstream: missing-openai")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("missing upstream: missing-openai")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    expect(app.frame()).toContain("Switch Upstream: app")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.patchWorker.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("upstream: openai")
+    })
+
+    expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "openai", log_level: "simple" })
   } finally {
     await app.cleanup()
   }
@@ -99,6 +147,7 @@ test("proxy upstream selection opens field list and saves provider", async () =>
 
     await openUpstreamEditor(app, "openai")
 
+    await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
@@ -116,10 +165,39 @@ test("proxy upstream selection opens field list and saves provider", async () =>
 
     expect(app.calls.patchUpstream).toEqual([
       {
-        name: "openai",
+        id: "openai",
         body: { base_url: "https://api.openai.com/v2" },
       },
     ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy upstream editor renames upstream display name", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamEditor(app, "openai")
+    expect(app.frame()).toContain("Name")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused upstream name prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("OpenAI Main")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchUpstream.some((call) => call.id === "openai" && call.body.name === "OpenAI Main") && app.frame().includes("OpenAI Main")
+    })
+
+    expect(app.calls.patchUpstream).toContainEqual({ id: "openai", body: { name: "OpenAI Main" } })
+    expect(app.frame()).toContain("OpenAI Main")
   } finally {
     await app.cleanup()
   }
@@ -145,6 +223,7 @@ test("proxy upstream creates a new upstream", async () => {
       return app.frame().includes("Edit Upstream: groq")
     })
 
+    await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
@@ -161,7 +240,7 @@ test("proxy upstream creates a new upstream", async () => {
 
     expect(app.calls.patchUpstream).toEqual([
       {
-        name: "groq",
+        id: "groq",
         body: { base_url: "https://api.groq.com/openai/v1" },
       },
     ])
@@ -213,6 +292,8 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.next")
     await app.render()
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await app.render()
     app.api.keymap.dispatchCommand("dialog.select.submit")
@@ -222,7 +303,7 @@ test("proxy upstream editor shows empty api_format as dash and persists edits", 
     })
 
     expect(app.calls.patchUpstream).toEqual([
-      { name: "openai", body: { api_format: "responses" } },
+      { id: "openai", body: { api_format: "responses" } },
     ])
   } finally {
     await app.cleanup()
@@ -399,6 +480,7 @@ test("proxy upstream editor tests upstream reachability and shows toast", async 
   try {
     await openUpstreamEditor(app, "openai")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")

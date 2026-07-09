@@ -8,10 +8,11 @@ import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
 
-type UpstreamOption = { type: "create" } | { type: "edit"; name: string } | { type: "test-all" }
-type FieldKey = "base_url" | "api_key" | "api_format"
+type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" }
+type FieldKey = "name" | "base_url" | "api_key" | "api_format"
 
 export type Draft = {
+  name: string
   base_url: string
   api_key: string
   api_format: string
@@ -33,6 +34,7 @@ const API_FORMAT_OPTIONS = [
 ]
 
 const FIELDS: Field[] = [
+  { key: "name", title: "Name", placeholder: "Display name" },
   { key: "base_url", title: "Base URL", placeholder: "https://example.com/v1" },
   { key: "api_key", title: "API Key", placeholder: "sk-...", hidden: true },
   { key: "api_format", title: "API Format", placeholder: "responses, chat_completions, or anthropic" },
@@ -49,11 +51,11 @@ export function DialogUpstream() {
     { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
     { title: "Test All Upstreams", value: { type: "test-all" as const }, description: "Probe every configured upstream", category: "Actions" },
     ...sync.data.upstreams.map((upstream) => {
-      const probe = sync.data.upstreamProbes[upstream.name]
+      const probe = sync.data.upstreamProbes[upstream.id]
       return {
         title: upstream.name,
-        value: { type: "edit" as const, name: upstream.name },
-        description: `${upstream.base_url}${upstream.has_api_key ? "" : " (no key)"}`,
+        value: { type: "edit" as const, id: upstream.id },
+        description: `${upstream.base_url ?? ""}${upstream.has_api_key ? "" : " (no key)"}`,
         category: "Configured upstreams",
         footer: !probe ? <span style={{ fg: theme.textMuted }}>—</span>
           : probe.ok ? <span style={{ fg: theme.success }}>●{probe.latency_ms}ms</span>
@@ -78,7 +80,7 @@ export function DialogUpstream() {
             toast.show({ message: "Invalid upstream name", variant: "error" })
             return
           }
-          dialog.push(() => <DialogUpstreamEditor name={upstreamName} draft={{ base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false }} mode="created" />)
+          dialog.push(() => <DialogUpstreamEditor id={upstreamName} draft={{ name: upstreamName, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false }} mode="created" />)
           return
         }
 
@@ -95,13 +97,14 @@ export function DialogUpstream() {
           return
         }
 
-        const upstream = sync.data.upstreams.find((item) => item.name === value.name)
+        const upstream = sync.data.upstreams.find((item) => item.id === value.id)
         if (!upstream) return
         dialog.push(() => (
           <DialogUpstreamEditor
-            name={upstream.name}
+            id={upstream.id}
             draft={{
-              base_url: upstream.base_url,
+              name: upstream.name,
+              base_url: upstream.base_url ?? "",
               api_key: "",
               api_format: upstream.api_format ?? "",
               has_api_key: upstream.has_api_key,
@@ -114,16 +117,17 @@ export function DialogUpstream() {
   )
 }
 
-export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: "created" | "saved" }) {
+export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "created" | "saved" }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
   const draft = createMemo<Draft>(() => {
-    const upstream = sync.data.upstreams.find((item) => item.name === props.name)
+    const upstream = sync.data.upstreams.find((item) => item.id === props.id)
     if (!upstream) return props.draft
     return {
-      base_url: upstream.base_url,
+      name: upstream.name,
+      base_url: upstream.base_url ?? "",
       api_key: "",
       api_format: upstream.api_format ?? "",
       has_api_key: upstream.has_api_key,
@@ -139,23 +143,23 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
       onSelect: async () => {
         const patch = await editField(dialog, field, draft())
         if (!patch) return
-        await sdk.client.patchUpstream(props.name, patch)
+        await sdk.client.patchUpstream(props.id, patch)
         await sync.bootstrap({ fatal: false })
-        toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${props.name}`, variant: "success" })
+        toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${patch.name ?? draft().name}`, variant: "success" })
       },
     })),
   )
   const deleteAction: DialogSelectOption<string> = {
     title: "Delete Upstream",
     value: "delete",
-    description: props.name,
+    description: draft().name,
     onSelect: async () => {
-      const confirmed = await DialogConfirm.show(dialog, "Delete upstream", `Delete ${props.name}? This will remove the provider config.`)
+      const confirmed = await DialogConfirm.show(dialog, "Delete upstream", `Delete ${draft().name}? This will remove the provider config.`)
       if (!confirmed) return
       try {
-        await sdk.client.deleteUpstream(props.name)
+        await sdk.client.deleteUpstream(props.id)
         await sync.bootstrap({ fatal: false })
-        toast.show({ message: `Deleted upstream ${props.name}`, variant: "success" })
+        toast.show({ message: `Deleted upstream ${draft().name}`, variant: "success" })
       } catch (err) {
         toast.error(err)
       }
@@ -168,11 +172,11 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
     description: "Probe reachability and auth",
     onSelect: async () => {
       try {
-        const result = await sdk.client.testUpstream(props.name)
+        const result = await sdk.client.testUpstream(props.id)
         sync.set("upstreamProbes", result.upstream, result)
         const msg = result.ok
-          ? `${props.name}: OK ${result.latency_ms}ms`
-          : `${props.name}: FAIL ${result.error || result.status_code}`
+          ? `${draft().name}: OK ${result.latency_ms}ms`
+          : `${draft().name}: FAIL ${result.error || result.status_code}`
         toast.show({ message: msg, variant: result.ok ? "success" : "error" })
       } catch (err) {
         toast.error(err)
@@ -180,7 +184,7 @@ export function DialogUpstreamEditor(props: { name: string; draft: Draft; mode: 
     },
   }
 
-  return <DialogSelect title={`Edit Upstream: ${props.name}`} options={[...options(), testAction, deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
+  return <DialogSelect title={`Edit Upstream: ${draft().name}`} options={[...options(), testAction, deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
 }
 
 function describe(field: Field, draft: Draft) {
@@ -234,7 +238,8 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
     return { api_format: result }
   }
 
-  const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.base_url || "upstream"}`, {
+  const promptTarget = field.key === "name" ? draft.name : draft.base_url || "upstream"
+  const result = await DialogPrompt.show(dialog, `${field.title}: ${promptTarget}`, {
     value: draft[field.key],
     placeholder: field.placeholder,
   })

@@ -12,11 +12,13 @@ import { mountProxyApp, wait } from "./proxy-commands.fixture"
 
 const DAY_MS = 86_400_000
 const now = Date.UTC(2026, 0, 2)
-const upstream: RedactedUpstream = { name: "openai", base_url: "", has_api_key: true }
+const upstream: RedactedUpstream = { id: "openai", name: "openai", base_url: "", has_api_key: true }
 
-function worker(name: string, port = 1000): WorkerSummary {
+function worker(name: string, port = 1000, id = name): WorkerSummary {
   return {
+    id,
     name,
+    upstream_id: upstream.id,
     port,
     role: "cli",
     upstream,
@@ -39,6 +41,20 @@ test("sortLaunchWorkers puts higher frecency workers first and preserves config 
   )
 
   expect(sorted.map((item) => item.name)).toEqual(["gamma", "beta", "alpha", "delta"])
+})
+
+test("sortLaunchWorkers keys frecency by stable worker id instead of display name", () => {
+  const alpha = worker("Renamed CLI", 1001, "alpha-id")
+  const beta = worker("Renamed CLI", 1002, "beta-id")
+  const sorted = sortLaunchWorkers(
+    [alpha, beta],
+    {
+      "beta-id": { frequency: 2, lastOpen: now },
+    },
+    now,
+  )
+
+  expect(sorted).toEqual([beta, alpha])
 })
 
 test("sortLaunchWorkers uses recency before config order when frecency scores tie", () => {
@@ -91,35 +107,52 @@ test("launchWorkerSections puts recent workers first and removes them from the o
   })
 })
 
+test("launchWorkerSections removes recent workers by stable id when names are duplicated", () => {
+  const alpha = worker("shared-name", 1001, "alpha-id")
+  const beta = worker("shared-name", 1002, "beta-id")
+  const sections = launchWorkerSections(
+    [alpha, beta],
+    {
+      "beta-id": { frequency: 1, lastOpen: now },
+    },
+    now,
+  )
+
+  expect(sections).toEqual({
+    recent: [beta],
+    rest: [alpha],
+  })
+})
+
 test("recordWorkerFrecency increments the selected worker and stamps the current time", () => {
   const next = recordWorkerFrecency("beta", { beta: { frequency: 2, lastOpen: 10 } }, now)
 
-  expect(next).toEqual({ name: "beta", frequency: 3, lastOpen: now })
+  expect(next).toEqual({ id: "beta", frequency: 3, lastOpen: now })
 })
 
-test("parseWorkerFrecency skips corruption, keeps latest worker state, and limits entries", () => {
+test("parseWorkerFrecency migrates legacy name entries, skips corruption, keeps latest worker state, and limits entries", () => {
   const entries = Array.from({ length: MAX_WORKER_FRECENCY_ENTRIES + 1 }, (_, index) =>
     JSON.stringify({ name: `worker-${index}`, frequency: 1, lastOpen: index }),
   )
-  entries.push("broken", JSON.stringify({ name: "worker-1000", frequency: 2, lastOpen: 2000 }))
+  entries.push("broken", JSON.stringify({ id: "worker-1000", frequency: 2, lastOpen: 2000 }))
 
   const result = parseWorkerFrecency(entries.join("\n"))
 
   expect(result).toHaveLength(MAX_WORKER_FRECENCY_ENTRIES)
-  expect(result[0]).toEqual({ name: "worker-1000", frequency: 2, lastOpen: 2000 })
-  expect(result.some((entry) => entry.name === "worker-0")).toBe(false)
+  expect(result[0]).toEqual({ id: "worker-1000", frequency: 2, lastOpen: 2000 })
+  expect(result.some((entry) => entry.id === "worker-0")).toBe(false)
 })
 
 test("external launch worker picker orders cli workers by stored frecency", async () => {
-  const alphaWorker = "alpha-cli"
-  const gammaWorker = "gamma-cli"
+  const alphaWorker = worker("Alpha CLI", 11200, "alpha-cli")
+  const gammaWorker = worker("Gamma CLI", 11202, "gamma-cli")
 
   const app = await mountProxyApp({
     settings: { launch: { default_mode: "external-window" } },
     stateFiles: {
-      [WORKER_FRECENCY_FILE_NAME]: `${JSON.stringify({ name: gammaWorker, frequency: 5, lastOpen: Date.now() })}\n`,
+      [WORKER_FRECENCY_FILE_NAME]: `${JSON.stringify({ id: gammaWorker.id, frequency: 5, lastOpen: Date.now() })}\n`,
     },
-    workers: [worker(alphaWorker, 11200), worker(gammaWorker, 11202)],
+    workers: [alphaWorker, gammaWorker],
   })
 
   try {
@@ -127,15 +160,15 @@ test("external launch worker picker orders cli workers by stored frecency", asyn
     await wait(async () => {
       await app.render()
       const frame = app.frame()
-      return frame.includes(alphaWorker) && frame.includes(gammaWorker)
+      return frame.includes(alphaWorker.name) && frame.includes(gammaWorker.name)
     })
 
     const workerRows = app
       .lines()
-      .flatMap((line) => [gammaWorker, alphaWorker].filter((name) => line.includes(name)))
+      .flatMap((line) => [gammaWorker.name, alphaWorker.name].filter((name) => line.includes(name)))
 
     expect(app.frame()).toContain("Recent")
-    expect(workerRows).toEqual([gammaWorker, alphaWorker])
+    expect(workerRows).toEqual([gammaWorker.name, alphaWorker.name])
   } finally {
     await app.cleanup()
   }

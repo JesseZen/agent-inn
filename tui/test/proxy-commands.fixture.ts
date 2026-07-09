@@ -27,6 +27,13 @@ type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal"> & 
   }
 }
 
+type HarnessUpstream = Omit<RedactedUpstream, "id"> & { id?: string }
+type HarnessWorker = Omit<WorkerSummary, "id" | "upstream_id" | "upstream"> & {
+  id?: string
+  upstream_id?: string
+  upstream: HarnessUpstream
+}
+
 export async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
   while (!(await fn())) {
@@ -45,37 +52,46 @@ function frameLines(frame: string) {
 const defaultBatchVariantCount = 3
 
 type ProxyHarnessInput = {
-  workers?: WorkerSummary[]
-  upstreams?: RedactedUpstream[]
+  workers?: HarnessWorker[]
+  upstreams?: HarnessUpstream[]
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
   patchWorkerDelayMs?: number
+  strictModuleWorkerIDs?: boolean
   settings?: ProxySettingsPatch
 }
 
 function createProxyHarness(input: ProxyHarnessInput = {}) {
   const batchHostedSessionWindowMode = input.batchHostedSessionWindowMode ?? "present"
-  const providers = new Map<string, RedactedUpstream>(
-    (input.upstreams ?? [
+  const inputUpstreams = input.upstreams ?? [
       {
+        id: "openai",
         name: "openai",
         base_url: "https://api.openai.com/v1",
         has_api_key: true,
       },
       {
+        id: "anthropic",
         name: "anthropic",
         base_url: "https://api.anthropic.com/v1",
         has_api_key: true,
         api_format: "anthropic",
       },
-    ]).map((upstream) => [upstream.name, upstream]),
+    ]
+  const providers = new Map<string, RedactedUpstream>(
+    inputUpstreams.map((upstream) => {
+      const id = upstream.id ?? upstream.name
+      return [id, { ...upstream, id }] as const
+    }),
   )
 
-  const workers = new Map<number, WorkerSummary>([
+  const workers = new Map<string, WorkerSummary>([
     [
-      6767,
+      "app",
       {
+        id: "app",
         name: "app",
+        upstream_id: "openai",
         port: 6767,
         role: "app",
         protocol: "chat_completions",
@@ -104,9 +120,11 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       },
     ],
     [
-      11199,
+      "cli-openrouter",
       {
+        id: "cli-openrouter",
         name: "cli-openrouter",
+        upstream_id: "openai",
         port: 11199,
         role: "cli",
         upstream: providers.get("openai")!,
@@ -116,13 +134,20 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       },
     ],
   ])
-  for (const worker of input.workers ?? []) {
-    workers.set(worker.port, worker)
-  }
-
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions: HostedSessionSummary[] = []
   const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
+  const findWorker = (key: string) => workers.get(key) ?? [...workers.values()].find((worker) => String(worker.port) === key)
+  const setWorker = (worker: WorkerSummary) => workers.set(worker.id, worker)
+  for (const worker of input.workers ?? []) {
+    const upstreamID = worker.upstream_id ?? worker.upstream.id ?? worker.upstream.name
+    setWorker({
+      ...worker,
+      id: worker.id ?? worker.name,
+      upstream_id: upstreamID,
+      upstream: { ...worker.upstream, id: worker.upstream.id ?? upstreamID },
+    })
+  }
   const config: {
     status: ProxyConfigStatus
     settings: ProxySettings
@@ -170,9 +195,14 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
   }
   const calls = {
     createWorker: [] as Array<{ name: string; port?: number; upstream: string; launcher?: string }>,
-    patchWorker: [] as Array<{ port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number; proxy_url?: string }>,
+    patchWorker: [] as Array<
+      | { id: string; name: string }
+      | { port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number; proxy_url?: string }
+    >,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
-    patchUpstream: [] as Array<{ name: string; body: { base_url?: string; api_key?: string; api_format?: string } }>,
+    getWorkerRoute: [] as string[],
+    patchModuleRoute: [] as string[],
+    patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string } }>,
     patchSettings: [] as ProxySettingsPatch[],
     deleteWorker: [] as number[],
     deleteUpstream: [] as string[],
@@ -217,8 +247,15 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       return json({
         workers: [...workers.values()],
       })
-    if (url.pathname === "/api/workers/6767" && url.search === "")
-      return json(workers.get(6767)!)
+    if (url.pathname.startsWith("/api/workers/") && url.search === "" && !url.pathname.includes("/modules/")) {
+      const workerKey = url.pathname.slice("/api/workers/".length)
+      calls.getWorkerRoute.push(decodeURIComponent(workerKey))
+      if (input.strictModuleWorkerIDs && [...workers.values()].some((worker) => String(worker.port) === workerKey)) {
+        return json({ error: "worker route must use stable ID" }, { status: 404 })
+      }
+      const worker = findWorker(workerKey)
+      if (worker) return json(worker)
+    }
     if (url.pathname === "/api/upstreams")
       return json({
         upstreams: Object.fromEntries(providers.entries()),
@@ -272,54 +309,69 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     const url = new URL(request ? request.url : String(requestInput))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
-    if (url.pathname === "/api/workers/6767" && method === "PATCH") {
+    const workerRoute = url.pathname.match(/^\/api\/workers\/([^/]+)$/)
+    if (workerRoute && method === "PATCH") {
       if (input.patchWorkerDelayMs) await Bun.sleep(input.patchWorkerDelayMs)
+      const workerKey = decodeURIComponent(workerRoute[1]!)
+      const current = findWorker(workerKey)!
       const body = JSON.parse(String(init?.body ?? "null")) as {
-        port: number
-        upstream: string
+        name?: string
+        port?: number
+        upstream?: string
+        upstream_id?: string
         log_level?: string
         launcher?: string
         proxy_url?: string
       }
-      calls.patchWorker.push({
-        port: 6767,
-        upstream: body.upstream,
-        log_level: body.log_level,
-        ...(body.port !== 6767 ? { next_port: body.port } : {}),
-        ...(body.launcher ? { launcher: body.launcher } : {}),
-        ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
-      })
-      const nextUpstream = providers.get(body.upstream)
+      if (body.name !== undefined && body.name !== current.name) {
+        calls.patchWorker.push({ id: current.id, name: body.name })
+      } else {
+        calls.patchWorker.push({
+          port: current.port,
+          upstream: body.upstream_id ?? body.upstream,
+          log_level: body.log_level,
+          ...(body.port !== undefined && body.port !== current.port ? { next_port: body.port } : {}),
+          ...(body.launcher ? { launcher: body.launcher } : {}),
+          ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
+        })
+      }
+      const nextUpstreamID = body.upstream_id ?? body.upstream
+      const nextUpstream = nextUpstreamID ? providers.get(nextUpstreamID) : undefined
       if (nextUpstream) {
-        workers.set(6767, {
-          ...workers.get(6767)!,
+        setWorker({
+          ...current,
+          upstream_id: nextUpstream.id,
           upstream: nextUpstream,
         })
       }
       if (body.log_level) {
-        workers.set(6767, { ...workers.get(6767)!, log_level: body.log_level })
+        setWorker({ ...findWorker(current.id)!, log_level: body.log_level })
       }
       if (body.launcher) {
-        workers.set(6767, { ...workers.get(6767)!, launcher: body.launcher })
+        setWorker({ ...findWorker(current.id)!, launcher: body.launcher })
+      }
+      if (body.name !== undefined) {
+        setWorker({ ...findWorker(current.id)!, name: body.name })
       }
       if (body.proxy_url !== undefined) {
-        workers.set(6767, { ...workers.get(6767)!, proxy_url: body.proxy_url })
+        setWorker({ ...findWorker(current.id)!, proxy_url: body.proxy_url })
       }
-      if (body.port !== 6767) {
-        const worker = { ...workers.get(6767)!, port: body.port }
-        workers.delete(6767)
-        workers.set(body.port, worker)
+      if (body.port !== undefined && body.port !== current.port) {
+        const worker = { ...findWorker(current.id)!, port: body.port }
+        setWorker(worker)
         return json(worker)
       }
-      return json(workers.get(6767)!)
+      return json(findWorker(current.id)!)
     }
 
     if (url.pathname === "/api/workers" && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "null")) as { name: string; port?: number; upstream: string; launcher?: string }
       calls.createWorker.push(body)
       const port = body.port ?? 11201
-      workers.set(port, {
+      setWorker({
+        id: body.name,
         name: body.name,
+        upstream_id: body.upstream,
         port,
         role: "cli",
         launcher: body.launcher ?? "codex",
@@ -336,22 +388,29 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           request_log: { protocols: ["responses", "chat_completions", "anthropic"] },
         },
       })
-      return json(workers.get(port)!)
+      return json(findWorker(body.name)!)
     }
 
-    if (url.pathname === "/api/workers/6767/modules/model_override" && method === "PATCH") {
+    const moduleRoute = url.pathname.match(/^\/api\/workers\/([^/]+)\/modules\/([^/]+)$/)
+    if (moduleRoute?.[2] === "model_override" && method === "PATCH") {
+      const workerKey = decodeURIComponent(moduleRoute[1]!)
+      calls.patchModuleRoute.push(workerKey)
+      if (input.strictModuleWorkerIDs && [...workers.values()].some((worker) => String(worker.port) === workerKey)) {
+        return json({ error: "module route must use stable worker ID" }, { status: 404 })
+      }
+      const worker = findWorker(workerKey)!
       const body = JSON.parse(String(init?.body ?? "null")) as { enabled: boolean; params?: { model?: string } }
-      calls.patchModule.push({ port: 6767, module: "model_override", body })
-      workers.set(6767, {
-        ...workers.get(6767)!,
+      calls.patchModule.push({ port: worker.port, module: "model_override", body })
+      setWorker({
+        ...worker,
         modules: {
-          ...workers.get(6767)!.modules,
+          ...worker.modules,
           model_override: body,
         },
       })
       return json({
-        worker: "app",
-        port: 6767,
+        worker: worker.name,
+        port: worker.port,
         module: {
           name: "model_override",
           enabled: body.enabled,
@@ -360,19 +419,25 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       })
     }
 
-    if (url.pathname === "/api/workers/6767/modules/tool_filter" && method === "PATCH") {
+    if (moduleRoute?.[2] === "tool_filter" && method === "PATCH") {
+      const workerKey = decodeURIComponent(moduleRoute[1]!)
+      calls.patchModuleRoute.push(workerKey)
+      if (input.strictModuleWorkerIDs && [...workers.values()].some((worker) => String(worker.port) === workerKey)) {
+        return json({ error: "module route must use stable worker ID" }, { status: 404 })
+      }
+      const worker = findWorker(workerKey)!
       const body = JSON.parse(String(init?.body ?? "null")) as { enabled: boolean; params?: Record<string, unknown> }
-      calls.patchModule.push({ port: 6767, module: "tool_filter", body })
-      workers.set(6767, {
-        ...workers.get(6767)!,
+      calls.patchModule.push({ port: worker.port, module: "tool_filter", body })
+      setWorker({
+        ...worker,
         modules: {
-          ...workers.get(6767)!.modules,
+          ...worker.modules,
           tool_filter: body,
         },
       })
       return json({
-        worker: "app",
-        port: 6767,
+        worker: worker.name,
+        port: worker.port,
         module: {
           name: "tool_filter",
           enabled: body.enabled,
@@ -381,56 +446,62 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       })
     }
 
-    if (url.pathname === "/api/workers/6767/restart" && method === "POST") {
-      calls.restartWorker.push(6767)
-      workers.set(6767, { ...workers.get(6767)!, status: "running" })
-      return json({ worker: "app", status: "running" })
+    const restartRoute = url.pathname.match(/^\/api\/workers\/([^/]+)\/restart$/)
+    if (restartRoute && method === "POST") {
+      const worker = findWorker(decodeURIComponent(restartRoute[1]!))!
+      calls.restartWorker.push(worker.port)
+      setWorker({ ...worker, status: "running" })
+      return json({ worker: worker.name, status: "running" })
     }
 
-    if (url.pathname === "/api/workers/6767" && method === "DELETE") {
-      calls.stopWorker.push(6767)
-      workers.set(6767, { ...workers.get(6767)!, status: "stopped" })
-      return json({ worker: "app", status: "stopped" })
+    if (workerRoute && method === "DELETE") {
+      const worker = findWorker(decodeURIComponent(workerRoute[1]!))!
+      calls.stopWorker.push(worker.port)
+      setWorker({ ...worker, status: "stopped" })
+      return json({ worker: worker.name, status: "stopped" })
     }
 
-    if (url.pathname === "/api/workers/6767/config" && method === "DELETE") {
-      calls.deleteWorker.push(6767)
-      workers.delete(6767)
-      return json({ worker: "app" })
+    const workerConfigRoute = url.pathname.match(/^\/api\/workers\/([^/]+)\/config$/)
+    if (workerConfigRoute && method === "DELETE") {
+      const worker = findWorker(decodeURIComponent(workerConfigRoute[1]!))!
+      calls.deleteWorker.push(worker.port)
+      workers.delete(worker.id)
+      return json({ worker: worker.name })
     }
 
     if (url.pathname.startsWith("/api/upstreams/") && method === "PATCH") {
-      const name = url.pathname.slice("/api/upstreams/".length)
-      const body = JSON.parse(String(init?.body ?? "null")) as { base_url?: string; api_key?: string; api_format?: string }
-      calls.patchUpstream.push({ name, body })
-      providers.set(name, {
-        name,
-        base_url: body.base_url ?? providers.get(name)?.base_url ?? "",
-        api_format: body.api_format ?? providers.get(name)?.api_format,
-        has_api_key: body.api_key !== undefined ? Boolean(body.api_key) : providers.get(name)?.has_api_key ?? false,
+      const id = url.pathname.slice("/api/upstreams/".length)
+      const body = JSON.parse(String(init?.body ?? "null")) as { name?: string; base_url?: string; api_key?: string; api_format?: string }
+      calls.patchUpstream.push({ id, body })
+      providers.set(id, {
+        id,
+        name: body.name ?? providers.get(id)?.name ?? id,
+        base_url: body.base_url ?? providers.get(id)?.base_url ?? "",
+        api_format: body.api_format ?? providers.get(id)?.api_format,
+        has_api_key: body.api_key !== undefined ? Boolean(body.api_key) : providers.get(id)?.has_api_key ?? false,
       })
-      for (const [port, worker] of workers.entries()) {
-        if (worker.upstream.name !== name) continue
-        workers.set(port, {
+      for (const worker of workers.values()) {
+        if (worker.upstream_id !== id) continue
+        setWorker({
           ...worker,
-          upstream: providers.get(name)!,
+          upstream: providers.get(id)!,
         })
       }
-      return json(providers.get(name)!)
+      return json(providers.get(id)!)
     }
 
     if (url.pathname.startsWith("/api/upstreams/") && method === "DELETE") {
-      const name = url.pathname.slice("/api/upstreams/".length)
-      calls.deleteUpstream.push(name)
-      providers.delete(name)
-      return json({ upstream: name })
+      const id = url.pathname.slice("/api/upstreams/".length)
+      calls.deleteUpstream.push(id)
+      providers.delete(id)
+      return json({ upstream: id })
     }
 
     if (url.pathname === "/api/upstreams/test" && method === "POST") {
       calls.testAllUpstreams += 1
       return json({
         results: [...providers.values()].map((p) => ({
-          upstream: p.name,
+          upstream: p.id,
           ok: true,
           status_code: 200,
           latency_ms: 120,
@@ -439,9 +510,9 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
 
     if (url.pathname.startsWith("/api/upstreams/") && url.pathname.endsWith("/test") && method === "POST") {
-      const name = url.pathname.slice("/api/upstreams/".length, -"/test".length)
-      calls.testUpstream.push(name)
-      return json({ upstream: name, ok: true, status_code: 200, latency_ms: 120 })
+      const id = url.pathname.slice("/api/upstreams/".length, -"/test".length)
+      calls.testUpstream.push(id)
+      return json({ upstream: id, ok: true, status_code: 200, latency_ms: 120 })
     }
 
     if (url.pathname === "/api/config" && method === "PUT") {

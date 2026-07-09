@@ -15,12 +15,12 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
 
   const options = createMemo<DialogSelectOption<string>[]>(() =>
     sync.data.upstreams.map((p) => {
-      const probe = sync.data.upstreamProbes[p.name]
+      const probe = sync.data.upstreamProbes[p.id]
       return {
         title: p.name,
-        value: p.name,
-        description: `${p.base_url}${p.has_api_key ? "" : " (no key)"}`,
-        category: p.name === props.worker.upstream.name ? "Current" : "Available",
+        value: p.id,
+        description: `${p.base_url ?? ""}${p.has_api_key ? "" : " (no key)"}`,
+        category: p.id === props.worker.upstream_id ? "Current" : "Available",
         footer: !probe ? <span style={{ fg: theme.textMuted }}>—</span>
           : probe.ok ? <span style={{ fg: theme.success }}>●{probe.latency_ms}ms</span>
           : probe.degraded ? <span style={{ fg: theme.warning }}>▲{probe.error || `${probe.latency_ms}ms`}</span>
@@ -34,15 +34,15 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
       title={`Switch Upstream: ${props.worker.name}`}
       options={options()}
       placeholder="Search upstreams..."
-      current={props.worker.upstream.name}
+      current={props.worker.upstream_id}
       onSelect={async (opt) => {
-        if (opt.value === props.worker.upstream.name) {
+        if (opt.value === props.worker.upstream_id) {
           dialog.pop()
           return
         }
         dialog.pop()
         try {
-          await sdk.client.patchWorker(props.worker.port, { upstream: opt.value })
+          await sdk.client.patchWorker(props.worker.id, { upstream_id: opt.value })
           await sync.bootstrap({ fatal: false })
           toast.show({ message: `Switched ${props.worker.name} to ${opt.value}`, variant: "success" })
         } catch (err) {

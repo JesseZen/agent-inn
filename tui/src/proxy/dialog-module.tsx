@@ -65,7 +65,7 @@ export function DialogModulePicker(props: { worker: WorkerSummary }) {
         category,
         onSelect: async () => {
           if (!available && !configured) return
-          const worker = await sdk.client.getWorker(props.worker.port)
+          const worker = await sdk.client.getWorker(props.worker.id)
           dialog.push(() => <DialogModuleEditor worker={worker} moduleName={name} available={available} />)
         },
       }
@@ -178,7 +178,7 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
 
   async function patchModule(next: { enabled: boolean; params?: Record<string, unknown> }) {
     try {
-      const result = await sdk.client.patchModule(props.worker.port, props.moduleName, next)
+      const result = await sdk.client.patchModule(props.worker.id, props.moduleName, next)
       setDraft({
         enabled: result.module.enabled,
         params: result.module.params,
