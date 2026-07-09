@@ -8,7 +8,6 @@ import path from "node:path"
 import { tmpdir } from "./fixture/fixture"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
-import { registerProxyCommands } from "../src/proxy/commands"
 import {
   toAinnUpstreams,
   type BatchRun,
@@ -178,6 +177,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     saveConfig: 0,
     getLogs: 0,
     listHostedSessions: 0,
+    getHostedSession: [] as string[],
     listBatches: 0,
     createBatch: [] as CreateBatchRequest[],
     getBatch: [] as string[],
@@ -244,6 +244,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     if (url.pathname === "/api/hosted-sessions") {
       calls.listHostedSessions += 1
       return json({ sessions: hostedSessions })
+    }
+    if (url.pathname.startsWith("/api/hosted-sessions/")) {
+      const sessionID = url.pathname.slice("/api/hosted-sessions/".length)
+      calls.getHostedSession.push(sessionID)
+      const session = hostedSessions.find((item) => item.session_id === sessionID)
+      return json(session ?? { error: "hosted session not found" }, session ? undefined : { status: 404 })
     }
     if (url.pathname === "/api/workers/6767/logs") {
       calls.getLogs += 1
@@ -467,8 +473,32 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const body = JSON.parse(String(init?.body ?? "null")) as CreateBatchRequest
       calls.createBatch.push(body)
       const workerPort = [...workers.values()].find((worker) => worker.name === body.worker_name)?.port ?? 0
+      const batchID = `batch_${batches.size + 1}`
+      const variants = Array.from({ length: body.count }, (_, index) => {
+        const number = index + 1
+        const hostedSessionID = `${batchID}_session_${number}`
+        ;(hostedSessions as Array<HostedSessionSummary & { tmux_window_id?: string }>).push({
+          session_id: hostedSessionID,
+          session_label: `${body.title} ${number}`,
+          worker_name: body.worker_name,
+          worker_port: workerPort,
+          workspace: `${body.source_directory}/.worktrees/${body.title.replace(/\s+/g, "-")}-${number}`,
+          model: body.model,
+          created_at: "2026-07-09T00:00:00Z",
+          last_opened_at: "2026-07-09T00:00:00Z",
+          status: "active",
+          tmux_window_id: `@${number}`,
+        })
+        return {
+          id: `variant_${number}`,
+          index: number,
+          hosted_session_id: hostedSessionID,
+          session_label: `${body.title} ${number}`,
+          worktree_dir: `${body.source_directory}/.worktrees/${body.title.replace(/\s+/g, "-")}-${number}`,
+        }
+      })
       const batchRun: BatchRun = {
-        id: `batch_${batches.size + 1}`,
+        id: batchID,
         title: body.title,
         prompt: body.prompt,
         worker_name: body.worker_name,
@@ -476,7 +506,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         model: body.model,
         source_directory: body.source_directory,
         created_at: "2026-07-09T00:00:00Z",
-        variants: [],
+        variants,
       }
       batches.set(batchRun.id, batchRun)
       return json(batchRun)
@@ -540,7 +570,10 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
     started = resolve
   })
 
-  const { run } = await import("../src/app")
+  const [{ run }, { registerProxyCommands }] = await Promise.all([
+    import("../src/app"),
+    import("../src/proxy/commands"),
+  ])
   const task = Effect.runPromise(
     run({
       url: "http://test",

@@ -6,6 +6,7 @@ import { DialogUpstream } from "./dialog-upstream"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogWorkers } from "./dialog-workers"
 import { DialogLaunch } from "./dialog-launch"
+import { DialogBatch } from "./dialog-batch"
 
 export function registerProxyCommands(api: TuiPluginApi) {
   return api.keymap.registerLayer({
@@ -70,6 +71,16 @@ export function registerProxyCommands(api: TuiPluginApi) {
         slashName: "launch",
         run() {
           api.ui.dialog.replace(() => <DialogLaunch />)
+        },
+      },
+      {
+        namespace: "palette",
+        name: "proxy.batch",
+        title: "Run batch",
+        category: "Proxy",
+        slashName: "batch",
+        run() {
+          api.ui.dialog.replace(() => <DialogBatch />)
         },
       },
       {

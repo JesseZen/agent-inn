@@ -1,12 +1,196 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
+import { InputRenderable, TextareaRenderable } from "@opentui/core"
 import { afterEach, expect, mock, test } from "bun:test"
 import { onMount } from "solid-js"
 import { SDKProvider, useSDK } from "../src/context/sdk"
+import { resolveSlashCommand } from "../src/keymap"
+import type { BatchRun } from "../src/proxy/backend"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
+const launchCalls: unknown[] = []
+const pasteCalls: unknown[] = []
+
 afterEach(() => {
+  launchCalls.length = 0
+  pasteCalls.length = 0
   mock.restore()
+})
+
+function installLaunchMock() {
+  mock.module("../src/proxy/launch", () => ({
+    createProxyLaunchCommand() {
+      return ["ainn", "launch"]
+    },
+    renderProxyLaunchCommand(command: string[]) {
+      return command.join(" ")
+    },
+    async launchProxySession(opts: unknown) {
+      launchCalls.push(opts)
+      return true
+    },
+    async pasteHostedPrompt(opts: unknown) {
+      pasteCalls.push(opts)
+      return true
+    },
+  }))
+}
+
+async function loadProxyFixture() {
+  return import("./proxy-commands.fixture")
+}
+
+async function submitPrompt(app: Awaited<ReturnType<(typeof import("./proxy-commands.fixture"))["mountProxyApp"]>>, value?: string) {
+  await app.render()
+  const editor = app.setup.renderer.currentFocusedEditor
+  if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused prompt")
+  if (value !== undefined) {
+    editor.selectAll()
+    await app.mockInput.typeText(value)
+  }
+  app.api.keymap.dispatchCommand("dialog.prompt.submit")
+  await app.render()
+}
+
+test("proxy batch command is registered", async () => {
+  installLaunchMock()
+  const { mountProxyApp } = await loadProxyFixture()
+  const app = await mountProxyApp()
+
+  try {
+    await app.render()
+    expect(resolveSlashCommand(app.api.keymap, "/batch")).toBe("proxy.batch")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy batch create flow launches each hosted variant", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+    await app.mockInput.typeText("cli-openrouter")
+    await runCommand(app, "dialog.select.submit")
+
+    await submitPrompt(app)
+    await submitPrompt(app, "fix scroll")
+    await submitPrompt(app, "3")
+    await submitPrompt(app, "Fix scroll")
+    await submitPrompt(app)
+
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3 && pasteCalls.length === 3)
+
+    expect(app.calls.createBatch).toEqual([
+      {
+        title: "fix scroll",
+        prompt: "Fix scroll",
+        worker_name: "cli-openrouter",
+        count: 3,
+        source_directory: directory,
+      },
+    ])
+    expect(launchCalls).toEqual([
+      expect.objectContaining({
+        workerPort: 11199,
+        profile: "cli-openrouter",
+        workspace: `${directory}/.worktrees/fix-scroll-1`,
+        model: undefined,
+        mode: "hosted-terminal",
+        sessionID: "batch_1_session_1",
+      }),
+      expect.objectContaining({
+        workerPort: 11199,
+        profile: "cli-openrouter",
+        workspace: `${directory}/.worktrees/fix-scroll-2`,
+        model: undefined,
+        mode: "hosted-terminal",
+        sessionID: "batch_1_session_2",
+      }),
+      expect.objectContaining({
+        workerPort: 11199,
+        profile: "cli-openrouter",
+        workspace: `${directory}/.worktrees/fix-scroll-3`,
+        model: undefined,
+        mode: "hosted-terminal",
+        sessionID: "batch_1_session_3",
+      }),
+    ])
+    expect(app.calls.getHostedSession).toEqual(["batch_1_session_1", "batch_1_session_2", "batch_1_session_3"])
+    expect(pasteCalls).toEqual([
+      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@1" },
+      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@2" },
+      { prompt: "Fix scroll", tmuxSocketName: "ainn", tmuxWindowID: "@3" },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("batch winner action selects the highlighted variant", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const batch: BatchRun = {
+    id: "batch_1",
+    title: "fix scroll",
+    prompt: "Fix scroll",
+    worker_name: "cli-openrouter",
+    worker_port: 11199,
+    source_directory: directory,
+    created_at: "2026-07-09T00:00:00Z",
+    variants: [
+      {
+        id: "variant_1",
+        index: 1,
+        hosted_session_id: "session_1",
+        session_label: "fix scroll 1",
+        worktree_dir: `${directory}/.worktrees/fix-scroll-1`,
+      },
+      {
+        id: "variant_2",
+        index: 2,
+        hosted_session_id: "session_2",
+        session_label: "fix scroll 2",
+        worktree_dir: `${directory}/.worktrees/fix-scroll-2`,
+      },
+    ],
+  }
+  const app = await mountProxyApp({ batches: [batch] })
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("fix scroll 1") && app.frame().includes("fix scroll 2")
+    })
+
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("batch.winner")
+    await wait(() => app.calls.selectBatchWinner.length === 1)
+
+    expect(app.calls.selectBatchWinner).toEqual([{ batchID: "batch_1", variantID: "variant_2" }])
+  } finally {
+    await app.cleanup()
+  }
 })
 
 type BatchClient = ReturnType<typeof useSDK>["client"] & {
