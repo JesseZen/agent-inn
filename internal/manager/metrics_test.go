@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -518,5 +519,74 @@ func TestMetricsStoreRecordRunsRetentionCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("record should run retention cleanup for old metrics file: %v", err)
+	}
+}
+
+func TestMetricsStoreConcurrentRecordsSerializeRetentionCleanup(t *testing.T) {
+	const (
+		recordCount      = 32
+		expiredFileCount = 256
+	)
+	dir := t.TempDir()
+	metricsDir := filepath.Join(dir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	oldPath := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -60)))
+	for i := 0; i < expiredFileCount; i++ {
+		path := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -60-i)))
+		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newMetricsStore(config.Settings{StateDir: dir, Metrics: config.MetricsSettings{RetentionDays: 30}}, func() time.Time {
+		return now
+	})
+
+	start := make(chan struct{})
+	errors := make(chan error, recordCount)
+	var wg sync.WaitGroup
+	for i := 0; i < recordCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errors <- store.Record(MetricsRecord{
+				Timestamp:   now,
+				Worker:      "app",
+				Port:        6767,
+				Status:      200,
+				UsageKnown:  true,
+				TotalTokens: 1,
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("concurrent record failed: %v", err)
+		}
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("expired metrics file should be removed: %v", err)
+	}
+
+	got, err := store.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767, Status: "running"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startOfDay := startOfLocalDay(now)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: startOfDay, End: startOfDay.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Totals: MetricsTotals{Requests: recordCount, TotalTokens: recordCount}},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad concurrent metrics records:\ngot  %#v\nwant %#v", got, want)
 	}
 }

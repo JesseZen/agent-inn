@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -92,6 +93,7 @@ type MetricsQueryResponse struct {
 type metricsStore struct {
 	settings config.Settings
 	clock    func() time.Time
+	mu       sync.Mutex
 }
 
 type workerMetricSource struct {
@@ -109,6 +111,9 @@ func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsS
 }
 
 func (s *metricsStore) Record(record MetricsRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.settings.Metrics.PersistEnabled != nil && !*s.settings.Metrics.PersistEnabled {
 		return nil
 	}
@@ -127,7 +132,7 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return s.CleanupRetention()
+	return s.cleanupRetentionLocked()
 }
 
 func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (MetricsQueryResponse, error) {
@@ -231,6 +236,12 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 }
 
 func (s *metricsStore) CleanupRetention() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cleanupRetentionLocked()
+}
+
+func (s *metricsStore) cleanupRetentionLocked() error {
 	retentionDays := s.settings.Metrics.RetentionDays
 	if retentionDays <= 0 {
 		retentionDays = 30

@@ -500,82 +500,99 @@ func TestManagerRecordsWorkerMetricsUsingEventUpstreamAfterRuntimeChange(t *test
 	}
 }
 
-func TestManagerAPIMetricsHydratesRunningWorkersConcurrently(t *testing.T) {
+func TestManagerAPIMetricsBoundsLiveHydrationAcrossConcurrentRequests(t *testing.T) {
+	const requestCount = 2
+	workerCount := metricsHydrationConcurrencyLimit + 2
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCalls := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseCalls)
 	client := &blockingStatusWorkerClient{
-		started: make(chan int, 3),
-		release: release,
-		statuses: map[int]WorkerStatus{
-			6767: {Metrics: worker.MetricsSnapshot{Requests: 1, RPM: 1}},
-			6768: {Metrics: worker.MetricsSnapshot{Requests: 2, RPM: 2}},
-			6769: {Metrics: worker.MetricsSnapshot{Requests: 3, RPM: 3}},
-		},
+		started:  make(chan int, requestCount*workerCount),
+		release:  release,
+		statuses: map[int]WorkerStatus{},
+	}
+	workers := make(map[string]config.WorkerConfig, workerCount)
+	wantWorkers := make([]WorkerMetricsAggregate, 0, workerCount)
+	for i := 0; i < workerCount; i++ {
+		name := fmt.Sprintf("worker-%02d", i)
+		port := 6767 + i
+		metrics := worker.MetricsSnapshot{Requests: int64(i + 1), RPM: int64(i + 1)}
+		workers[name] = config.WorkerConfig{Port: port, Upstream: "openai"}
+		client.statuses[port] = WorkerStatus{Metrics: metrics}
+		wantWorkers = append(wantWorkers, WorkerMetricsAggregate{
+			Worker: name, Port: port, Status: "running", Upstream: "openai", Live: metrics,
+		})
 	}
 	m := New(Config{
 		Config: config.Config{
 			Settings: config.Settings{StateDir: t.TempDir()},
 			Plugins:  testPluginDefinitions(),
-			Workers: map[string]config.WorkerConfig{
-				"app":  {Port: 6767, Upstream: "openai"},
-				"cli":  {Port: 6768, Upstream: "openai"},
-				"tool": {Port: 6769, Upstream: "openai"},
-			},
+			Workers:  workers,
 			Upstreams: map[string]config.UpstreamProfile{
 				"openai": {BaseURL: "https://api.openai.com/v1"},
 			},
 		},
 		WorkerClient: client,
 	})
-	m.statuses["app"] = WorkerStateRunning
-	m.statuses["cli"] = WorkerStateRunning
-	m.statuses["tool"] = WorkerStateRunning
+	for name := range workers {
+		m.statuses[name] = WorkerStateRunning
+	}
 
-	response := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		res := httptest.NewRecorder()
-		m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
-		response <- res
-	}()
+	responses := make(chan *httptest.ResponseRecorder, requestCount)
+	for i := 0; i < requestCount; i++ {
+		go func() {
+			res := httptest.NewRecorder()
+			m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+			responses <- res
+		}()
+	}
 
-	started := map[int]bool{}
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
-	for len(started) < 3 {
+	for i := 0; i < metricsHydrationConcurrencyLimit; i++ {
 		select {
-		case port := <-client.started:
-			started[port] = true
+		case <-client.started:
 		case <-timer.C:
-			close(release)
-			t.Fatalf("status hydration was serial: started ports %#v", started)
+			t.Fatalf("only %d status calls started before release", i)
 		}
 	}
-	close(release)
-
-	var res *httptest.ResponseRecorder
 	select {
-	case res = <-response:
-	case <-time.After(time.Second):
-		t.Fatal("metrics request did not finish")
+	case port := <-client.started:
+		t.Fatalf("status hydration exceeded limit %d with port %d", metricsHydrationConcurrencyLimit, port)
+	case <-time.After(100 * time.Millisecond):
 	}
-	if res.Code != http.StatusOK {
-		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	if got := client.maxActive.Load(); got != metricsHydrationConcurrencyLimit {
+		t.Fatalf("max active status calls = %d, want %d", got, metricsHydrationConcurrencyLimit)
 	}
-	var got MetricsQueryResponse
-	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
+	releaseCalls()
+
 	start := startOfLocalDay(m.clock())
 	want := MetricsQueryResponse{
-		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
-		Workers: []WorkerMetricsAggregate{
-			{Worker: "app", Port: 6767, Status: "running", Upstream: "openai", Live: worker.MetricsSnapshot{Requests: 1, RPM: 1}},
-			{Worker: "cli", Port: 6768, Status: "running", Upstream: "openai", Live: worker.MetricsSnapshot{Requests: 2, RPM: 2}},
-			{Worker: "tool", Port: 6769, Status: "running", Upstream: "openai", Live: worker.MetricsSnapshot{Requests: 3, RPM: 3}},
-		},
+		Range:          MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers:        wantWorkers,
 		SkippedRecords: 0,
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+	for i := 0; i < requestCount; i++ {
+		var res *httptest.ResponseRecorder
+		select {
+		case res = <-responses:
+		case <-time.After(2 * time.Second):
+			t.Fatal("metrics hydration did not finish")
+		}
+		if res.Code != http.StatusOK {
+			t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+		}
+		var got MetricsQueryResponse
+		if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+		}
+	}
+	if got := client.maxActive.Load(); got > metricsHydrationConcurrencyLimit {
+		t.Fatalf("max active status calls = %d, limit %d", got, metricsHydrationConcurrencyLimit)
 	}
 }
 
@@ -4822,14 +4839,24 @@ func (c *recordingWorkerClient) GetStatus(port int) (WorkerStatus, error) {
 
 type blockingStatusWorkerClient struct {
 	recordingWorkerClient
-	started  chan int
-	release  <-chan struct{}
-	statuses map[int]WorkerStatus
+	started   chan int
+	release   <-chan struct{}
+	statuses  map[int]WorkerStatus
+	active    atomic.Int32
+	maxActive atomic.Int32
 }
 
 func (c *blockingStatusWorkerClient) GetStatus(port int) (WorkerStatus, error) {
+	active := c.active.Add(1)
+	for {
+		maximum := c.maxActive.Load()
+		if active <= maximum || c.maxActive.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
 	c.started <- port
 	<-c.release
+	c.active.Add(-1)
 	status, ok := c.statuses[port]
 	if !ok {
 		return WorkerStatus{}, fmt.Errorf("missing status for port %d", port)

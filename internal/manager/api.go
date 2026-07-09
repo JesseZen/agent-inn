@@ -51,25 +51,39 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 	m.mu.RLock()
 	store := m.metricsStore
 	client := m.workerClient
+	hydrationSem := m.metricsStatusSem
 	m.mu.RUnlock()
 	summaries := m.workerSummaries()
 	if query.Upstream == "" && query.Model == "" && query.Path == "" && query.Status == 0 {
 		if client == nil {
 			client = defaultWorkerClient()
 		}
-		var wg sync.WaitGroup
+		indices := make([]int, 0, len(summaries))
 		for i := range summaries {
-			if summaries[i].Status != string(WorkerStateRunning) || query.Worker != "" && summaries[i].Name != query.Worker {
-				continue
+			if summaries[i].Status == string(WorkerStateRunning) && (query.Worker == "" || summaries[i].Name == query.Worker) {
+				indices = append(indices, i)
 			}
-			wg.Add(1)
-			go func(summary *WorkerSummary) {
+		}
+		jobs := make(chan int, len(indices))
+		for _, index := range indices {
+			jobs <- index
+		}
+		close(jobs)
+		workerCount := min(len(indices), metricsHydrationConcurrencyLimit)
+		var wg sync.WaitGroup
+		wg.Add(workerCount)
+		for i := 0; i < workerCount; i++ {
+			go func() {
 				defer wg.Done()
-				status, err := client.GetStatus(summary.Port)
-				if err == nil {
-					summary.Metrics = status.Metrics
+				for index := range jobs {
+					hydrationSem <- struct{}{}
+					status, err := client.GetStatus(summaries[index].Port)
+					<-hydrationSem
+					if err == nil {
+						summaries[index].Metrics = status.Metrics
+					}
 				}
-			}(&summaries[i])
+			}()
 		}
 		wg.Wait()
 	}

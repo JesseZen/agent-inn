@@ -68,6 +68,7 @@ type Manager struct {
 	hookStatuses       map[string]map[string]modulehook.Status
 	metricsStore       *metricsStore
 	metricsTrackers    map[string]*worker.MetricsTracker
+	metricsStatusSem   chan struct{}
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -156,7 +157,10 @@ type WorkerDetail struct {
 	Metrics            worker.MetricsSnapshot                      `json:"metrics"`
 }
 
-const healthyRetryResetWindow = 60 * time.Second
+const (
+	healthyRetryResetWindow          = 60 * time.Second
+	metricsHydrationConcurrencyLimit = 4
+)
 
 func New(cfg Config) *Manager {
 	cfg.Config.ApplyDefaults()
@@ -194,6 +198,7 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		hookStatuses:       map[string]map[string]modulehook.Status{},
 		metricsTrackers:    map[string]*worker.MetricsTracker{},
+		metricsStatusSem:   make(chan struct{}, metricsHydrationConcurrencyLimit),
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
