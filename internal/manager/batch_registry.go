@@ -21,7 +21,6 @@ type BatchRegistry struct {
 type BatchRun struct {
 	ID              string         `json:"id"`
 	Title           string         `json:"title"`
-	Prompt          string         `json:"prompt,omitempty"`
 	WorkerName      string         `json:"worker_name"`
 	WorkerPort      int            `json:"worker_port"`
 	Model           string         `json:"model,omitempty"`
@@ -40,7 +39,6 @@ type BatchVariant struct {
 
 type BatchCreateInput struct {
 	Title           string
-	Prompt          string
 	WorkerName      string
 	WorkerPort      int
 	Model           string
@@ -124,7 +122,6 @@ func (r *BatchRegistry) Create(input BatchCreateInput) (BatchRun, error) {
 		created = BatchRun{
 			ID:              fmt.Sprintf("batch_%d", file.NextBatchID),
 			Title:           title,
-			Prompt:          strings.TrimSpace(input.Prompt),
 			WorkerName:      workerName,
 			WorkerPort:      input.WorkerPort,
 			Model:           strings.TrimSpace(input.Model),

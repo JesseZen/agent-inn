@@ -12,7 +12,6 @@ func TestBatchRegistryCreatesListsUpdatesAndDeletesRun(t *testing.T) {
 
 	created, err := registry.Create(BatchCreateInput{
 		Title:           "fix scroll",
-		Prompt:          "Fix scroll state",
 		WorkerName:      "codex-app",
 		WorkerPort:      6767,
 		Model:           "gpt-5.5",

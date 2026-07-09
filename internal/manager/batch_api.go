@@ -35,7 +35,6 @@ func (m *Manager) handleBatches(rw http.ResponseWriter, r *http.Request) {
 func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Title           string `json:"title"`
-		Prompt          string `json:"prompt"`
 		WorkerName      string `json:"worker_name"`
 		Count           *int   `json:"count"`
 		SourceDirectory string `json:"source_directory"`
@@ -46,7 +45,6 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title := strings.TrimSpace(payload.Title)
-	prompt := strings.TrimSpace(payload.Prompt)
 	workerName := strings.TrimSpace(payload.WorkerName)
 	sourceDirectory := strings.TrimSpace(payload.SourceDirectory)
 	model := strings.TrimSpace(payload.Model)
@@ -82,7 +80,6 @@ func (m *Manager) handleCreateBatch(rw http.ResponseWriter, r *http.Request) {
 	}
 	batch, err := m.batchRegistry.Create(BatchCreateInput{
 		Title:           title,
-		Prompt:          prompt,
 		WorkerName:      workerName,
 		WorkerPort:      worker.Port,
 		Model:           model,

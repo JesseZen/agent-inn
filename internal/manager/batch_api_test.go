@@ -50,7 +50,6 @@ func TestManagerAPICreatesBatchWithHostedSessionsAndWorktrees(t *testing.T) {
 	want := BatchRun{
 		ID:              "batch_1",
 		Title:           "fix scroll",
-		Prompt:          "Fix scroll",
 		WorkerName:      "codex-app",
 		WorkerPort:      6767,
 		Model:           "gpt-5.5",
@@ -112,7 +111,6 @@ func TestManagerAPICreatesBatchesWithDuplicateTitles(t *testing.T) {
 		{
 			ID:              "batch_1",
 			Title:           "fix scroll",
-			Prompt:          "Fix scroll",
 			WorkerName:      "codex-app",
 			WorkerPort:      6767,
 			Model:           "gpt-5.5",
@@ -126,7 +124,6 @@ func TestManagerAPICreatesBatchesWithDuplicateTitles(t *testing.T) {
 		{
 			ID:              "batch_2",
 			Title:           "fix scroll",
-			Prompt:          "Fix scroll",
 			WorkerName:      "codex-app",
 			WorkerPort:      6767,
 			Model:           "gpt-5.5",
