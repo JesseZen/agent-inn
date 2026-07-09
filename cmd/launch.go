@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	modeExternalWindow = "external-window"
-	modeHostedTerminal = "hosted-terminal"
+	modeExternalWindow              = "external-window"
+	modeHostedTerminal              = "hosted-terminal"
+	hostedSessionAcknowledgeCommand = "hosted-session acknowledge"
+	hostedSessionToggleTodoCommand  = "hosted-session toggle-todo"
 )
 
 type launchRunner interface {
@@ -68,6 +70,8 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 		return stdoutBuf.String(), err
 	})
 }
+
+var hostedTurnWatcherSidecarStarter = startHostedTurnWatcherSidecar
 
 func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags := flag.NewFlagSet("launch", flag.ContinueOnError)
@@ -267,14 +271,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 				fmt.Fprintf(stderr, "failed to select tmux window: %v\n", err)
 				return 1
 			}
-			if noAttach {
-				return 0
-			}
-			if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
-				fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
-				return 1
-			}
-			return 0
+			return finishHostedTerminalLaunch(settings, configDir, runner, stderr, noAttach)
 		}
 		reopenOpts := opts
 		workerCfg, ok := cfg.Workers[session.WorkerName]
@@ -307,14 +304,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			fmt.Fprintf(stderr, "failed to persist hosted session: %v\n", err)
 			return 1
 		}
-		if noAttach {
-			return 0
-		}
-		if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
-			fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
-			return 1
-		}
-		return 0
+		return finishHostedTerminalLaunch(settings, configDir, runner, stderr, noAttach)
 	}
 
 	session, err := registry.Create(manager.HostedSessionRecord{
@@ -414,6 +404,16 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		fmt.Fprintf(stderr, "failed to persist hosted session: %v\n", err)
 		return 1
 	}
+	return finishHostedTerminalLaunch(settings, configDir, runner, stderr, noAttach)
+}
+
+func finishHostedTerminalLaunch(settings config.Settings, configDir string, runner launchRunner, stderr io.Writer, noAttach bool) int {
+	if settings.Terminal.Tmux.TurnStatusHooks && !noAttach {
+		if err := hostedTurnWatcherSidecarStarter(configDir); err != nil {
+			fmt.Fprintf(stderr, "failed to start hosted turn watcher: %v\n", err)
+			return 1
+		}
+	}
 	if noAttach {
 		return 0
 	}
@@ -422,6 +422,29 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		return 1
 	}
 	return 0
+}
+
+func startHostedTurnWatcherSidecar(configDir string) error {
+	rootLock, err := rootLockPath(configDir)
+	if err != nil {
+		return err
+	}
+	release, err := rootLockerFactory(rootLock).Acquire()
+	if err == nil {
+		release()
+	} else if err == errAlreadyLocked {
+		return nil
+	} else {
+		return err
+	}
+
+	cmd := exec.Command(hostedSessionExecutable(), "hosted-session", "watch-all", "--config-dir", configDir)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, configDir string, executable string) error {
@@ -470,14 +493,35 @@ func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, c
 	return nil
 }
 
-func managedTurnStatusConfigDir(outputs ...string) (string, bool, error) {
+func managedTurnStatusConfigDir(hooksOutput string, acknowledgeBindingOutput string, todoBindingOutput string) (string, bool, error) {
 	owner := ""
 	found := false
+	outputs := []struct {
+		text    string
+		matches func(string) bool
+	}{
+		{
+			text: hooksOutput,
+			matches: func(line string) bool {
+				return strings.Contains(line, manager.TmuxAcknowledgeTurnHook) && strings.Contains(line, hostedSessionAcknowledgeCommand)
+			},
+		},
+		{
+			text: acknowledgeBindingOutput,
+			matches: func(line string) bool {
+				return strings.Contains(line, manager.TmuxAcknowledgeMouseKey) && strings.Contains(line, hostedSessionAcknowledgeCommand)
+			},
+		},
+		{
+			text: todoBindingOutput,
+			matches: func(line string) bool {
+				return strings.Contains(line, manager.TmuxToggleTodoMouseKey) && strings.Contains(line, hostedSessionToggleTodoCommand)
+			},
+		},
+	}
 	for _, output := range outputs {
-		for _, line := range strings.Split(output, "\n") {
-			matchesAcknowledge := strings.Contains(line, "hosted-session acknowledge")
-			matchesTodo := strings.Contains(line, "DoubleClick1Status") && strings.Contains(line, "hosted-session toggle-todo")
-			if !matchesAcknowledge && !matchesTodo {
+		for _, line := range strings.Split(output.text, "\n") {
+			if !output.matches(line) {
 				continue
 			}
 			marker := "--config-dir "

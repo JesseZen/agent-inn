@@ -33,6 +33,8 @@ const (
 
 const HostedUserMarkerTodo = "todo"
 
+const HostedTurnWatchKindCodex = "codex"
+
 type HostedSessionRegistry struct {
 	path string
 	lock string
@@ -54,6 +56,7 @@ type HostedSessionRecord struct {
 	TurnAcknowledgedGeneration int       `json:"turn_acknowledged_generation,omitempty"`
 	TurnTranscriptPath         string    `json:"turn_transcript_path,omitempty"`
 	TurnID                     string    `json:"turn_id,omitempty"`
+	TurnWatchKind              string    `json:"turn_watch_kind,omitempty"`
 	UserMarker                 string    `json:"user_marker,omitempty"`
 	CreatedAt                  time.Time `json:"created_at"`
 	LastOpenedAt               time.Time `json:"last_opened_at"`
@@ -365,10 +368,10 @@ func (r *HostedSessionRegistry) RenameForSettings(sessionID string, sessionLabel
 }
 
 func (r *HostedSessionRegistry) MarkTurnState(sessionID string, state string, reason string, launcherSessionID string) (HostedSessionRecord, error) {
-	return r.MarkTurnStateWithWatch(sessionID, state, reason, launcherSessionID, "", "")
+	return r.MarkTurnStateWithWatch(sessionID, state, reason, launcherSessionID, "", "", "")
 }
 
-func (r *HostedSessionRegistry) MarkTurnStateWithWatch(sessionID string, state string, reason string, launcherSessionID string, transcriptPath string, turnID string) (HostedSessionRecord, error) {
+func (r *HostedSessionRegistry) MarkTurnStateWithWatch(sessionID string, state string, reason string, launcherSessionID string, transcriptPath string, turnID string, watchKind string) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
@@ -380,6 +383,7 @@ func (r *HostedSessionRegistry) MarkTurnStateWithWatch(sessionID string, state s
 			session.TurnStateReason = ""
 			session.TurnTranscriptPath = strings.TrimSpace(transcriptPath)
 			session.TurnID = strings.TrimSpace(turnID)
+			session.TurnWatchKind = strings.TrimSpace(watchKind)
 		}
 		if state == HostedTurnStateDone &&
 			(session.TurnState == HostedTurnStateFailed || session.TurnState == HostedTurnStateInterrupted) {
@@ -415,10 +419,14 @@ func (r *HostedSessionRegistry) CompleteWatchedTurn(sessionID string, turnGenera
 			updated = session
 			return nil
 		}
+		if session.TurnState == HostedTurnStateDone && (state == HostedTurnStateFailed || state == HostedTurnStateInterrupted) {
+			session.TurnAcknowledgedGeneration = 0
+		}
 		session.TurnState = state
 		session.TurnStateReason = strings.TrimSpace(reason)
 		session.TurnTranscriptPath = ""
 		session.TurnID = ""
+		session.TurnWatchKind = ""
 		file.Sessions[sessionID] = session
 		updated = session
 		applied = true
@@ -438,7 +446,8 @@ func (r *HostedSessionRegistry) WatchedTurns() ([]HostedTurnWatch, error) {
 				continue
 			}
 			hasExplicitWatch := session.TurnTranscriptPath != "" && session.TurnID != ""
-			hasLauncherWatch := session.TurnTranscriptPath == "" && session.TurnID == "" && session.LauncherSessionID != ""
+			hasLauncherWatch := session.TurnWatchKind == HostedTurnWatchKindCodex &&
+				session.TurnTranscriptPath == "" && session.TurnID == "" && session.LauncherSessionID != ""
 			if !hasExplicitWatch && !hasLauncherWatch {
 				continue
 			}

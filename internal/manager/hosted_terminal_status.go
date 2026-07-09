@@ -15,9 +15,9 @@ const (
 	tmuxErrorConnectingError = "error connecting to "
 	tmuxNoSuchFileError      = "No such file or directory"
 	// tmux hooks are array options; this slot lets AINN replace its own hook without clearing user hooks.
-	tmuxAcknowledgeTurnHook          = "after-select-window[90]"
-	tmuxAcknowledgeMouseKey          = "MouseDown1Status"
-	tmuxToggleTodoMouseKey           = "DoubleClick1Status"
+	TmuxAcknowledgeTurnHook          = "after-select-window[90]"
+	TmuxAcknowledgeMouseKey          = "MouseDown1Status"
+	TmuxToggleTodoMouseKey           = "DoubleClick1Status"
 	tmuxTurnStatusOwnerOption        = "@ainn_turn_status_owner"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
 )
@@ -95,7 +95,7 @@ func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configD
 	command := "run-shell -b " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
 		"set-hook", "-t", tmuxHostSessionForSettings(settings),
-		tmuxAcknowledgeTurnHook, command,
+		TmuxAcknowledgeTurnHook, command,
 	)
 }
 
@@ -106,7 +106,7 @@ func TmuxAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings,
 		" --window-name " + tmuxShellEscapedWindowNameFormat
 	command := "switch-client -t = ; run-shell -b -t = " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
-		"bind-key", "-T", "root", tmuxAcknowledgeMouseKey,
+		"bind-key", "-T", "root", TmuxAcknowledgeMouseKey,
 		command,
 	)
 }
@@ -118,7 +118,7 @@ func TmuxToggleTodoMouseBindingCommandForSettings(settings config.Settings, conf
 		" --window-name " + tmuxShellEscapedWindowNameFormat
 	command := "run-shell -b -t = " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
-		"bind-key", "-T", "root", tmuxToggleTodoMouseKey,
+		"bind-key", "-T", "root", TmuxToggleTodoMouseKey,
 		command,
 	)
 }
@@ -142,7 +142,7 @@ func TmuxShowHooksCommandForSettings(settings config.Settings) []string {
 }
 
 func TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings config.Settings) []string {
-	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", tmuxAcknowledgeMouseKey)
+	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root", TmuxAcknowledgeMouseKey)
 }
 
 func TmuxListToggleTodoMouseBindingCommandForSettings(settings config.Settings) []string {

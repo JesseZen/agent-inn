@@ -28,6 +28,8 @@ func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedSessionAcknowledge(args[1:], stdout, stderr)
 	case "toggle-todo":
 		return runHostedSessionToggleTodo(args[1:], stdout, stderr)
+	case "watch-all":
+		return runHostedSessionWatchAll(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown hosted-session subcommand %q\n", args[0])
 		return 2
@@ -46,6 +48,7 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 	watchCodexTurn := flags.Bool("watch-codex-turn", false, "watch codex transcript for terminal turn state")
 	transcriptPath := ""
 	turnID := ""
+	watchKind := ""
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -60,6 +63,9 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 	default:
 		fmt.Fprintf(stderr, "invalid hosted session turn state %q\n", *state)
 		return 2
+	}
+	if *watchCodexTurn {
+		watchKind = manager.HostedTurnWatchKindCodex
 	}
 	if *captureLauncherSessionID {
 		var payload struct {
@@ -96,7 +102,7 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
-	session, err := registry.MarkTurnStateWithWatch(*sessionID, *state, *reason, *launcherSessionID, transcriptPath, turnID)
+	session, err := registry.MarkTurnStateWithWatch(*sessionID, *state, *reason, *launcherSessionID, transcriptPath, turnID, watchKind)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to mark hosted session: %v\n", err)
 		return 1
@@ -150,8 +156,16 @@ func runHostedSessionAcknowledge(args []string, stdout io.Writer, stderr io.Writ
 	if !ok {
 		return 0
 	}
+	command, found, err := hostedSessionLatestTurnStatusCommand(cfg.Settings, registry, session)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
+		return 1
+	}
+	if !found {
+		return 0
+	}
 	runner := launchRunnerFactory(io.Discard, stderr)
-	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+	if _, err := runner.Run(command); err != nil {
 		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
 		return 1
 	}
@@ -188,12 +202,28 @@ func runHostedSessionToggleTodo(args []string, stdout io.Writer, stderr io.Write
 	if !ok {
 		return 0
 	}
+	command, found, err := hostedSessionLatestTurnStatusCommand(cfg.Settings, registry, session)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to load hosted session: %v\n", err)
+		return 1
+	}
+	if !found {
+		return 0
+	}
 	runner := launchRunnerFactory(io.Discard, stderr)
-	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+	if _, err := runner.Run(command); err != nil {
 		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func hostedSessionLatestTurnStatusCommand(settings config.Settings, registry *manager.HostedSessionRegistry, session manager.HostedSessionRecord) ([]string, bool, error) {
+	latest, found, err := registry.Get(session.SessionID)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return manager.TmuxHostedTurnStatusCommandForRecord(settings, latest), true, nil
 }
 
 func acknowledgeHostedSessionDoneIfCurrent(settings config.Settings, registry *manager.HostedSessionRegistry, session manager.HostedSessionRecord, runner launchRunner) (manager.HostedSessionRecord, error) {

@@ -27,7 +27,11 @@ const tmuxMissingSocketErrorText = "error connecting to /private/tmp/ainn-tmux-r
 func TestMain(m *testing.M) {
 	os.Unsetenv("TMUX")
 	os.Unsetenv("TMUX_PANE")
-	os.Exit(m.Run())
+	previousSidecarStarter := hostedTurnWatcherSidecarStarter
+	hostedTurnWatcherSidecarStarter = func(string) error { return nil }
+	code := m.Run()
+	hostedTurnWatcherSidecarStarter = previousSidecarStarter
+	os.Exit(code)
 }
 
 func TestRunVersionPrintsVersion(t *testing.T) {
@@ -346,6 +350,7 @@ func TestRunHostedSessionMarkRecordsCodexTurnWatch(t *testing.T) {
 	wantSession.LauncherSessionID = "019f3872-e4d0-7252-b858-3f9284ae8b21"
 	wantSession.TurnTranscriptPath = "/tmp/codex.jsonl"
 	wantSession.TurnID = "turn_1"
+	wantSession.TurnWatchKind = manager.HostedTurnWatchKindCodex
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
@@ -404,6 +409,7 @@ func TestRunHostedSessionMarkRecordsLauncherWatchWithoutCodexTurnMetadata(t *tes
 	wantSession.TurnState = manager.HostedTurnStateRunning
 	wantSession.TurnGeneration = 1
 	wantSession.LauncherSessionID = "019f3872-e4d0-7252-b858-3f9284ae8b21"
+	wantSession.TurnWatchKind = manager.HostedTurnWatchKindCodex
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
@@ -624,6 +630,154 @@ func TestRunHostedSessionToggleTodoUpdatesRegistryAndTmux(t *testing.T) {
 	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
+	}
+}
+
+func TestRunHostedSessionWatchAllExitsWhenSidecarAlreadyRunning(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	holdLockForTest(t)
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "watch-all", "--config-dir", configDir}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("got stderr %q, want empty", stderr.String())
+	}
+}
+
+func TestRunHostedSessionWatchAllExitsWhenTmuxHostMissing(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+
+	previousLockerFactory := rootLockerFactory
+	rootLockerFactory = func(string) rootLocker { return noopLocker{} }
+	defer func() { rootLockerFactory = previousLockerFactory }()
+
+	previousInterval := hostedTurnWatcherSidecarPollInterval
+	hostedTurnWatcherSidecarPollInterval = time.Hour
+	defer func() { hostedTurnWatcherSidecarPollInterval = previousInterval }()
+
+	previousRunnerFactory := launchRunnerFactory
+	launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+		return launchRunnerFunc(func(args []string) (string, error) {
+			if len(args) > 3 && args[3] == "has-session" {
+				return "", errors.New("can't find session")
+			}
+			return "", nil
+		})
+	}
+	defer func() { launchRunnerFactory = previousRunnerFactory }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "watch-all", "--config-dir", configDir}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("got stderr %q, want empty", stderr.String())
+	}
+}
+
+func TestHostedSessionLatestTurnStatusCommandUsesLatestTodoAfterConcurrentToggle(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "worker",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  manager.HostedTurnStateDone,
+		TurnGeneration:             2,
+		TurnAcknowledgedGeneration: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	acknowledged, ok, err := registry.AcknowledgeTurnByWindow("@12", "solve problem A")
+	if err != nil || !ok {
+		t.Fatalf("acknowledge got ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := registry.ToggleUserMarkerByWindow("@12", "solve problem A"); err != nil || !ok {
+		t.Fatalf("toggle todo got ok=%v err=%v", ok, err)
+	}
+	wantSession := session
+	wantSession.TurnAcknowledgedGeneration = session.TurnGeneration
+	wantSession.UserMarker = manager.HostedUserMarkerTodo
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+	got, ok, err := hostedSessionLatestTurnStatusCommand(cfg.Settings, registry, acknowledged)
+	if err != nil || !ok {
+		t.Fatalf("latest command got ok=%v err=%v", ok, err)
+	}
+	want := manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux command %#v, want %#v", got, want)
+	}
+}
+
+func TestHostedSessionLatestTurnStatusCommandUsesLatestReadAfterConcurrentAcknowledge(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	cfg, err := config.LoadFile(filepath.Join(configDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	session, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel:               "solve problem A",
+		WorkerName:                 "worker",
+		WorkerPort:                 11199,
+		TmuxWindowID:               "@12",
+		TurnState:                  manager.HostedTurnStateDone,
+		TurnGeneration:             2,
+		TurnAcknowledgedGeneration: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	todo, ok, err := registry.ToggleUserMarkerByWindow("@12", "solve problem A")
+	if err != nil || !ok {
+		t.Fatalf("toggle todo got ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := registry.AcknowledgeTurnByWindow("@12", "solve problem A"); err != nil || !ok {
+		t.Fatalf("acknowledge got ok=%v err=%v", ok, err)
+	}
+	wantSession := session
+	wantSession.TurnAcknowledgedGeneration = session.TurnGeneration
+	wantSession.UserMarker = manager.HostedUserMarkerTodo
+	updated, ok, err := registry.Get(session.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(updated, wantSession) {
+		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
+	}
+	got, ok, err := hostedSessionLatestTurnStatusCommand(cfg.Settings, registry, todo)
+	if err != nil || !ok {
+		t.Fatalf("latest command got ok=%v err=%v", ok, err)
+	}
+	want := manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got tmux command %#v, want %#v", got, want)
 	}
 }
 

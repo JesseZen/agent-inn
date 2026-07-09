@@ -191,8 +191,21 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
+		runner := hostedTMuxRunnerFactory()
+		activeWindowID := ""
 		if session.TmuxWindowID != "" {
-			if _, err := hostedTMuxRunnerFactory().Run(TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+			windows, err := hostedWindowDetailsFromRunnerForSettings(cfg.Settings, runner)
+			if err != nil {
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+			if windowID, active := HostedSessionActiveWindowID(windows, session); active {
+				activeWindowID = windowID
+			}
+		}
+		if activeWindowID != "" {
+			session.TmuxWindowID = activeWindowID
+			if _, err := runner.Run(TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
 				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 				return
 			}

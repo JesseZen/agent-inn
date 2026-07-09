@@ -201,7 +201,7 @@ func TestHostedSessionRegistryMarkTurnStateWithWatchRegistersActiveTurn(t *testi
 		t.Fatal(err)
 	}
 
-	got, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "launcher-1", "/tmp/codex.jsonl", "turn_1")
+	got, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "launcher-1", "/tmp/codex.jsonl", "turn_1", HostedTurnWatchKindCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +211,7 @@ func TestHostedSessionRegistryMarkTurnStateWithWatchRegistersActiveTurn(t *testi
 	want.LauncherSessionID = "launcher-1"
 	want.TurnTranscriptPath = "/tmp/codex.jsonl"
 	want.TurnID = "turn_1"
+	want.TurnWatchKind = HostedTurnWatchKindCodex
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -248,11 +249,11 @@ func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_1")
+	firstTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_1", HostedTurnWatchKindCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_2")
+	secondTurn, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", "/tmp/codex.jsonl", "turn_2", HostedTurnWatchKindCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,8 +282,86 @@ func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.
 	want.TurnStateReason = "user_interrupt"
 	want.TurnTranscriptPath = ""
 	want.TurnID = ""
+	want.TurnWatchKind = ""
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryCompleteWatchedTurnMarksCorrectedFailureUnread(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  string
+		reason string
+	}{
+		{name: "failed", state: HostedTurnStateFailed, reason: hostedTurnCodexFailureReason},
+		{name: "interrupted", state: HostedTurnStateInterrupted, reason: hostedTurnInterruptedReason},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+
+			registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+			created, err := registry.Create(HostedSessionRecord{
+				SessionLabel:               "solve problem A",
+				WorkerName:                 "worker",
+				WorkerPort:                 11199,
+				TmuxWindowID:               "@12",
+				TurnState:                  HostedTurnStateDone,
+				TurnGeneration:             3,
+				TurnAcknowledgedGeneration: 3,
+				TurnTranscriptPath:         "/tmp/codex.jsonl",
+				TurnID:                     "turn_1",
+				TurnWatchKind:              HostedTurnWatchKindCodex,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, ok, err := registry.CompleteWatchedTurn(created.SessionID, created.TurnGeneration, tt.state, tt.reason)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := created
+			want.TurnState = tt.state
+			want.TurnStateReason = tt.reason
+			want.TurnAcknowledgedGeneration = 0
+			want.TurnTranscriptPath = ""
+			want.TurnID = ""
+			want.TurnWatchKind = ""
+			if !ok || !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+			}
+		})
+	}
+}
+
+func TestHostedSessionRegistryWatchedTurnsIgnoresLauncherOnlyTurnWithoutCodexWatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.MarkTurnState(created.SessionID, HostedTurnStateRunning, "", "claude-session-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := registry.WatchedTurns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []HostedTurnWatch
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want no watched turns", got)
 	}
 }
 

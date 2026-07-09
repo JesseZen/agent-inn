@@ -369,6 +369,106 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	}
 }
 
+func TestRunLaunchHostedTerminalStartsWatcherSidecarForAttachedLaunch(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	var gotSidecarConfigDir string
+	restoreSidecar := func() func() {
+		previous := hostedTurnWatcherSidecarStarter
+		hostedTurnWatcherSidecarStarter = func(configDir string) error {
+			gotSidecarConfigDir = configDir
+			return nil
+		}
+		return func() { hostedTurnWatcherSidecarStarter = previous }
+	}()
+	defer restoreSidecar()
+
+	restoreRunner := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				if len(args) > 3 && args[3] == "show" {
+					return "off\n", nil
+				}
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restoreRunner()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	if gotSidecarConfigDir != configDir {
+		t.Fatalf("got sidecar config dir %q, want %q", gotSidecarConfigDir, configDir)
+	}
+}
+
+func TestRunLaunchHostedTerminalNoAttachDoesNotStartWatcherSidecar(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+
+	sidecarStarted := false
+	restoreSidecar := func() func() {
+		previous := hostedTurnWatcherSidecarStarter
+		hostedTurnWatcherSidecarStarter = func(configDir string) error {
+			sidecarStarted = true
+			return nil
+		}
+		return func() { hostedTurnWatcherSidecarStarter = previous }
+	}()
+	defer restoreSidecar()
+
+	restoreRunner := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if len(args) > 3 && args[3] == "has-session" {
+					return "", errors.New("can't find session")
+				}
+				if len(args) > 3 && args[3] == "select-window" {
+					return "", errors.New("can't find window")
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@12\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restoreRunner()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A", "--no-attach"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	if sidecarStarted {
+		t.Fatal("no-attach launch should not start watcher sidecar")
+	}
+}
+
 func TestRunLaunchHostedTerminalEnablesExtendedKeys(t *testing.T) {
 	configDir := t.TempDir()
 	stateDir := filepath.Join(configDir, "state")
@@ -855,7 +955,27 @@ func TestRunLaunchHostedTerminalRejectsUnparseableLegacyTurnStatusHook(t *testin
 }
 
 func TestManagedTurnStatusConfigDirIgnoresUnrelatedTodoBindings(t *testing.T) {
-	owner, found, err := managedTurnStatusConfigDir("bind-key -T root C-t run-shell -b \"'/tmp/ainn' hosted-session toggle-todo --config-dir '/tmp/other' --window-id #{window_id}\"\n")
+	owner, found, err := managedTurnStatusConfigDir("", "", "bind-key -T root C-t run-shell -b \"'/tmp/ainn' hosted-session toggle-todo --config-dir '/tmp/other' --window-id #{window_id}\"\n")
+	got := struct {
+		owner string
+		found bool
+		err   string
+	}{owner: owner, found: found}
+	if err != nil {
+		got.err = err.Error()
+	}
+	want := struct {
+		owner string
+		found bool
+		err   string
+	}{}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestManagedTurnStatusConfigDirIgnoresUnrelatedAcknowledgeRootBindings(t *testing.T) {
+	owner, found, err := managedTurnStatusConfigDir("", "", "bind-key -T root C-a run-shell -b \"'/tmp/ainn' hosted-session acknowledge --config-dir '/tmp/other' --window-id #{window_id}\"\n")
 	got := struct {
 		owner string
 		found bool
