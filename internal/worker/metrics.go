@@ -9,30 +9,31 @@ const MetricsWindowSeconds = 60
 const errorStatusFloor = 400
 
 type RequestMetricEvent struct {
-	Timestamp     time.Time
-	Method        string
-	Path          string
-	Status        int
-	DurationMS    int64
-	ResponseBytes int64
-	Usage         UsageTokens
+	Timestamp     time.Time   `json:"timestamp"`
+	Model         string      `json:"model,omitempty"`
+	Method        string      `json:"method"`
+	Path          string      `json:"path"`
+	Status        int         `json:"status"`
+	DurationMS    int64       `json:"duration_ms"`
+	ResponseBytes int64       `json:"response_bytes"`
+	Usage         UsageTokens `json:"usage"`
 }
 
 type MetricsSnapshot struct {
-	WindowSeconds        int64
-	InFlight             int64
-	Requests             int64
-	Errors               int64
-	RPM                  int64
-	TPM                  int64
-	AvgLatencyMS         int64
-	InputTokens          int64
-	OutputTokens         int64
-	CacheReadTokens      int64
-	CacheWriteTokens     int64
-	ReasoningTokens      int64
-	TotalTokens          int64
-	UnknownUsageRequests int64
+	WindowSeconds        int   `json:"window_seconds"`
+	InFlight             int64 `json:"in_flight"`
+	Requests             int64 `json:"requests"`
+	Errors               int64 `json:"errors"`
+	RPM                  int64 `json:"rpm"`
+	TPM                  int64 `json:"tpm"`
+	AvgLatencyMS         int64 `json:"avg_latency_ms"`
+	InputTokens          int64 `json:"input_tokens"`
+	OutputTokens         int64 `json:"output_tokens"`
+	CacheReadTokens      int64 `json:"cache_read_tokens"`
+	CacheWriteTokens     int64 `json:"cache_write_tokens"`
+	ReasoningTokens      int64 `json:"reasoning_tokens"`
+	TotalTokens          int64 `json:"total_tokens"`
+	UnknownUsageRequests int64 `json:"unknown_usage_requests"`
 }
 
 type MetricsTracker struct {
