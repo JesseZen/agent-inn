@@ -180,13 +180,84 @@ test("popup mode opens existing hosted session with setup only and stays open", 
 
     expect(spawns).toEqual([
       {
-        cmd: "ainn",
+        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test", "--config-dir", Global.Path.config, "--session-id", "hs_popup"],
       },
     ])
     expect(app.setup.renderer.isDestroyed).toBe(false)
     expect(listCalls).toBe(2)
   } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
+test("popup mode uses configured executable for hosted setup", async () => {
+  const originalExecutable = process.env.AINN_EXECUTABLE
+  const configuredExecutable = "/tmp/ainn-popup-bin"
+  process.env.AINN_EXECUTABLE = configuredExecutable
+  const spawns: Array<{ cmd: string; args: string[] }> = []
+  const popupSession = {
+    ...activeHostedSession,
+    session_id: "hs_popup_exec",
+    worker_name: "test",
+    session_label: "popup exec task",
+  }
+
+  mock.module("node:child_process", () => ({
+    spawn(cmd: string, args: string[]) {
+      spawns.push({ cmd, args })
+      const child = {
+        stdout: { on() {} },
+        stderr: { on() {} },
+        on(event: string, handler: (code?: number) => void) {
+          if (event === "exit") queueMicrotask(() => handler(0))
+          return child
+        },
+        unref() {},
+      }
+      return child
+    },
+  }))
+
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers")
+      return json({
+        workers: [defaultWorker],
+      })
+    if (url.pathname === "/api/hosted-sessions")
+      return json({
+        sessions: [popupSession],
+      })
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return app.setup.captureCharFrame().includes("Refresh")
+    })
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressArrow("down")
+    app.setup.mockInput.pressEnter()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return spawns.length === 1
+    })
+
+    expect(spawns).toEqual([
+      {
+        cmd: configuredExecutable,
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test", "--config-dir", Global.Path.config, "--session-id", "hs_popup_exec"],
+      },
+    ])
+  } finally {
+    if (originalExecutable === undefined) {
+      delete process.env.AINN_EXECUTABLE
+    } else {
+      process.env.AINN_EXECUTABLE = originalExecutable
+    }
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     await app.cleanup()
   }
@@ -252,7 +323,7 @@ test("popup mode duplicates hosted session with setup only and stays open", asyn
     expect(duplicateCalls).toBe(1)
     expect(spawns).toEqual([
       {
-        cmd: "ainn",
+        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_dup"],
       },
     ])
@@ -328,7 +399,7 @@ test("popup mode creates hosted session with setup only and returns to root", as
 
     expect(spawns).toEqual([
       {
-        cmd: "ainn",
+        cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
         args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-label", "test-cli 1", "--cd", directory],
       },
     ])

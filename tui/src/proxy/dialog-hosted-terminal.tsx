@@ -43,7 +43,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   const workerFrecency = useWorkerFrecency()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
   const mode = props.mode ?? "dialog"
-  const executable = mode === "popup" ? undefined : import.meta.env?.AINN_EXECUTABLE || undefined
+  const executable = import.meta.env?.AINN_EXECUTABLE || undefined
   const workerSections = createMemo(() => workerFrecency.sections(sync.data.workers))
 
   async function openHostedTerminal(opts: ProxyLaunchOptions) {

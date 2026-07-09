@@ -244,10 +244,6 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
 			return 1
 		}
-		if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
-			fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
-			return 1
-		}
 		if settings.Terminal.Tmux.TurnStatusHooks {
 			if err := installTmuxTurnStatusHooks(runner, settings, configDir, hostedSessionExecutable()); err != nil {
 				fmt.Fprintf(stderr, "failed to install tmux turn acknowledgement hooks: %v\n", err)
@@ -256,6 +252,10 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		}
 		if err := installTmuxHostedPopupBinding(runner, settings, configDir, hostedSessionExecutable()); err != nil {
 			fmt.Fprintf(stderr, "failed to install tmux hosted popup binding: %v\n", err)
+			return 1
+		}
+		if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
+			fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 			return 1
 		}
 		activeWindowID := ""
@@ -396,11 +396,6 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
 		return 1
 	}
-	if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
-		cleanupIncompleteSession()
-		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
-		return 1
-	}
 	if settings.Terminal.Tmux.TurnStatusHooks {
 		if err := installTmuxTurnStatusHooks(runner, settings, configDir, hostedSessionExecutable()); err != nil {
 			cleanupIncompleteSession()
@@ -411,6 +406,11 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	if err := installTmuxHostedPopupBinding(runner, settings, configDir, hostedSessionExecutable()); err != nil {
 		cleanupIncompleteSession()
 		fmt.Fprintf(stderr, "failed to install tmux hosted popup binding: %v\n", err)
+		return 1
+	}
+	if _, err := runner.Run(manager.TmuxThemeCommandForSettings(settings)); err != nil {
+		cleanupIncompleteSession()
+		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
 		return 1
 	}
 	if !reuseFirstWindow {

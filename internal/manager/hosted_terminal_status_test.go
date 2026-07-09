@@ -152,7 +152,7 @@ func TestTmuxThemeCommandForSettingsIncludesHostedSessions(t *testing.T) {
 		"tmux", "-L", "ainn-test",
 		"set-option", "-g", "status", "on", ";",
 		"set-option", "-g", "status-left", "", ";",
-		"set-option", "-g", "status-right", "#[range=user|ainn-hosted-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]", ";",
+		"set-option", "-g", "status-right", "#[range=user|ainn-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]", ";",
 		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
 		"set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";",
 		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
@@ -160,6 +160,11 @@ func TestTmuxThemeCommandForSettingsIncludesHostedSessions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for _, arg := range got {
+		if strings.Contains(arg, "ainn-hosted-sessions") {
+			t.Fatalf("tmux status range must fit tmux 3.6b 15-byte user range data limit, got %#v", got)
+		}
 	}
 }
 
@@ -405,10 +410,13 @@ func TestTmuxHostedPopupMouseBindingCommandForSettingsSelectMode(t *testing.T) {
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"bind-key", "-T", "root", "MouseDown1Status",
-		"if -F \"#{==:#{mouse_status_range},ainn-hosted-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t =\"",
+		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t =\"",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "ainn-hosted-sessions") {
+		t.Fatalf("tmux popup mouse range must use <=15-byte user range data, got %#v", got)
 	}
 }
 
@@ -418,10 +426,13 @@ func TestTmuxHostedPopupMouseBindingCommandForSettingsAcknowledgeMode(t *testing
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"bind-key", "-T", "root", "MouseDown1Status",
-		"if -F \"#{==:#{mouse_status_range},ainn-hosted-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t = ; run-shell -b -t = \\\"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\\\"\"",
+		"if -F \"#{==:#{mouse_status_range},ainn-sessions}\" \"display-popup -E -x R -y 0 -w 80% -h 70% -T 'Hosted Terminal' '/tmp/ainn bin' hosted-session popup --config-dir '/tmp/ainn config' --manager-url 'http://127.0.0.1:19090'\" \"switch-client -t = ; run-shell -b -t = \\\"'/tmp/ainn bin' hosted-session acknowledge --config-dir '/tmp/ainn config' --window-id #{window_id} --window-name #{q:window_name}\\\"\"",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "ainn-hosted-sessions") {
+		t.Fatalf("tmux popup mouse range must use <=15-byte user range data, got %#v", got)
 	}
 }
 

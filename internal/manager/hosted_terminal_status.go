@@ -25,7 +25,7 @@ const (
 	hostedPopupWidth                 = "80%"
 	hostedPopupHeight                = "70%"
 	tmuxShellEscapedWindowNameFormat = "#{q:window_name}"
-	tmuxHostedPopupStatusRange       = "ainn-hosted-sessions"
+	tmuxHostedPopupStatusRange       = "ainn-sessions"
 )
 
 type TmuxHostedPopupMouseMode int

@@ -15,7 +15,7 @@ const (
 	tmuxWindowPrefix              = "ainn"
 	tmuxExtkeysSlot               = "terminal-features[3]"
 	tmuxExtkeys                   = "xterm*:extkeys"
-	tmuxHostedSessionsStatusRight = "#[range=user|ainn-hosted-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]"
+	tmuxHostedSessionsStatusRight = "#[range=user|ainn-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]"
 )
 
 func defaultTmuxSettings() config.Settings {
