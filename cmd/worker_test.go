@@ -110,6 +110,9 @@ func TestRunWorkerAcceptsMetricsFD(t *testing.T) {
 	var called bool
 	restore := SetWorkerRunnerForTest(func(cfg WorkerRuntimeConfig) error {
 		called = true
+		if cfg.MetricsWriter != metricsWriter {
+			t.Fatalf("metrics writer was not wired through: %#v", cfg.MetricsWriter)
+		}
 		return nil
 	})
 	defer restore()

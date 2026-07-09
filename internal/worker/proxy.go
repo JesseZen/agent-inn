@@ -104,7 +104,7 @@ func (w *Worker) UpdateSnapshot(snapshot RuntimeConfigSnapshot) error {
 }
 
 func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, constants.ProxyPathPrefix) || r.URL.Path == proxyStatusAliasPath {
+	if strings.HasPrefix(r.URL.Path, constants.ProxyPathPrefix) || (r.URL.Path == proxyStatusAliasPath && r.Method == http.MethodGet) {
 		w.serveManagement(rw, r)
 		return
 	}

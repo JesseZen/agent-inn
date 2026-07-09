@@ -66,6 +66,33 @@ func TestWorkerPassesThroughWithNoModulesAndInjectsAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkerProxiesNonGetStatusAlias(t *testing.T) {
+	var receivedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("proxied"))
+	}))
+	defer server.Close()
+
+	w, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{BaseURL: server.URL},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	w.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/__ainn/status", strings.NewReader("body")))
+
+	if res.Code != http.StatusCreated || res.Body.String() != "proxied" || receivedPath != "/__ainn/status" {
+		t.Fatalf("status alias was not proxied: status=%d body=%q path=%q", res.Code, res.Body.String(), receivedPath)
+	}
+}
+
 func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
