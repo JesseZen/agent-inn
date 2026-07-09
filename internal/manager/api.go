@@ -137,6 +137,21 @@ func (m *Manager) handleHostedSessions(rw http.ResponseWriter, r *http.Request) 
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
+		for i := range sessions {
+			workerID := sessions[i].WorkerID
+			if workerID == "" {
+				workerID = sessions[i].WorkerName
+			}
+			workerName := workerID
+			missing := true
+			if worker, ok := cfg.Workers[workerID]; ok {
+				missing = false
+				if worker.Name != "" {
+					workerName = worker.Name
+				}
+			}
+			sessions[i].Worker = &HostedSessionWorkerSummary{ID: workerID, Name: workerName, Missing: missing}
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"sessions": sessions})
 		return
 	}
@@ -230,6 +245,7 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 	}
 	if r.Method == http.MethodPatch {
 		var payload struct {
+			WorkerID     *string `json:"worker_id"`
 			WorkerName   *string `json:"worker_name"`
 			SessionLabel *string `json:"session_label"`
 		}
@@ -237,7 +253,8 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 			return
 		}
-		if (payload.WorkerName == nil && payload.SessionLabel == nil) || (payload.WorkerName != nil && payload.SessionLabel != nil) {
+		workerPatch := payload.WorkerID != nil || payload.WorkerName != nil
+		if (!workerPatch && payload.SessionLabel == nil) || (workerPatch && payload.SessionLabel != nil) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "exactly one hosted session field is required"})
 			return
 		}
@@ -260,7 +277,13 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 			writeJSON(rw, http.StatusOK, updated)
 			return
 		}
-		workerName := strings.TrimSpace(*payload.WorkerName)
+		targetWorkerID := ""
+		if payload.WorkerID != nil {
+			targetWorkerID = strings.TrimSpace(*payload.WorkerID)
+		} else if payload.WorkerName != nil {
+			targetWorkerID = strings.TrimSpace(*payload.WorkerName)
+		}
+		workerName := targetWorkerID
 		if workerName == "" {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker name is required"})
 			return
@@ -270,29 +293,36 @@ func (m *Manager) handleHostedSessionByID(rw http.ResponseWriter, r *http.Reques
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("worker %q not found", workerName)})
 			return
 		}
-		currentWorker, ok := cfg.Workers[session.WorkerName]
-		if !ok {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("worker %q not found", session.WorkerName)})
-			return
+		currentWorkerID := session.WorkerID
+		if currentWorkerID == "" {
+			currentWorkerID = session.WorkerName
 		}
-		if currentWorker.Launcher != targetWorker.Launcher {
+		currentWorker, currentWorkerFound := cfg.Workers[currentWorkerID]
+		if currentWorkerFound && currentWorker.Launcher != targetWorker.Launcher {
 			writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("hosted session worker launcher cannot change from %q to %q", currentWorker.Launcher, targetWorker.Launcher)})
 			return
 		}
-		if workerName != session.WorkerName {
-			sessions, err := m.hostedSessions.SummariesForSettings(cfg.Settings)
-			if err != nil {
-				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		if workerName != currentWorkerID {
+			if session.TurnState == HostedTurnStateRunning {
+				writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("hosted session %q turn state %q cannot change worker", id, session.TurnState)})
 				return
 			}
-			for _, summary := range sessions {
-				if summary.SessionID == id && summary.Status == hostedSessionStatusActive {
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("active hosted session %q cannot change worker", session.SessionLabel)})
+			if session.TmuxWindowID != "" {
+				runner := hostedTMuxRunnerFactory()
+				windows, err := hostedWindowDetailsFromRunnerForSettings(cfg.Settings, runner)
+				if err != nil {
+					writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 					return
+				}
+				if windowID, active := HostedSessionActiveWindowID(windows, session); active {
+					if _, err := runner.Run(TmuxKillWindowCommandForSettings(cfg.Settings, windowID)); err != nil {
+						writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+						return
+					}
 				}
 			}
 		}
-		updated, err := m.hostedSessions.UpdateWorker(id, workerName, targetWorker.Port)
+		updated, err := m.hostedSessions.UpdateWorker(id, targetWorkerID, targetWorker.Port)
 		if err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return

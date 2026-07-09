@@ -274,13 +274,17 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			return finishHostedTerminalLaunch(settings, configDir, runner, stderr, noAttach)
 		}
 		reopenOpts := opts
-		workerCfg, ok := cfg.Workers[session.WorkerName]
+		workerID := session.WorkerID
+		if workerID == "" {
+			workerID = session.WorkerName
+		}
+		workerCfg, ok := cfg.Workers[workerID]
 		if !ok {
-			fmt.Fprintf(stderr, "worker %q not found for hosted session %q\n", session.WorkerName, sessionID)
+			fmt.Fprintf(stderr, "worker %q not found for hosted session %q\n", workerID, sessionID)
 			return 1
 		}
 		reopenOpts.Launcher = workerCfg.Launcher
-		reopenOpts.Profile = session.WorkerName
+		reopenOpts.Profile = workerID
 		reopenOpts.WorkerPort = workerCfg.Port
 		reopenOpts.Workspace = session.Workspace
 		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
@@ -309,6 +313,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 
 	session, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel: sessionLabel,
+		WorkerID:     workerName,
 		WorkerName:   workerName,
 		WorkerPort:   opts.WorkerPort,
 		Workspace:    opts.Workspace,

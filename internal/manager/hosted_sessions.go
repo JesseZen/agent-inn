@@ -43,6 +43,7 @@ type HostedSessionRegistry struct {
 type HostedSessionRecord struct {
 	SessionID                  string    `json:"session_id"`
 	SessionLabel               string    `json:"session_label"`
+	WorkerID                   string    `json:"worker_id,omitempty"`
 	WorkerName                 string    `json:"worker_name"`
 	WorkerPort                 int       `json:"worker_port"`
 	Workspace                  string    `json:"workspace,omitempty"`
@@ -64,7 +65,14 @@ type HostedSessionRecord struct {
 
 type HostedSessionSummary struct {
 	HostedSessionRecord
-	Status string `json:"status"`
+	Status string                      `json:"status"`
+	Worker *HostedSessionWorkerSummary `json:"worker,omitempty"`
+}
+
+type HostedSessionWorkerSummary struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Missing bool   `json:"missing,omitempty"`
 }
 
 type HostedTurnWatch struct {
@@ -195,10 +203,17 @@ func (r *HostedSessionRegistry) Create(input HostedSessionRecord) (HostedSession
 		}
 		input.SessionID = strings.TrimSpace(input.SessionID)
 		input.SessionLabel = strings.TrimSpace(input.SessionLabel)
+		input.WorkerID = strings.TrimSpace(input.WorkerID)
 		input.WorkerName = strings.TrimSpace(input.WorkerName)
 		input.Workspace = strings.TrimSpace(input.Workspace)
 		input.Model = strings.TrimSpace(input.Model)
+		if input.WorkerID == "" {
+			input.WorkerID = input.WorkerName
+		}
 		if input.WorkerName == "" {
+			input.WorkerName = input.WorkerID
+		}
+		if input.WorkerID == "" {
 			return errors.New("worker name is required")
 		}
 		if input.WorkerPort <= 0 {
@@ -215,15 +230,15 @@ func (r *HostedSessionRegistry) Create(input HostedSessionRecord) (HostedSession
 
 		label := input.SessionLabel
 		if label == "" {
-			next := file.WorkerCounters[input.WorkerName]
+			next := file.WorkerCounters[input.WorkerID]
 			for {
 				next++
-				label = fmt.Sprintf("%s %d", input.WorkerName, next)
+				label = fmt.Sprintf("%s %d", input.WorkerID, next)
 				if !hasSessionLabel(file.Sessions, label) {
 					break
 				}
 			}
-			file.WorkerCounters[input.WorkerName] = next
+			file.WorkerCounters[input.WorkerID] = next
 		} else if hasSessionLabel(file.Sessions, label) {
 			return fmt.Errorf("hosted session label %q already exists", label)
 		}
@@ -274,6 +289,7 @@ func (r *HostedSessionRegistry) Duplicate(sessionID string) (HostedSessionRecord
 		duplicated = HostedSessionRecord{
 			SessionID:    fmt.Sprintf("hs_%d", file.NextSessionID),
 			SessionLabel: label,
+			WorkerID:     session.WorkerID,
 			WorkerName:   session.WorkerName,
 			WorkerPort:   session.WorkerPort,
 			Workspace:    session.Workspace,
@@ -304,21 +320,22 @@ func (r *HostedSessionRegistry) UpdateWindowID(sessionID string, windowID string
 	})
 }
 
-func (r *HostedSessionRegistry) UpdateWorker(sessionID string, workerName string, workerPort int) (HostedSessionRecord, error) {
+func (r *HostedSessionRegistry) UpdateWorker(sessionID string, workerID string, workerPort int) (HostedSessionRecord, error) {
 	var updated HostedSessionRecord
 	err := r.withLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
 		if !ok {
 			return fmt.Errorf("hosted session %q not found", sessionID)
 		}
-		workerName = strings.TrimSpace(workerName)
-		if workerName == "" {
+		workerID = strings.TrimSpace(workerID)
+		if workerID == "" {
 			return errors.New("worker name is required")
 		}
 		if workerPort <= 0 {
 			return errors.New("worker port is required")
 		}
-		session.WorkerName = workerName
+		session.WorkerID = workerID
+		session.WorkerName = workerID
 		session.WorkerPort = workerPort
 		file.Sessions[sessionID] = session
 		updated = session
@@ -600,6 +617,17 @@ func (r *HostedSessionRegistry) loadFile() (*hostedSessionFile, error) {
 	}
 	if file.Sessions == nil {
 		file.Sessions = map[string]HostedSessionRecord{}
+	}
+	for sessionID, session := range file.Sessions {
+		session.WorkerID = strings.TrimSpace(session.WorkerID)
+		session.WorkerName = strings.TrimSpace(session.WorkerName)
+		if session.WorkerID == "" {
+			session.WorkerID = session.WorkerName
+		}
+		if session.WorkerName == "" {
+			session.WorkerName = session.WorkerID
+		}
+		file.Sessions[sessionID] = session
 	}
 	return &file, nil
 }

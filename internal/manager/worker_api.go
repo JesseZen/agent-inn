@@ -162,7 +162,11 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, session := range sessions {
-				if session.WorkerName == workerName && session.Status == hostedSessionStatusActive {
+				sessionWorkerID := session.WorkerID
+				if sessionWorkerID == "" {
+					sessionWorkerID = session.WorkerName
+				}
+				if sessionWorkerID == workerName && session.Status == hostedSessionStatusActive {
 					writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("worker port cannot change while active hosted session %q exists", session.SessionLabel)})
 					return
 				}

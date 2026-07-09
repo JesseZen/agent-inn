@@ -343,6 +343,7 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	want := HostedSessionRecord{
 		SessionID:    got.SessionID,
 		SessionLabel: "solve problem A 2",
+		WorkerID:     "cli-openai",
 		WorkerName:   "cli-openai",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
@@ -813,6 +814,7 @@ func TestManagerAPIPatchesStaleHostedSessionWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := created
+	want.WorkerID = "cli-local"
 	want.WorkerName = "cli-local"
 	want.WorkerPort = 11200
 	if !reflect.DeepEqual(got, want) {
@@ -830,7 +832,81 @@ func TestManagerAPIPatchesStaleHostedSessionWorker(t *testing.T) {
 	}
 }
 
-func TestManagerAPIHostedSessionWorkerPatchRejectsActiveSession(t *testing.T) {
+func TestManagerHostedSessionPatchUsesWorkerID(t *testing.T) {
+	cfg := testManagerConfig()
+	cfg.Settings.StateDir = t.TempDir()
+	local := cfg.Workers["app"]
+	local.Port = 11200
+	cfg.Workers["local"] = local
+	m := New(Config{Config: cfg})
+	created, err := m.hostedSessions.Create(HostedSessionRecord{
+		SessionLabel: "work",
+		WorkerID:     "app",
+		WorkerName:   "app",
+		WorkerPort:   6767,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.NewReader(`{"worker_id":"local"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var updated HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorkerID != "local" || updated.WorkerName != "local" || updated.WorkerPort != 11200 {
+		t.Fatalf("bad updated session: %#v", updated)
+	}
+}
+
+func TestManagerAPIHostedSessionSummariesReportMissingWorker(t *testing.T) {
+	stateDir := t.TempDir()
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Workers: map[string]config.WorkerConfig{
+				"cli-local": {Port: 11200, Upstream: "openai", Launcher: "codex"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	_, err := m.hostedSessions.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerID:     "cli-openai",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/hosted-sessions", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Sessions []HostedSessionSummary `json:"sessions"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Sessions) != 1 {
+		t.Fatalf("expected one hosted session, got %#v", body.Sessions)
+	}
+	want := &HostedSessionWorkerSummary{ID: "cli-openai", Name: "cli-openai", Missing: true}
+	if !reflect.DeepEqual(body.Sessions[0].Worker, want) {
+		t.Fatalf("bad hosted session worker summary:\nwant %#v\ngot  %#v", want, body.Sessions[0].Worker)
+	}
+}
+
+func TestManagerAPIHostedSessionWorkerPatchKillsActiveNonRunningWindow(t *testing.T) {
 	stateDir := t.TempDir()
 	settings := config.Settings{StateDir: stateDir}
 	m := New(Config{
@@ -848,6 +924,7 @@ func TestManagerAPIHostedSessionWorkerPatchRejectsActiveSession(t *testing.T) {
 	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(HostedSessionRecord{
 		SessionLabel: "solve problem A",
+		WorkerID:     "cli-openai",
 		WorkerName:   "cli-openai",
 		WorkerPort:   11199,
 		TmuxWindowID: "@12",
@@ -856,9 +933,11 @@ func TestManagerAPIHostedSessionWorkerPatchRejectsActiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var gotCalls [][]string
 	oldRunner := hostedTMuxRunnerFactory
 	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
 		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			gotCalls = append(gotCalls, append([]string{}, args...))
 			switch {
 			case strings.Join(args, " ") == strings.Join(TmuxHasSessionCommandForSettings(settings), " "):
 				return "", nil
@@ -872,13 +951,21 @@ func TestManagerAPIHostedSessionWorkerPatchRejectsActiveSession(t *testing.T) {
 	defer func() { hostedTMuxRunnerFactory = oldRunner }()
 
 	res := httptest.NewRecorder()
-	body := strings.NewReader(`{"worker_name":"cli-local"}`)
+	body := strings.NewReader(`{"worker_id":"cli-local"}`)
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
-	if res.Code != http.StatusConflict {
-		t.Fatalf("expected active hosted session conflict, got %d: %s", res.Code, res.Body.String())
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), "active hosted session") {
-		t.Fatalf("conflict response did not explain active hosted session: %s", res.Body.String())
+	var got HostedSessionRecord
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := created
+	want.WorkerID = "cli-local"
+	want.WorkerName = "cli-local"
+	want.WorkerPort = 11200
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
 	persisted, ok, err := registry.Get(created.SessionID)
 	if err != nil {
@@ -887,8 +974,65 @@ func TestManagerAPIHostedSessionWorkerPatchRejectsActiveSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected hosted session %q", created.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, created) {
+	if !reflect.DeepEqual(persisted, want) {
 		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, created)
+	}
+	wantCalls := [][]string{
+		TmuxHasSessionCommandForSettings(settings),
+		TmuxListWindowDetailsCommandForSettings(settings),
+		TmuxKillWindowCommandForSettings(settings, "@12"),
+	}
+	if !reflect.DeepEqual(gotCalls, wantCalls) {
+		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
+	}
+}
+
+func TestManagerAPIHostedSessionWorkerPatchRejectsRunningTurn(t *testing.T) {
+	stateDir := t.TempDir()
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Workers: map[string]config.WorkerConfig{
+				"cli-openai": {Port: 11199, Upstream: "openai", Launcher: "codex"},
+				"cli-local":  {Port: 11200, Upstream: "openai", Launcher: "codex"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	created, err := m.hostedSessions.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerID:     "cli-openai",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+		TurnState:    HostedTurnStateRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			t.Fatalf("unexpected tmux call: %#v", args)
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	res := httptest.NewRecorder()
+	body := strings.NewReader(`{"worker_id":"cli-local"}`)
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected running turn conflict, got %d: %s", res.Code, res.Body.String())
+	}
+	persisted, ok, err := m.hostedSessions.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(persisted, created) {
+		t.Fatalf("unexpected persisted session:\n got %#v ok=%v\nwant %#v", persisted, ok, created)
 	}
 }
 
@@ -2732,6 +2876,64 @@ func TestManagerAPIWorkerPortUpdateRejectsActiveHostedSession(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("worker config changed:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerAPIWorkerPortUpdateRejectsActiveHostedSessionByWorkerID(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextPort := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"cli-openai": {Name: "Codex Main", Port: 11199, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: fakeStarter{},
+	})
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	_, err = registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerID:     "cli-openai",
+		WorkerName:   "Codex Main",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRunner := hostedTMuxRunnerFactory
+	hostedTMuxRunnerFactory = func() hostedTMuxRunner {
+		return hostedTMuxRunnerFunc(func(args []string) (string, error) {
+			if strings.Contains(strings.Join(args, " "), "list-windows") {
+				return "@12\tsolve problem A\n", nil
+			}
+			return "", nil
+		})
+	}
+	defer func() { hostedTMuxRunnerFactory = oldRunner }()
+
+	body := strings.NewReader(fmt.Sprintf(`{"port":%d,"upstream":"openai"}`, nextPort))
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/workers/11199", body))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected active hosted session conflict, got %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "active hosted session") {
+		t.Fatalf("conflict response did not explain active hosted session: %s", res.Body.String())
 	}
 }
 

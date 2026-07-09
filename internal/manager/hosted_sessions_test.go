@@ -2,12 +2,37 @@ package manager
 
 import (
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 const tmuxMissingSocketErrorText = "error connecting to /private/tmp/ainn-tmux-repro/tmux-501/ainn-test (No such file or directory)"
+
+func TestHostedSessionCreateDefaultsWorkerIDFromWorkerName(t *testing.T) {
+	registry := NewHostedSessionRegistry(filepath.Join(t.TempDir(), "sessions.json"))
+	session, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "work",
+		WorkerName:   "cli",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HostedSessionRecord{
+		SessionID:    session.SessionID,
+		SessionLabel: "work",
+		WorkerID:     "cli",
+		WorkerName:   "cli",
+		WorkerPort:   11199,
+		CreatedAt:    session.CreatedAt,
+		LastOpenedAt: session.LastOpenedAt,
+	}
+	if !reflect.DeepEqual(session, want) {
+		t.Fatalf("bad session:\nwant %#v\ngot  %#v", want, session)
+	}
+}
 
 func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 	home := t.TempDir()
@@ -687,6 +712,7 @@ func TestHostedSessionRegistryDuplicateCreatesFreshSessionFromWorkspaceAndWorker
 	want := HostedSessionRecord{
 		SessionID:    duplicated.SessionID,
 		SessionLabel: "solve problem A 2",
+		WorkerID:     "worker",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
@@ -730,6 +756,7 @@ func TestHostedSessionRegistryDuplicateIncrementsExistingLabelSuffix(t *testing.
 	want := HostedSessionRecord{
 		SessionID:    duplicated.SessionID,
 		SessionLabel: "solve problem A 3",
+		WorkerID:     "worker",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
 		AddDirs:      []string{},
@@ -763,6 +790,7 @@ func TestHostedSessionRegistryDuplicateIncrementsInitialLabelSuffix(t *testing.T
 	want := HostedSessionRecord{
 		SessionID:    duplicated.SessionID,
 		SessionLabel: "worker 2",
+		WorkerID:     "worker",
 		WorkerName:   "worker",
 		WorkerPort:   11199,
 		AddDirs:      []string{},

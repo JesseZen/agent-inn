@@ -1326,8 +1326,9 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel:      "solve problem A",
-		WorkerName:        "cli-openai",
-		WorkerPort:        11199,
+		WorkerID:          "cli-openai",
+		WorkerName:        "Codex Main",
+		WorkerPort:        9999,
 		Workspace:         "/tmp/work",
 		AddDirs:           []string{"/tmp/shared"},
 		Model:             "gpt-5.5",
