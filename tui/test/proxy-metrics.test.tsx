@@ -35,6 +35,43 @@ test("proxy status opens metrics console with today's totals", async () => {
   }
 })
 
+test("proxy status keeps removed metrics rows historical", async () => {
+  const app = await mountProxyApp({
+    metricsResponder: (range) => {
+      const response = metricsResponse(range, 20)
+      response.workers[0] = {
+        ...response.workers[0],
+        port: 9999,
+        status: "removed",
+      }
+      return response
+    },
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics") && app.frame().includes(":9999 removed")
+    })
+
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+
+    await Bun.sleep(METRICS_REFRESH_DELAY_MS)
+    await app.render()
+    expect({
+      metricsOpen: app.frame().includes("Worker Metrics"),
+      workerRequestError: app.frame().includes("unexpected request: /api/workers/9999"),
+    }).toEqual({
+      metricsOpen: true,
+      workerRequestError: false,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy status switches to last 24 hours", async () => {
   const app = await mountProxyApp()
   try {

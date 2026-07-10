@@ -113,15 +113,17 @@ export function DialogMetrics() {
       description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
       footer: `:${worker.port} ${worker.status}`,
       category: "Workers",
-      onSelect: async () => {
-        try {
-          const detail = await sdk.client.getWorker(worker.port)
-          if (disposed) return
-          dialog.replace(() => <DialogWorkerStatus worker={detail} />)
-        } catch (err) {
-          if (!disposed) toast.error(err)
-        }
-      },
+      ...(worker.status === "removed" ? {} : {
+        onSelect: async () => {
+          try {
+            const detail = await sdk.client.getWorker(worker.port)
+            if (disposed) return
+            dialog.replace(() => <DialogWorkerStatus worker={detail} />)
+          } catch (err) {
+            if (!disposed) toast.error(err)
+          }
+        },
+      }),
     })),
   ])
 
