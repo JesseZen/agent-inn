@@ -88,6 +88,7 @@ export type WorkerLiveMetrics = MetricsTotals & {
   in_flight: number
   rpm: number
   tpm: number
+  dropped_events: number
 }
 
 export type WorkerMetricsAggregate = {

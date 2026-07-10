@@ -99,33 +99,42 @@ export function DialogMetrics() {
     pendingRange = undefined
   })
 
-  const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => [
-    ...RANGES.map((item) => ({
-      title: item.title,
-      value: { type: "range" as const, range: item.value },
-      description: item.value === range() ? "selected" : "",
-      category: "Range",
-      onSelect: () => loadMetrics(item.value),
-    })),
-    ...(metrics()?.workers ?? []).map((worker) => ({
-      title: worker.worker,
-      value: { type: "worker" as const, port: worker.port },
-      description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
-      footer: `:${worker.port} ${worker.status}`,
-      category: "Workers",
-      ...(worker.status === "removed" ? {} : {
-        onSelect: async () => {
-          try {
-            const detail = await sdk.client.getWorker(worker.port)
-            if (disposed) return
-            dialog.replace(() => <DialogWorkerStatus worker={detail} />)
-          } catch (err) {
-            if (!disposed) toast.error(err)
-          }
-        },
-      }),
-    })),
-  ])
+  const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => {
+    const result = metrics()
+    return [
+      ...RANGES.map((item) => ({
+        title: item.title,
+        value: { type: "range" as const, range: item.value },
+        description: item.value === range()
+          ? result && result.skipped_records > 0
+            ? `selected • ${result.skipped_records} persisted records unreadable`
+            : "selected"
+          : "",
+        category: "Range",
+        onSelect: () => loadMetrics(item.value),
+      })),
+      ...(result?.workers ?? []).map((worker) => ({
+        title: worker.live.dropped_events > 0
+          ? `${worker.worker} • ${worker.live.dropped_events} live events dropped`
+          : worker.worker,
+        value: { type: "worker" as const, port: worker.port },
+        description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
+        footer: `:${worker.port} ${worker.status}`,
+        category: "Workers",
+        ...(worker.status === "removed" ? {} : {
+          onSelect: async () => {
+            try {
+              const detail = await sdk.client.getWorker(worker.port)
+              if (disposed) return
+              dialog.replace(() => <DialogWorkerStatus worker={detail} />)
+            } catch (err) {
+              if (!disposed) toast.error(err)
+            }
+          },
+        }),
+      })),
+    ]
+  })
 
   return (
     <DialogSelect

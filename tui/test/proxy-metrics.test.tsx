@@ -12,7 +12,7 @@ function metricsResponse(range: MetricsRangeName, totalTokens: number): MetricsR
       port: 6767,
       status: "running",
       upstream: "openai",
-      live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: totalTokens, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0 },
+      live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: totalTokens, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0, dropped_events: 0 },
       totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0 },
     }],
     skipped_records: 0,
@@ -30,6 +30,27 @@ test("proxy status opens metrics console with today's totals", async () => {
     })
     expect(app.calls.getMetrics).toEqual(["today"])
     expect(app.frame()).toContain("20 tok")
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy status warns about dropped events and skipped records", async () => {
+  const app = await mountProxyApp({
+    metricsResponder: (range) => {
+      const response = metricsResponse(range, 20)
+      response.workers[0].live.dropped_events = 3
+      response.skipped_records = 2
+      return response
+    },
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      const frame = app.frame()
+      return frame.includes("3 live events dropped") && frame.includes("2 persisted records unreadable")
+    })
   } finally {
     await app.cleanup()
   }
