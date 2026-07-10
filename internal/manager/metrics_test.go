@@ -235,6 +235,53 @@ func TestMetricsStoreQueryWorkerFilter(t *testing.T) {
 	}
 }
 
+func TestMetricsStoreQueryIncludesRemovedWorkerHistoryWithFilters(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: dir}, func() time.Time { return now })
+	records := []MetricsRecord{
+		{
+			Timestamp: now, Worker: "removed", Port: 6767, Upstream: "openai", Model: "gpt-5",
+			Method: "POST", Path: "/v1/responses", Status: 500, DurationMS: 120, ResponseBytes: 64,
+			UsageKnown: true, InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
+		},
+		{Timestamp: now, Worker: "other", Port: 6768, Upstream: "openai", Model: "gpt-5", Path: "/v1/responses", Status: 500},
+		{Timestamp: now, Worker: "removed", Port: 6767, Upstream: "anthropic", Model: "gpt-5", Path: "/v1/responses", Status: 500},
+		{Timestamp: now, Worker: "removed", Port: 6767, Upstream: "openai", Model: "gpt-4.1", Path: "/v1/responses", Status: 500},
+		{Timestamp: now, Worker: "removed", Port: 6767, Upstream: "openai", Model: "gpt-5", Path: "/v1/chat/completions", Status: 500},
+		{Timestamp: now, Worker: "removed", Port: 6767, Upstream: "openai", Model: "gpt-5", Path: "/v1/responses", Status: 429},
+	}
+	for _, record := range records {
+		if err := store.Record(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := store.Query(MetricsQuery{
+		Range: MetricsRangeToday, Worker: "removed", Upstream: "openai", Model: "gpt-5", Path: "/v1/responses", Status: 500,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := startOfLocalDay(now)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{
+				Worker: "removed", Port: 6767, Status: "removed", Upstream: "openai",
+				Totals: MetricsTotals{
+					Requests: 1, Errors: 1, AvgLatencyMS: 120, ResponseBytes: 64,
+					InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
+				},
+			},
+		},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad removed-worker metrics query:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestMetricsStoreQueryWorkerFilterKeepsLiveMetrics(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)

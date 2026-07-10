@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -513,6 +514,131 @@ func TestManagerConfigSyncKeepsMetricsStoreDuringConcurrentPersistence(t *testin
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("bad metrics after config sync:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerMetricsQueryDoesNotBlockRecordOrConfigSync(t *testing.T) {
+	const operationTimeout = time.Second
+
+	stateDir := t.TempDir()
+	metricsDir := filepath.Join(stateDir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	queryPath := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -1)))
+	if err := syscall.Mkfifo(queryPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir, Metrics: config.MetricsSettings{RetentionDays: 30}},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.clock = func() time.Time { return now }
+
+	releaseQuery := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseQuery) }) }
+	t.Cleanup(release)
+	writerReady := make(chan error, 1)
+	writerDone := make(chan error, 1)
+	go func() {
+		file, err := os.OpenFile(queryPath, os.O_WRONLY, 0600)
+		if err != nil {
+			writerReady <- err
+			return
+		}
+		_, err = file.Write([]byte("{"))
+		writerReady <- err
+		if err != nil {
+			_ = file.Close()
+			return
+		}
+		<-releaseQuery
+		writerDone <- file.Close()
+	}()
+	queryDone := make(chan error, 1)
+	go func() {
+		_, err := m.metricsStore.Query(MetricsQuery{Range: MetricsRangeLast24H}, []WorkerSummary{{
+			Name: "app", Port: 6767, Status: "running", Upstream: upstream.RedactedUpstream{Name: "openai"},
+		}})
+		queryDone <- err
+	}()
+	select {
+	case err := <-writerReady:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(operationTimeout):
+		t.Fatal("metrics query did not start reading the blocking JSONL file")
+	}
+
+	m.store.Update(func(cfg *config.Config) {
+		cfg.Settings.Metrics.RetentionDays = 7
+	})
+	completed := make(chan string, 2)
+	go func() {
+		m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+			Timestamp: now,
+			Upstream:  "openai",
+			Method:    "POST",
+			Path:      "/v1/responses",
+			Status:    http.StatusOK,
+			Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+		})
+		completed <- "record"
+	}()
+	go func() {
+		m.syncConfigFromStore()
+		completed <- "config sync"
+	}()
+
+	finished := map[string]bool{}
+	timer := time.NewTimer(operationTimeout)
+	for len(finished) < 2 {
+		select {
+		case operation := <-completed:
+			finished[operation] = true
+		case <-timer.C:
+			blocked := make([]string, 0, 2-len(finished))
+			for _, operation := range []string{"record", "config sync"} {
+				if !finished[operation] {
+					blocked = append(blocked, operation)
+				}
+			}
+			release()
+			for len(finished) < 2 {
+				finished[<-completed] = true
+			}
+			if err := <-queryDone; err != nil {
+				t.Fatal(err)
+			}
+			if err := <-writerDone; err != nil {
+				t.Fatal(err)
+			}
+			t.Fatalf("blocking metrics query stalled %s", strings.Join(blocked, " and "))
+		}
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	release()
+	if err := <-queryDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writerDone; err != nil {
+		t.Fatal(err)
 	}
 }
 

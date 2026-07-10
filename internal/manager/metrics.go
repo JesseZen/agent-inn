@@ -91,9 +91,10 @@ type MetricsQueryResponse struct {
 }
 
 type metricsStore struct {
-	settings config.Settings
-	clock    func() time.Time
-	mu       sync.Mutex
+	settings   config.Settings
+	clock      func() time.Time
+	settingsMu sync.RWMutex
+	writeMu    sync.Mutex
 }
 
 type workerMetricSource struct {
@@ -113,19 +114,24 @@ func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsS
 func (s *metricsStore) UpdateSettings(settings config.Settings) {
 	cfg := config.Config{Settings: settings}
 	cfg.ApplyDefaults()
-	s.mu.Lock()
+	s.settingsMu.Lock()
 	s.settings = cfg.Settings
-	s.mu.Unlock()
+	s.settingsMu.Unlock()
 }
 
 func (s *metricsStore) Record(record MetricsRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	if err := os.MkdirAll(s.metricsDir(), 0700); err != nil {
+	s.settingsMu.RLock()
+	settings := s.settings
+	s.settingsMu.RUnlock()
+	metricsDir := metricsDir(settings)
+
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
 		return err
 	}
-	path := filepath.Join(s.metricsDir(), metricsFileName(record.Timestamp))
+	path := filepath.Join(metricsDir, metricsFileName(record.Timestamp))
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return err
@@ -137,14 +143,15 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return s.cleanupRetentionLocked()
+	return s.cleanupRetentionLocked(settings)
 }
 
 func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (MetricsQueryResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	s.settingsMu.RLock()
+	settings := s.settings
+	s.settingsMu.RUnlock()
 	resolved := s.resolveRange(query.Range)
+	paths := filesForRange(metricsDir(settings), resolved)
 	response := MetricsQueryResponse{Range: resolved}
 	aggregates := map[string]*WorkerMetricsAggregate{}
 	summaries := map[string]WorkerSummary{}
@@ -166,7 +173,7 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 	}
 
 	durationByWorker := map[string]int64{}
-	for _, path := range s.filesForRange(resolved) {
+	for _, path := range paths {
 		file, err := os.Open(path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -188,16 +195,15 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 			}
 			aggregate := aggregates[record.Worker]
 			if aggregate == nil {
-				summary, ok := summaries[record.Worker]
-				if !ok {
-					return
-				}
 				aggregate = &WorkerMetricsAggregate{
 					Worker:   record.Worker,
 					Port:     record.Port,
-					Status:   summary.Status,
+					Status:   "removed",
 					Upstream: record.Upstream,
-					Live:     liveMetricsForQuery(summary, query),
+				}
+				if summary, ok := summaries[record.Worker]; ok {
+					aggregate.Status = summary.Status
+					aggregate.Live = liveMetricsForQuery(summary, query)
 				}
 				aggregates[record.Worker] = aggregate
 			}
@@ -244,18 +250,22 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 }
 
 func (s *metricsStore) CleanupRetention() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cleanupRetentionLocked()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.settingsMu.RLock()
+	settings := s.settings
+	s.settingsMu.RUnlock()
+	return s.cleanupRetentionLocked(settings)
 }
 
-func (s *metricsStore) cleanupRetentionLocked() error {
-	retentionDays := s.settings.Metrics.RetentionDays
+func (s *metricsStore) cleanupRetentionLocked(settings config.Settings) error {
+	retentionDays := settings.Metrics.RetentionDays
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
 	cutoff := startOfLocalDay(s.clock()).AddDate(0, 0, 1-retentionDays)
-	entries, err := os.ReadDir(s.metricsDir())
+	metricsDir := metricsDir(settings)
+	entries, err := os.ReadDir(metricsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -270,15 +280,15 @@ func (s *metricsStore) cleanupRetentionLocked() error {
 		if !ok || !day.Before(cutoff) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(s.metricsDir(), entry.Name())); err != nil {
+		if err := os.Remove(filepath.Join(metricsDir, entry.Name())); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *metricsStore) metricsDir() string {
-	return filepath.Join(expandHomePath(s.settings.StateDir), "metrics")
+func metricsDir(settings config.Settings) string {
+	return filepath.Join(expandHomePath(settings.StateDir), "metrics")
 }
 
 func (s *metricsStore) resolveRange(name MetricsRangeName) MetricsRange {
@@ -295,7 +305,7 @@ func (s *metricsStore) resolveRange(name MetricsRangeName) MetricsRange {
 	}
 }
 
-func (s *metricsStore) filesForRange(r MetricsRange) []string {
+func filesForRange(metricsDir string, r MetricsRange) []string {
 	day := startOfLocalDay(r.Start)
 	endDay := startOfLocalDay(r.End)
 	if r.End.Equal(endDay) {
@@ -303,7 +313,7 @@ func (s *metricsStore) filesForRange(r MetricsRange) []string {
 	}
 	var paths []string
 	for !day.After(endDay) {
-		paths = append(paths, filepath.Join(s.metricsDir(), metricsFileName(day)))
+		paths = append(paths, filepath.Join(metricsDir, metricsFileName(day)))
 		day = day.AddDate(0, 0, 1)
 	}
 	return paths
