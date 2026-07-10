@@ -160,7 +160,7 @@ func (m *Manager) recordWorkerUpstreamSuccess(workerName string, upstreamName st
 	previous := m.circuits.Status(key, pool.CircuitBreaker)
 	m.circuits.RecordSuccess(key, pool.CircuitBreaker)
 	current := m.circuits.Status(key, pool.CircuitBreaker)
-	m.publishCircuitTransition(upstreamName, previous, current)
+	m.publishCircuitTransition(poolName, upstreamName, previous, current)
 	return nil
 }
 
@@ -191,14 +191,14 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probeOK bool) e
 			continue
 		}
 		afterAllow := m.circuits.Status(key, pool.CircuitBreaker)
-		m.publishCircuitTransition(upstreamName, beforeAllow, afterAllow)
+		m.publishCircuitTransition(poolName, upstreamName, beforeAllow, afterAllow)
 		if probeOK {
 			m.circuits.RecordSuccess(key, pool.CircuitBreaker)
 		} else {
 			m.circuits.RecordFailure(key, pool.CircuitBreaker)
 		}
 		afterProbe := m.circuits.Status(key, pool.CircuitBreaker)
-		m.publishCircuitTransition(upstreamName, afterAllow, afterProbe)
+		m.publishCircuitTransition(poolName, upstreamName, afterAllow, afterProbe)
 
 		active := m.poolActiveUpstream(poolName)
 		if probeOK && afterProbe.State == CircuitStateClosed && len(pool.Upstreams) > 0 && upstreamName == pool.Upstreams[0] && active != upstreamName {
@@ -227,11 +227,12 @@ func (m *Manager) poolActiveUpstream(poolName string) string {
 	return active
 }
 
-func (m *Manager) publishCircuitTransition(upstreamName string, previous CircuitStatus, current CircuitStatus) {
+func (m *Manager) publishCircuitTransition(poolName string, upstreamName string, previous CircuitStatus, current CircuitStatus) {
 	if previous.State == current.State {
 		return
 	}
 	m.publishEvent(EventUpstreamCircuitChanged, map[string]any{
+		"pool":     poolName,
 		"upstream": upstreamName,
 		"state":    current.State,
 	})

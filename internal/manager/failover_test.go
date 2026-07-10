@@ -403,6 +403,7 @@ func TestFailoverEventAccessors(t *testing.T) {
 	circuitEvent := Event{
 		Type: EventUpstreamCircuitChanged,
 		Payload: map[string]any{
+			"pool":     "coding-ha",
 			"upstream": "primary",
 			"state":    CircuitStateOpen,
 		},
@@ -416,26 +417,28 @@ func TestFailoverEventAccessors(t *testing.T) {
 		},
 	}
 
-	upstreamName, state, circuitOK := circuitEvent.AsUpstreamCircuitChanged()
+	circuitPool, upstreamName, state, circuitOK := circuitEvent.AsUpstreamCircuitChanged()
 	poolName, previous, current, poolOK := poolEvent.AsUpstreamPoolSwitched()
 	got := struct {
-		Upstream string
-		State    CircuitState
-		Circuit  bool
-		Pool     string
-		Previous string
-		Current  string
-		Switched bool
-	}{upstreamName, state, circuitOK, poolName, previous, current, poolOK}
+		CircuitPool string
+		Upstream    string
+		State       CircuitState
+		Circuit     bool
+		Pool        string
+		Previous    string
+		Current     string
+		Switched    bool
+	}{circuitPool, upstreamName, state, circuitOK, poolName, previous, current, poolOK}
 	want := struct {
-		Upstream string
-		State    CircuitState
-		Circuit  bool
-		Pool     string
-		Previous string
-		Current  string
-		Switched bool
-	}{"primary", CircuitStateOpen, true, "coding-ha", "primary", "backup", true}
+		CircuitPool string
+		Upstream    string
+		State       CircuitState
+		Circuit     bool
+		Pool        string
+		Previous    string
+		Current     string
+		Switched    bool
+	}{"coding-ha", "primary", CircuitStateOpen, true, "coding-ha", "primary", "backup", true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected failover event accessors:\n got %#v\nwant %#v", got, want)
 	}

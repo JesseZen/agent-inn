@@ -114,10 +114,11 @@ func (e Event) AsUpstreamUpdated() (upstream string, ok bool) {
 	return upstream, true
 }
 
-func (e Event) AsUpstreamCircuitChanged() (upstream string, state CircuitState, ok bool) {
+func (e Event) AsUpstreamCircuitChanged() (pool string, upstream string, state CircuitState, ok bool) {
 	if e.Type != EventUpstreamCircuitChanged {
-		return "", "", false
+		return "", "", "", false
 	}
+	pool, _ = e.Payload["pool"].(string)
 	upstream, _ = e.Payload["upstream"].(string)
 	switch value := e.Payload["state"].(type) {
 	case CircuitState:
@@ -125,7 +126,7 @@ func (e Event) AsUpstreamCircuitChanged() (upstream string, state CircuitState, 
 	case string:
 		state = CircuitState(value)
 	}
-	return upstream, state, true
+	return pool, upstream, state, true
 }
 
 func (e Event) AsUpstreamPoolSwitched() (pool string, previous string, upstream string, ok bool) {
