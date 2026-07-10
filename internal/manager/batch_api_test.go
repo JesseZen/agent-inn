@@ -276,6 +276,7 @@ func TestManagerAPIDeleteRetriesAfterPartialHostedSessionCleanup(t *testing.T) {
 		{
 			SessionID:    created.Variants[1].HostedSessionID,
 			SessionLabel: created.Variants[1].SessionLabel,
+			WorkerID:     created.WorkerName,
 			WorkerName:   created.WorkerName,
 			WorkerPort:   created.WorkerPort,
 			Workspace:    created.Variants[1].WorktreeDir,

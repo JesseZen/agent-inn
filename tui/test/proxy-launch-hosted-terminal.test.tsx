@@ -573,11 +573,21 @@ test("active non-running hosted session changes worker and reopens same session"
   mock.module("node:child_process", () => ({
     spawn(cmd: string, args: string[]) {
       spawns.push({ cmd, args })
+      let onStdoutData: ((chunk: Buffer) => void) | undefined
       const child = {
-        stdout: { on() {} },
+        stdout: {
+          on(event: string, handler: (data: Buffer) => void) {
+            if (event === "data") onStdoutData = handler
+          },
+        },
         stderr: { on() {} },
         on(event: string, handler: (code?: number) => void) {
-          if (event === "exit") queueMicrotask(() => handler(0))
+          if (event === "exit") {
+            queueMicrotask(() => {
+              if (cmd === "tmux" && args[2] === "list-clients") onStdoutData?.(Buffer.from("/dev/ttys001: ainn-host\n"))
+              handler(0)
+            })
+          }
           return child
         },
         unref() {},
@@ -647,7 +657,7 @@ test("active non-running hosted session changes worker and reopens same session"
           "launch --worker 11200 --mode hosted-terminal --no-attach --profile local-cli --config-dir " +
             Global.Path.config +
             " --session-id hs_active"
-      )
+      ) && spawns.some((spawned) => spawned.cmd === "osascript")
     })
 
     expect(patches).toEqual([{ session_id: "hs_active", worker_id: "local-cli" }])
