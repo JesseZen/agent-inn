@@ -1,10 +1,8 @@
 package worker
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/module"
@@ -25,8 +23,7 @@ type UsageObserver struct {
 	parser      module.SSEParser
 	usage       UsageTokens
 	model       string
-	jsonWriter  *io.PipeWriter
-	jsonResult  <-chan responseUsageMetadata
+	jsonScanner *responseJSONScanner
 }
 
 type responseUsageMetadata struct {
@@ -37,16 +34,7 @@ type responseUsageMetadata struct {
 func NewUsageObserver(contentType string) *UsageObserver {
 	observer := &UsageObserver{contentType: strings.ToLower(contentType)}
 	if strings.Contains(observer.contentType, "json") {
-		reader, writer := io.Pipe()
-		result := make(chan responseUsageMetadata, 1)
-		observer.jsonWriter = writer
-		observer.jsonResult = result
-		go func() {
-			metadata := extractUsageMetadataFromJSONDecoder(json.NewDecoder(reader))
-			_, _ = io.Copy(io.Discard, reader)
-			_ = reader.Close()
-			result <- metadata
-		}()
+		observer.jsonScanner = &responseJSONScanner{}
 	}
 	return observer
 }
@@ -58,8 +46,8 @@ func (u *UsageObserver) Observe(chunk []byte) {
 			u.processSSEEvent(event)
 		}
 	}
-	if u.jsonWriter != nil {
-		_, _ = u.jsonWriter.Write(chunk)
+	if u.jsonScanner != nil {
+		u.jsonScanner.Write(chunk)
 	}
 }
 
@@ -70,12 +58,11 @@ func (u *UsageObserver) Finish() UsageTokens {
 			u.processSSEEvent(event)
 		}
 	}
-	if u.jsonWriter != nil {
-		_ = u.jsonWriter.Close()
-		metadata := <-u.jsonResult
+	if u.jsonScanner != nil {
+		metadata := u.jsonScanner.Finish()
 		u.usage = metadata.Usage
 		u.model = metadata.Model
-		u.jsonWriter = nil
+		u.jsonScanner = nil
 	}
 	return u.usage
 }
@@ -111,8 +98,9 @@ func ExtractUsageFromJSON(data []byte) UsageTokens {
 }
 
 func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	return extractUsageMetadataFromJSONDecoder(decoder)
+	scanner := &responseJSONScanner{}
+	scanner.Write(data)
+	return scanner.Finish()
 }
 
 func extractUsageMetadataFromJSONDecoder(decoder *json.Decoder) responseUsageMetadata {
