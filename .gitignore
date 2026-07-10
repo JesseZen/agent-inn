@@ -10,6 +10,8 @@ ainn
 .claude/
 .ref/
 .trae/
+.superpowers/
+.specs/
 
 # Internal dev docs (kept local only)
 docs/
