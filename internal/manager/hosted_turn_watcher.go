@@ -30,6 +30,10 @@ const (
 	codexTranscriptTurnCompleted = "turn.completed"
 	codexTranscriptTurnFailed    = "turn.failed"
 	codexTranscriptInterrupted   = "interrupted"
+	codexTranscriptGoalUpdated   = "thread_goal_updated"
+	codexTranscriptGoalActive    = "active"
+	codexTranscriptGoalPaused    = "paused"
+	codexTranscriptGoalComplete  = "complete"
 )
 
 type hostedTurnWatcher struct {
@@ -50,6 +54,8 @@ type hostedTurnRegistryCursor struct {
 type hostedTurnWatchPlan struct {
 	TranscriptPath string
 	TurnsByID      map[string][]HostedTurnWatch
+	PendingGoals   []HostedTurnWatch
+	GoalCandidates []HostedTurnWatch
 }
 
 type hostedTurnTranscriptCursor struct {
@@ -59,9 +65,12 @@ type hostedTurnTranscriptCursor struct {
 }
 
 type hostedTurnTranscriptResult struct {
-	TurnID string
-	State  string
-	Reason string
+	TurnID           string
+	State            string
+	Reason           string
+	GoalThreadID     string
+	GoalStatus       string
+	TranscriptOffset int64
 }
 
 func (m *Manager) StartHostedTurnWatcher(interval time.Duration) func() {
@@ -109,11 +118,79 @@ func (w *hostedTurnWatcher) pollOnce() error {
 		}
 		completed := []HostedSessionRecord{}
 		for _, result := range results {
-			if result.State == HostedTurnStateRunning {
-				for _, completedSession := range completed {
-					session, err := w.registry.MarkTurnStateWithWatch(completedSession.SessionID, HostedTurnStateRunning, "", "", plan.TranscriptPath, result.TurnID, HostedTurnWatchKindCodex)
+			if result.GoalStatus != "" {
+				updatedSessions := map[string]bool{}
+				goalWatches := []HostedTurnWatch{}
+				for _, watches := range plan.TurnsByID {
+					goalWatches = append(goalWatches, watches...)
+				}
+				goalWatches = append(goalWatches, plan.GoalCandidates...)
+				for _, watch := range goalWatches {
+					if updatedSessions[watch.SessionID] || watch.LauncherSessionID != result.GoalThreadID {
+						continue
+					}
+					updatedSessions[watch.SessionID] = true
+					session, err := w.registry.SetCodexGoalStatus(watch.SessionID, result.GoalStatus)
 					if err != nil {
 						return err
+					}
+					if session.TurnWatchKind == HostedTurnWatchKindCodexGoal && (session.TurnState == HostedTurnStateIdle || isHostedTurnTerminalState(session.TurnState)) {
+						plan.PendingGoals = append(plan.PendingGoals, HostedTurnWatch{
+							SessionID:         session.SessionID,
+							TurnGeneration:    session.TurnGeneration,
+							TranscriptPath:    session.TurnTranscriptPath,
+							TurnID:            session.TurnID,
+							LauncherSessionID: session.LauncherSessionID,
+							TmuxWindowID:      session.TmuxWindowID,
+							TurnState:         session.TurnState,
+							SessionSnapshot:   session,
+						})
+					}
+				}
+				continue
+			}
+			if result.State == HostedTurnStateRunning {
+				for _, completedSession := range completed {
+					var session HostedSessionRecord
+					if completedSession.TurnWatchKind == HostedTurnWatchKindCodexGoal {
+						started := false
+						session, started, err = w.registry.StartNextGoalTurn(completedSession.SessionID, completedSession.TurnGeneration, plan.TranscriptPath, result.TurnID, result.TranscriptOffset)
+						if err != nil {
+							return err
+						}
+						if !started {
+							continue
+						}
+					} else {
+						session, err = w.registry.MarkTurnStateWithWatch(completedSession.SessionID, HostedTurnStateRunning, "", "", plan.TranscriptPath, result.TurnID, HostedTurnWatchKindCodex)
+						if err != nil {
+							return err
+						}
+					}
+					plan.TurnsByID[result.TurnID] = append(plan.TurnsByID[result.TurnID], HostedTurnWatch{
+						SessionID:         session.SessionID,
+						TurnGeneration:    session.TurnGeneration,
+						TranscriptPath:    session.TurnTranscriptPath,
+						TurnID:            session.TurnID,
+						LauncherSessionID: session.LauncherSessionID,
+						TmuxWindowID:      session.TmuxWindowID,
+						TurnState:         session.TurnState,
+						SessionSnapshot:   session,
+					})
+					if session.TmuxWindowID == "" {
+						continue
+					}
+					if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
+						return err
+					}
+				}
+				for _, pending := range plan.PendingGoals {
+					session, started, err := w.registry.StartNextGoalTurn(pending.SessionID, pending.TurnGeneration, plan.TranscriptPath, result.TurnID, result.TranscriptOffset)
+					if err != nil {
+						return err
+					}
+					if !started {
+						continue
 					}
 					plan.TurnsByID[result.TurnID] = append(plan.TurnsByID[result.TurnID], HostedTurnWatch{
 						SessionID:         session.SessionID,
@@ -136,7 +213,7 @@ func (w *hostedTurnWatcher) pollOnce() error {
 				continue
 			}
 			for _, watch := range plan.TurnsByID[result.TurnID] {
-				session, ok, err := w.registry.CompleteWatchedTurn(watch.SessionID, watch.TurnGeneration, result.State, result.Reason)
+				session, ok, err := w.registry.CompleteWatchedTurn(watch.SessionID, watch.TurnGeneration, result.State, result.Reason, plan.TranscriptPath, result.TurnID, result.TranscriptOffset)
 				if err != nil {
 					return err
 				}
@@ -189,10 +266,20 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	goalCandidates, err := w.registry.GoalCandidates()
+	if err != nil {
+		return nil, err
+	}
+	watches = append(watches, goalCandidates...)
 	plansByPath := map[string]int{}
 	plans := []hostedTurnWatchPlan{}
 	unresolvedLauncherWatch := false
 	for _, watch := range watches {
+		if watch.TranscriptPath != "" && watch.TurnTranscriptOffset > 0 {
+			if _, found := w.files[watch.TranscriptPath]; !found {
+				w.files[watch.TranscriptPath] = hostedTurnTranscriptCursor{Offset: watch.TurnTranscriptOffset}
+			}
+		}
 		if watch.TranscriptPath == "" {
 			transcriptPath := w.launcherPaths[watch.LauncherSessionID]
 			if transcriptPath != "" {
@@ -216,6 +303,20 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 				sort.Strings(matches)
 				transcriptPath = matches[len(matches)-1]
 				w.launcherPaths[watch.LauncherSessionID] = transcriptPath
+			}
+			if watch.GoalCandidate {
+				index, ok := plansByPath[transcriptPath]
+				if !ok {
+					index = len(plans)
+					plansByPath[transcriptPath] = index
+					plans = append(plans, hostedTurnWatchPlan{
+						TranscriptPath: transcriptPath,
+						TurnsByID:      map[string][]HostedTurnWatch{},
+					})
+				}
+				watch.TranscriptPath = transcriptPath
+				plans[index].GoalCandidates = append(plans[index].GoalCandidates, watch)
+				continue
 			}
 
 			file, err := os.Open(transcriptPath)
@@ -304,6 +405,9 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 			})
 		}
 		plans[index].TurnsByID[watch.TurnID] = append(plans[index].TurnsByID[watch.TurnID], watch)
+		if watch.TurnWatchKind == HostedTurnWatchKindCodexGoal && isHostedTurnTerminalState(watch.TurnState) {
+			plans[index].PendingGoals = append(plans[index].PendingGoals, watch)
+		}
 	}
 	stat, err = os.Stat(w.registry.path)
 	if err != nil {
@@ -358,6 +462,7 @@ func (w *hostedTurnWatcher) pollTranscript(transcriptPath string) ([]hostedTurnT
 				return nil, parseErr
 			}
 			if ok {
+				result.TranscriptOffset = cursor.Offset
 				results = append(results, result)
 			}
 		}
@@ -385,8 +490,12 @@ func parseHostedTurnTranscriptLine(line string) (hostedTurnTranscriptResult, boo
 		Status  string `json:"status"`
 		Payload struct {
 			Type             string          `json:"type"`
+			ThreadID         string          `json:"threadId"`
 			TurnID           string          `json:"turn_id"`
 			LastAgentMessage json.RawMessage `json:"last_agent_message"`
+			Goal             struct {
+				Status string `json:"status"`
+			} `json:"goal"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
@@ -394,6 +503,12 @@ func parseHostedTurnTranscriptLine(line string) (hostedTurnTranscriptResult, boo
 	}
 	switch event.Type {
 	case codexTranscriptEventMsg:
+		if event.Payload.Type == codexTranscriptGoalUpdated && event.Payload.ThreadID != "" {
+			switch event.Payload.Goal.Status {
+			case codexTranscriptGoalActive, codexTranscriptGoalPaused, codexTranscriptGoalComplete:
+				return hostedTurnTranscriptResult{GoalThreadID: event.Payload.ThreadID, GoalStatus: event.Payload.Goal.Status}, true, nil
+			}
+		}
 		if event.Payload.TurnID == "" {
 			return hostedTurnTranscriptResult{}, false, nil
 		}

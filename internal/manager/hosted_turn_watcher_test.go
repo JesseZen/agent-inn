@@ -433,6 +433,226 @@ func TestHostedTurnWatcherPollOnceMarksNextGoalTurnRunning(t *testing.T) {
 	}
 }
 
+func TestHostedTurnWatcherPollOnceTracksActiveGoalAcrossPolls(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:      "solve problem A",
+		WorkerName:        "worker",
+		WorkerPort:        11199,
+		TmuxWindowID:      "@12",
+		LauncherSessionID: "goal-thread",
+		TurnState:         HostedTurnStateIdle,
+		TurnGeneration:    8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptDir := filepath.Join(home, ".codex", "sessions", "2026", "07", "10")
+	if err := os.MkdirAll(transcriptDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(transcriptDir, "rollout-2026-07-10-goal-thread.jsonl")
+	goalActive := `{"type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"goal-thread","goal":{"status":"active"}}}`
+	firstTurnStarted := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_1"}}`
+	firstTurnComplete := `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn_1","last_agent_message":"done"}}`
+	firstPollTranscript := strings.Join([]string{
+		goalActive,
+		firstTurnStarted,
+		firstTurnComplete,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(firstPollTranscript), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotCalls [][]string
+	runner := hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		gotCalls = append(gotCalls, append([]string{}, args...))
+		return "", nil
+	})
+	watcher := newHostedTurnWatcher(settings, registry, runner)
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFirstDone := created
+	wantFirstDone.TurnGeneration++
+	wantFirstDone.TurnState = HostedTurnStateDone
+	wantFirstDone.TurnTranscriptPath = transcriptPath
+	wantFirstDone.TurnID = "turn_1"
+	wantFirstDone.TurnWatchKind = HostedTurnWatchKindCodexGoal
+	wantFirstDone.TurnTranscriptOffset = int64(len(firstPollTranscript))
+	if !ok || !reflect.DeepEqual(firstDone, wantFirstDone) {
+		t.Fatalf("first turn got %#v ok=%v, want %#v", firstDone, ok, wantFirstDone)
+	}
+	wantFirstRunning := created
+	wantFirstRunning.TurnGeneration++
+	wantFirstRunning.TurnState = HostedTurnStateRunning
+	wantFirstRunning.TurnTranscriptPath = transcriptPath
+	wantFirstRunning.TurnTranscriptOffset = int64(len(goalActive) + len(firstTurnStarted) + 2)
+	wantFirstRunning.TurnID = "turn_1"
+	wantFirstRunning.TurnWatchKind = HostedTurnWatchKindCodexGoal
+	wantFirstCalls := [][]string{
+		TmuxHostedTurnStatusCommandForRecord(settings, wantFirstRunning),
+		TmuxActiveWindowDetailsCommandForSettings(settings),
+		TmuxHostedTurnStatusCommandForRecord(settings, wantFirstDone),
+	}
+	if !reflect.DeepEqual(gotCalls, wantFirstCalls) {
+		t.Fatalf("first poll tmux calls %#v, want %#v", gotCalls, wantFirstCalls)
+	}
+
+	gotCalls = nil
+	watcher = newHostedTurnWatcher(settings, registry, runner)
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotCalls) != 0 {
+		t.Fatalf("got tmux calls while waiting for next goal turn: %#v", gotCalls)
+	}
+
+	nextTurn := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_2"}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(firstPollTranscript+nextTurn), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRunning := wantFirstDone
+	wantRunning.TurnGeneration++
+	wantRunning.TurnState = HostedTurnStateRunning
+	wantRunning.TurnID = "turn_2"
+	wantRunning.TurnTranscriptOffset = int64(len(firstPollTranscript + nextTurn))
+	if !ok || !reflect.DeepEqual(updated, wantRunning) {
+		t.Fatalf("next goal turn got %#v ok=%v, want %#v", updated, ok, wantRunning)
+	}
+	wantNextCalls := [][]string{TmuxHostedTurnStatusCommandForRecord(settings, wantRunning)}
+	if !reflect.DeepEqual(gotCalls, wantNextCalls) {
+		t.Fatalf("next goal turn tmux calls %#v, want %#v", gotCalls, wantNextCalls)
+	}
+}
+
+func TestHostedTurnWatcherPollOnceWaitsForPausedGoalToBecomeActive(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(stateDir, "codex.jsonl")
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "goal-thread", transcriptPath, "turn_1", HostedTurnWatchKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeGoalTranscript := strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"goal-thread","goal":{"status":"active"}}}`,
+		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn_1","last_agent_message":"done"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(activeGoalTranscript), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	watcher := newHostedTurnWatcher(settings, registry, hostedTMuxRunnerFunc(func([]string) (string, error) {
+		return "", nil
+	}))
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	pausedGoal := `{"type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"goal-thread","goal":{"status":"paused"}}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(activeGoalTranscript+pausedGoal), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	paused, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPaused := running
+	wantPaused.TurnState = HostedTurnStateDone
+	wantPaused.TurnWatchKind = HostedTurnWatchKindCodexGoalPaused
+	wantPaused.TurnTranscriptOffset = int64(len(activeGoalTranscript))
+	if !ok || !reflect.DeepEqual(paused, wantPaused) {
+		t.Fatalf("paused goal got %#v ok=%v, want %#v", paused, ok, wantPaused)
+	}
+
+	pausedTurn := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_2"}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(activeGoalTranscript+pausedGoal+pausedTurn), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !reflect.DeepEqual(updated, wantPaused) {
+		t.Fatalf("paused goal restarted as %#v ok=%v, want %#v", updated, ok, wantPaused)
+	}
+
+	resumedGoal := `{"type":"event_msg","payload":{"type":"thread_goal_updated","threadId":"goal-thread","goal":{"status":"active"}}}` + "\n"
+	nextTurn := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_3"}}` + "\n"
+	fullTranscript := activeGoalTranscript + pausedGoal + pausedTurn + resumedGoal + nextTurn
+	if err := os.WriteFile(transcriptPath, []byte(fullTranscript), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, ok, err := registry.Get(created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantResumed := wantPaused
+	wantResumed.TurnGeneration++
+	wantResumed.TurnState = HostedTurnStateRunning
+	wantResumed.TurnWatchKind = HostedTurnWatchKindCodexGoal
+	wantResumed.TurnID = "turn_3"
+	wantResumed.TurnTranscriptOffset = int64(len(fullTranscript))
+	if !ok || !reflect.DeepEqual(resumed, wantResumed) {
+		t.Fatalf("resumed goal got %#v ok=%v, want %#v", resumed, ok, wantResumed)
+	}
+}
+
 func TestHostedTurnWatcherPollOnceRechecksUnresolvedLauncherWatchAfterTranscriptAppears(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

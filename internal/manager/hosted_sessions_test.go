@@ -250,6 +250,7 @@ func TestHostedSessionRegistryMarkTurnStateWithWatchRegistersActiveTurn(t *testi
 		TurnGeneration:    1,
 		TranscriptPath:    "/tmp/codex.jsonl",
 		TurnID:            "turn_1",
+		TurnWatchKind:     HostedTurnWatchKindCodex,
 		LauncherSessionID: "launcher-1",
 		TmuxWindowID:      "@12",
 		TurnState:         HostedTurnStateRunning,
@@ -283,7 +284,7 @@ func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.
 		t.Fatal(err)
 	}
 
-	got, ok, err := registry.CompleteWatchedTurn(created.SessionID, firstTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt")
+	got, ok, err := registry.CompleteWatchedTurn(created.SessionID, firstTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt", "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +299,7 @@ func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.
 		t.Fatalf("got %#v found=%v, want %#v", persisted, found, secondTurn)
 	}
 
-	got, ok, err = registry.CompleteWatchedTurn(created.SessionID, secondTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt")
+	got, ok, err = registry.CompleteWatchedTurn(created.SessionID, secondTurn.TurnGeneration, HostedTurnStateInterrupted, "user_interrupt", "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +311,61 @@ func TestHostedSessionRegistryCompleteWatchedTurnUsesGenerationGuard(t *testing.
 	want.TurnWatchKind = ""
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v ok=%v, want %#v", got, ok, want)
+	}
+}
+
+func TestHostedSessionRegistryCompleteGoalStopsWatching(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "goal-thread", "/tmp/codex.jsonl", "turn_1", HostedTurnWatchKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := registry.SetCodexGoalStatus(created.SessionID, codexTranscriptGoalActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalDone, ok, err := registry.CompleteWatchedTurn(created.SessionID, active.TurnGeneration, HostedTurnStateDone, "", "/tmp/codex.jsonl", "turn_1", 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGoalDone := running
+	wantGoalDone.TurnState = HostedTurnStateDone
+	wantGoalDone.TurnTranscriptOffset = 123
+	wantGoalDone.TurnWatchKind = HostedTurnWatchKindCodexGoal
+	if !ok || !reflect.DeepEqual(goalDone, wantGoalDone) {
+		t.Fatalf("goal turn got %#v applied=%v, want %#v", goalDone, ok, wantGoalDone)
+	}
+
+	got, err := registry.SetCodexGoalStatus(created.SessionID, codexTranscriptGoalComplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := wantGoalDone
+	want.TurnTranscriptPath = ""
+	want.TurnTranscriptOffset = 0
+	want.TurnID = ""
+	want.TurnWatchKind = ""
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("completed goal got %#v, want %#v", got, want)
+	}
+
+	watched, err := registry.WatchedTurns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(watched, []HostedTurnWatch(nil)) {
+		t.Fatalf("completed goal watches %#v, want none", watched)
 	}
 }
 
@@ -344,7 +400,7 @@ func TestHostedSessionRegistryCompleteWatchedTurnMarksCorrectedFailureUnread(t *
 				t.Fatal(err)
 			}
 
-			got, ok, err := registry.CompleteWatchedTurn(created.SessionID, created.TurnGeneration, tt.state, tt.reason)
+			got, ok, err := registry.CompleteWatchedTurn(created.SessionID, created.TurnGeneration, tt.state, tt.reason, "", "", 0)
 			if err != nil {
 				t.Fatal(err)
 			}
