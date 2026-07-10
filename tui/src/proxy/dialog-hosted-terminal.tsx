@@ -175,7 +175,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               session,
               worker,
               configDir: Global.Path.config,
-              executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+              executable,
+              launchMode: mode === "popup" ? "setup-only" : "open",
             })
             if (launched) workerFrecency.record(worker.id)
             await refreshSessions()

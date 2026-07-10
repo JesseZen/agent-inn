@@ -430,7 +430,7 @@ test("popup mode opens existing hosted session with setup only and stays open", 
     expect(spawns).toEqual([
       {
         cmd: import.meta.env?.AINN_EXECUTABLE || "ainn",
-        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test", "--config-dir", Global.Path.config, "--session-id", "hs_popup"],
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_popup"],
       },
     ])
     expect(app.setup.renderer.isDestroyed).toBe(false)
@@ -498,7 +498,7 @@ test("popup mode uses configured executable for hosted setup", async () => {
     expect(spawns).toEqual([
       {
         cmd: configuredExecutable,
-        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test", "--config-dir", Global.Path.config, "--session-id", "hs_popup_exec"],
+        args: ["launch", "--worker", "1234", "--mode", "hosted-terminal", "--no-attach", "--profile", "test-cli", "--config-dir", Global.Path.config, "--session-id", "hs_popup_exec"],
       },
     ])
   } finally {
