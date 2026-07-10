@@ -2,7 +2,8 @@ import { expect, test } from "bun:test"
 import { mountProxyApp, wait } from "./proxy-commands.fixture"
 import type { MetricsRangeName, MetricsResponse } from "../src/proxy/backend"
 
-const METRICS_REFRESH_DELAY_MS = 100
+const METRICS_REFRESH_DELAY_MS = 1000
+const METRICS_EARLY_REFRESH_WAIT_MS = 200
 
 function metricsResponse(range: MetricsRangeName, totalTokens: number): MetricsResponse {
   return {
@@ -12,16 +13,18 @@ function metricsResponse(range: MetricsRangeName, totalTokens: number): MetricsR
       port: 6767,
       status: "running",
       upstream: "openai",
+      live_available: true,
       live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: totalTokens, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0, dropped_events: 0 },
       totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0 },
     }],
     skipped_records: 0,
+    query_limited: false,
     persistence_errors: 0,
   }
 }
 
 test("proxy status opens metrics console with today's totals", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
   try {
     app.api.keymap.dispatchCommand("proxy.status")
     await wait(async () => {
@@ -36,6 +39,24 @@ test("proxy status opens metrics console with today's totals", async () => {
   }
 })
 
+test("proxy status limits live metric refreshes to once a second", async () => {
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics")
+    })
+
+    app.emitManagerEvent("metrics.updated", { worker: "app", port: 6767, metrics: {} })
+    await Bun.sleep(METRICS_EARLY_REFRESH_WAIT_MS)
+
+    expect(app.calls.getMetrics).toEqual(["today"])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy status warns when metric integrity is incomplete", async () => {
   const app = await mountProxyApp({
     metricsResponder: (range) => {
@@ -43,6 +64,7 @@ test("proxy status warns when metric integrity is incomplete", async () => {
       response.workers[0].live.dropped_events = 3
       response.workers[0].totals.unknown_usage_requests = 4
       response.skipped_records = 2
+      response.query_limited = true
       response.persistence_errors = 1
       return response
     },
@@ -51,13 +73,45 @@ test("proxy status warns when metric integrity is incomplete", async () => {
     app.api.keymap.dispatchCommand("proxy.status")
     await wait(async () => {
       await app.render()
-      const frame = app.frame()
-      return frame.includes("3 live events dropped")
-        && frame.includes("4 requests missing usage")
-        && frame.includes("token totals exclude them")
-        && frame.includes("2 persisted records unreadable")
-        && frame.includes("1 persistence error")
+      return app.frame().includes("Worker Metrics") && app.frame().includes("app")
     })
+    const frame = app.frame()
+    expect({
+      droppedEvents: frame.includes("3 live events dropped"),
+      unknownUsage: frame.includes("4 requests missing usage") && frame.includes("token totals exclude them"),
+      unreadableRecords: frame.includes("2 unreadable"),
+      queryLimited: frame.includes("totals incomplete"),
+      sessionPersistence: frame.includes("1 manager-session persistence error"),
+    }).toEqual({
+      droppedEvents: true,
+      unknownUsage: true,
+      unreadableRecords: true,
+      queryLimited: true,
+      sessionPersistence: true,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy status renders failed live hydration as unavailable", async () => {
+  const app = await mountProxyApp({
+    metricsResponder: (range) => {
+      const response = metricsResponse(range, 20)
+      response.workers[0].live_available = false
+      response.workers[0].live.rpm = 0
+      response.workers[0].live.tpm = 0
+      return response
+    },
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("RPM unavailable") && app.frame().includes("TPM unavailable")
+    })
+    expect(app.frame()).not.toContain("RPM 0")
+    expect(app.frame()).not.toContain("TPM 0")
   } finally {
     await app.cleanup()
   }
@@ -101,7 +155,7 @@ test("proxy status keeps removed metrics rows historical", async () => {
 })
 
 test("proxy status switches to last 24 hours", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
   try {
     app.api.keymap.dispatchCommand("proxy.status")
     await wait(async () => {
@@ -118,7 +172,8 @@ test("proxy status switches to last 24 hours", async () => {
 })
 
 test("proxy status refreshes active range on metrics update events", async () => {
-  const app = await mountProxyApp()
+  let totalTokens = 20
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, totalTokens) })
   try {
     app.api.keymap.dispatchCommand("proxy.status")
     await wait(async () => {
@@ -129,8 +184,7 @@ test("proxy status refreshes active range on metrics update events", async () =>
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(() => app.calls.getMetrics.includes("last_24h"))
 
-    app.metrics.tpm = 40
-    app.metrics.total_tokens = 40
+    totalTokens = 40
     app.emitManagerEvent("metrics.updated", { worker: "app", port: 6767, metrics: {} })
 
     await wait(async () => {
@@ -244,7 +298,7 @@ test("proxy status cancels queued refreshes when the dialog closes", async () =>
 })
 
 test("proxy status stays closed when worker selection finishes after disposal", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
   try {
     app.api.keymap.dispatchCommand("proxy.status")
     await wait(async () => {

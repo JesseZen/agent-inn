@@ -15,7 +15,7 @@ const RANGES: Array<{ title: string; value: MetricsRangeName }> = [
   { title: "Last 24h", value: "last_24h" },
 ]
 
-const METRICS_REFRESH_DELAY_MS = 100
+const METRICS_REFRESH_DELAY_MS = 1000
 
 function formatTokens(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M tok`
@@ -102,40 +102,54 @@ export function DialogMetrics() {
   const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => {
     const result = metrics()
     return [
-      ...RANGES.map((item) => ({
-        title: item.value === range() && result && result.persistence_errors > 0
-          ? `${item.title} • ${result.persistence_errors} persistence error${result.persistence_errors === 1 ? "" : "s"}`
-          : item.title,
-        value: { type: "range" as const, range: item.value },
-        description: item.value === range() ? "selected" : "",
-        details: item.value === range() && result && result.skipped_records > 0
-          ? [`${result.skipped_records} persisted records unreadable`]
-          : undefined,
-        category: "Range",
-        onSelect: () => loadMetrics(item.value),
-      })),
-      ...(result?.workers ?? []).map((worker) => ({
-        title: worker.live.dropped_events > 0
-          ? `${worker.worker} • ${worker.live.dropped_events} live events dropped`
-          : worker.worker,
-        value: { type: "worker" as const, port: worker.port },
-        description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
-        details: worker.totals.unknown_usage_requests > 0
-          ? [`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`]
-          : undefined,
-        footer: `:${worker.port} ${worker.status}`,
-        ...(worker.status === "removed" ? {} : {
-          onSelect: async () => {
-            try {
-              const detail = await sdk.client.getWorker(worker.port)
-              if (disposed) return
-              dialog.replace(() => <DialogWorkerStatus worker={detail} />)
-            } catch (err) {
-              if (!disposed) toast.error(err)
-            }
-          },
-        }),
-      })),
+      ...RANGES.map((item) => {
+        const selected = item.value === range()
+        const details: string[] = []
+        if (selected && result?.query_limited && result.skipped_records > 0) {
+          details.push(`query limit; totals incomplete; ${result.skipped_records} unreadable records`)
+        } else if (selected && result?.query_limited) {
+          details.push("query limit: persisted totals incomplete")
+        } else if (selected && result && result.skipped_records > 0) {
+          details.push(`${result.skipped_records} persisted records unreadable`)
+        }
+        return {
+          title: selected && result && result.persistence_errors > 0
+            ? `${item.title} • ${result.persistence_errors} manager-session persistence error${result.persistence_errors === 1 ? "" : "s"}`
+            : item.title,
+          value: { type: "range" as const, range: item.value },
+          description: selected ? "selected" : "",
+          details: details.length > 0 ? details : undefined,
+          category: "Range",
+          onSelect: () => loadMetrics(item.value),
+        }
+      }),
+      ...(result?.workers ?? []).map((worker) => {
+        const liveRates = worker.live_available
+          ? `RPM ${worker.live.rpm} • TPM ${worker.live.tpm}`
+          : "RPM unavailable • TPM unavailable"
+        return {
+          title: worker.live.dropped_events > 0
+            ? `${worker.worker} • ${worker.live.dropped_events} live events dropped`
+            : worker.worker,
+          value: { type: "worker" as const, port: worker.port },
+          description: `${liveRates} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
+          details: worker.totals.unknown_usage_requests > 0
+            ? [`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`]
+            : undefined,
+          footer: `:${worker.port} ${worker.status}`,
+          ...(worker.status === "removed" ? {} : {
+            onSelect: async () => {
+              try {
+                const detail = await sdk.client.getWorker(worker.port)
+                if (disposed) return
+                dialog.replace(() => <DialogWorkerStatus worker={detail} />)
+              } catch (err) {
+                if (!disposed) toast.error(err)
+              }
+            },
+          }),
+        }
+      }),
     ]
   })
 

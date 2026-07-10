@@ -96,6 +96,7 @@ export type WorkerMetricsAggregate = {
   port: number
   status: string
   upstream?: string
+  live_available: boolean
   live: WorkerLiveMetrics
   totals: MetricsTotals
 }
@@ -104,6 +105,7 @@ export type MetricsResponse = {
   range: { name: MetricsRangeName; start: string; end: string }
   workers: WorkerMetricsAggregate[]
   skipped_records: number
+  query_limited: boolean
   persistence_errors: number
 }
 
