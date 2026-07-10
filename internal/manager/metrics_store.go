@@ -1,7 +1,10 @@
 package manager
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,11 +17,31 @@ import (
 	"github.com/jesse/agent-inn/internal/worker"
 )
 
+const (
+	metricsMinimumRetentionDays = 2
+	metricsQueryCacheTTL        = time.Second
+	metricsQueryMaxLineBytes    = 256 * 1024
+	metricsQueryMaxScanBytes    = 8 * 1024 * 1024
+)
+
+type metricsQueryCache struct {
+	query          MetricsQuery
+	metricsDir     string
+	cachedAt       time.Time
+	rangeValue     MetricsRange
+	workers        []WorkerMetricsAggregate
+	skippedRecords int
+	queryLimited   bool
+	valid          bool
+}
+
 type metricsStore struct {
 	settings          config.Settings
 	clock             func() time.Time
 	settingsMu        sync.RWMutex
 	writeMu           sync.Mutex
+	queryMu           sync.Mutex
+	queryCache        metricsQueryCache
 	cleanupDay        time.Time
 	persistenceErrors atomic.Uint64
 }
@@ -81,10 +104,141 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 	s.settingsMu.RLock()
 	settings := s.settings
 	s.settingsMu.RUnlock()
-	resolved := s.resolveRange(query.Range)
-	paths := filesForRange(metricsDir(settings), resolved)
-	response := MetricsQueryResponse{Range: resolved, PersistenceErrors: s.persistenceErrors.Load()}
-	aggregates := map[string]*WorkerMetricsAggregate{}
+
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+	now := s.clock()
+	metricsPath := metricsDir(settings)
+	cached := s.queryCache
+	var persistedWorkers []WorkerMetricsAggregate
+	var resolved MetricsRange
+	var skippedRecords int
+	var queryLimited bool
+	if cached.valid && cached.query == query && cached.metricsDir == metricsPath && now.Sub(cached.cachedAt) >= 0 && now.Sub(cached.cachedAt) < metricsQueryCacheTTL {
+		resolved = cached.rangeValue
+		persistedWorkers = append([]WorkerMetricsAggregate(nil), cached.workers...)
+		skippedRecords = cached.skippedRecords
+		queryLimited = cached.queryLimited
+	} else {
+		resolved = s.resolveRange(query.Range)
+		paths := filesForRange(metricsPath, resolved)
+		aggregates := map[string]*WorkerMetricsAggregate{}
+		durationByWorker := map[string]int64{}
+		scannedBytes := 0
+		stopScan := false
+		for _, path := range paths {
+			file, err := os.Open(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return MetricsQueryResponse{}, err
+			}
+			remainingBytes := metricsQueryMaxScanBytes - scannedBytes
+			reader := bufio.NewReaderSize(io.LimitReader(file, int64(remainingBytes+1)), metricsQueryMaxLineBytes)
+			oversizedLine := false
+			for {
+				line, readErr := reader.ReadSlice('\n')
+				scannedBytes += len(line)
+				if scannedBytes > metricsQueryMaxScanBytes {
+					queryLimited = true
+					stopScan = true
+					break
+				}
+				if readErr == bufio.ErrBufferFull {
+					if !oversizedLine {
+						skippedRecords++
+						queryLimited = true
+						oversizedLine = true
+					}
+					continue
+				}
+				if oversizedLine {
+					oversizedLine = false
+				} else {
+					line = bytes.TrimRight(line, "\r\n")
+					if len(bytes.TrimSpace(line)) > 0 {
+						var record MetricsRecord
+						if err := json.Unmarshal(line, &record); err != nil {
+							skippedRecords++
+						} else if record.Timestamp.Before(resolved.End) && !record.Timestamp.Before(resolved.Start) && recordMatchesQuery(record, query) {
+							aggregate := aggregates[record.Worker]
+							if aggregate == nil {
+								aggregate = &WorkerMetricsAggregate{
+									Worker: record.Worker, Port: record.Port, Status: "removed", Upstream: record.Upstream,
+								}
+								aggregates[record.Worker] = aggregate
+							}
+							aggregate.Totals.Requests++
+							if record.Status >= 400 {
+								aggregate.Totals.Errors++
+							}
+							durationByWorker[record.Worker] += record.DurationMS
+							aggregate.Totals.ResponseBytes += record.ResponseBytes
+							if record.UsageKnown {
+								aggregate.Totals.InputTokens += record.InputTokens
+								aggregate.Totals.OutputTokens += record.OutputTokens
+								aggregate.Totals.CacheReadTokens += record.CacheReadTokens
+								aggregate.Totals.CacheWriteTokens += record.CacheWriteTokens
+								aggregate.Totals.ReasoningTokens += record.ReasoningTokens
+								aggregate.Totals.TotalTokens += record.TotalTokens
+							} else {
+								aggregate.Totals.UnknownUsageRequests++
+							}
+						}
+					}
+				}
+				if readErr == io.EOF {
+					break
+				}
+				if readErr != nil {
+					_ = file.Close()
+					return MetricsQueryResponse{}, readErr
+				}
+			}
+			if err := file.Close(); err != nil {
+				return MetricsQueryResponse{}, err
+			}
+			if stopScan {
+				break
+			}
+		}
+
+		names := make([]string, 0, len(aggregates))
+		for name := range aggregates {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		persistedWorkers = make([]WorkerMetricsAggregate, 0, len(names))
+		for _, name := range names {
+			aggregate := aggregates[name]
+			if aggregate.Totals.Requests > 0 {
+				aggregate.Totals.AvgLatencyMS = durationByWorker[name] / aggregate.Totals.Requests
+			}
+			persistedWorkers = append(persistedWorkers, *aggregate)
+		}
+		s.queryCache = metricsQueryCache{
+			query:          query,
+			metricsDir:     metricsPath,
+			cachedAt:       now,
+			rangeValue:     resolved,
+			workers:        append([]WorkerMetricsAggregate(nil), persistedWorkers...),
+			skippedRecords: skippedRecords,
+			queryLimited:   queryLimited,
+			valid:          true,
+		}
+	}
+
+	response := MetricsQueryResponse{
+		Range:             resolved,
+		SkippedRecords:    skippedRecords,
+		QueryLimited:      queryLimited,
+		PersistenceErrors: s.persistenceErrors.Load(),
+	}
+	aggregates := make(map[string]*WorkerMetricsAggregate, len(persistedWorkers)+len(workers))
+	for i := range persistedWorkers {
+		aggregates[persistedWorkers[i].Worker] = &persistedWorkers[i]
+	}
 	summaries := map[string]WorkerSummary{}
 	for _, summary := range workers {
 		summaries[summary.Name] = summary
@@ -94,73 +248,24 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 		if query.Upstream != "" && summary.Upstream.Name != query.Upstream {
 			continue
 		}
-		aggregates[summary.Name] = &WorkerMetricsAggregate{
-			Worker:   summary.Name,
-			Port:     summary.Port,
-			Status:   summary.Status,
-			Upstream: summary.Upstream.Name,
-			Live:     liveMetricsForQuery(summary, query),
+		aggregate := aggregates[summary.Name]
+		if aggregate == nil {
+			aggregate = &WorkerMetricsAggregate{Worker: summary.Name}
+			aggregates[summary.Name] = aggregate
 		}
+		aggregate.Port = summary.Port
+		aggregate.Status = summary.Status
+		aggregate.Upstream = summary.Upstream.Name
+		aggregate.Live = liveMetricsForQuery(summary, query)
 	}
-
-	durationByWorker := map[string]int64{}
-	for _, path := range paths {
-		file, err := os.Open(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return MetricsQueryResponse{}, err
+	for name, aggregate := range aggregates {
+		summary, ok := summaries[name]
+		if !ok {
+			continue
 		}
-		err = readJSONLLines(file, func(line []byte) {
-			var record MetricsRecord
-			if err := json.Unmarshal(line, &record); err != nil {
-				response.SkippedRecords++
-				return
-			}
-			if !record.Timestamp.Before(resolved.End) || record.Timestamp.Before(resolved.Start) {
-				return
-			}
-			if !recordMatchesQuery(record, query) {
-				return
-			}
-			aggregate := aggregates[record.Worker]
-			if aggregate == nil {
-				aggregate = &WorkerMetricsAggregate{
-					Worker:   record.Worker,
-					Port:     record.Port,
-					Status:   "removed",
-					Upstream: record.Upstream,
-				}
-				if summary, ok := summaries[record.Worker]; ok {
-					aggregate.Status = summary.Status
-					aggregate.Live = liveMetricsForQuery(summary, query)
-				}
-				aggregates[record.Worker] = aggregate
-			}
-			aggregate.Totals.Requests++
-			if record.Status >= 400 {
-				aggregate.Totals.Errors++
-			}
-			durationByWorker[record.Worker] += record.DurationMS
-			aggregate.Totals.ResponseBytes += record.ResponseBytes
-			if record.UsageKnown {
-				aggregate.Totals.InputTokens += record.InputTokens
-				aggregate.Totals.OutputTokens += record.OutputTokens
-				aggregate.Totals.CacheReadTokens += record.CacheReadTokens
-				aggregate.Totals.CacheWriteTokens += record.CacheWriteTokens
-				aggregate.Totals.ReasoningTokens += record.ReasoningTokens
-				aggregate.Totals.TotalTokens += record.TotalTokens
-			} else {
-				aggregate.Totals.UnknownUsageRequests++
-			}
-		})
-		if err != nil {
-			_ = file.Close()
-			return MetricsQueryResponse{}, err
-		}
-		if err := file.Close(); err != nil {
-			return MetricsQueryResponse{}, err
+		aggregate.Status = summary.Status
+		if query.Upstream != "" && summary.Upstream.Name != query.Upstream {
+			aggregate.Live = liveMetricsForQuery(summary, query)
 		}
 	}
 
@@ -171,11 +276,7 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 	sort.Strings(names)
 	response.Workers = make([]WorkerMetricsAggregate, 0, len(names))
 	for _, name := range names {
-		aggregate := aggregates[name]
-		if aggregate.Totals.Requests > 0 {
-			aggregate.Totals.AvgLatencyMS = durationByWorker[name] / aggregate.Totals.Requests
-		}
-		response.Workers = append(response.Workers, *aggregate)
+		response.Workers = append(response.Workers, *aggregates[name])
 	}
 	return response, nil
 }
@@ -195,6 +296,7 @@ func (s *metricsStore) cleanupRetentionLocked(settings config.Settings) error {
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
+	retentionDays = max(retentionDays, metricsMinimumRetentionDays)
 	cutoff := startOfLocalDay(s.clock()).AddDate(0, 0, 1-retentionDays)
 	metricsDir := metricsDir(settings)
 	entries, err := os.ReadDir(metricsDir)

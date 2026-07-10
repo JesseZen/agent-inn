@@ -54,6 +54,7 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 	hydrationSem := m.metricsStatusSem
 	m.mu.RUnlock()
 	summaries := m.workerSummaries()
+	liveAvailable := make([]bool, len(summaries))
 	if query.Upstream == "" && query.Model == "" && query.Path == "" && query.Status == 0 {
 		if client == nil {
 			client = defaultWorkerClient()
@@ -81,6 +82,7 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 					<-hydrationSem
 					if err == nil {
 						summaries[index].Metrics = status.Metrics
+						liveAvailable[index] = true
 					}
 				}
 			}()
@@ -91,6 +93,13 @@ func (m *Manager) handleMetrics(rw http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 		return
+	}
+	liveAvailableByWorker := make(map[string]bool, len(summaries))
+	for i, summary := range summaries {
+		liveAvailableByWorker[summary.Name] = liveAvailable[i]
+	}
+	for i := range response.Workers {
+		response.Workers[i].LiveAvailable = liveAvailableByWorker[response.Workers[i].Worker]
 	}
 	writeJSON(rw, http.StatusOK, response)
 }

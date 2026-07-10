@@ -166,11 +166,12 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
 		Workers: []WorkerMetricsAggregate{
 			{
-				Worker:   "app",
-				Port:     6767,
-				Status:   "running",
-				Upstream: "openai",
-				Live:     live,
+				Worker:        "app",
+				Port:          6767,
+				Status:        "running",
+				Upstream:      "openai",
+				LiveAvailable: true,
+				Live:          live,
 				Totals: MetricsTotals{
 					Requests:      1,
 					AvgLatencyMS:  120,
@@ -195,9 +196,10 @@ func TestManagerStartupCleansExpiredMetricsRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	today := startOfLocalDay(time.Now())
-	expiredPath := filepath.Join(metricsDir, metricsFileName(today.AddDate(0, 0, -1)))
+	expiredPath := filepath.Join(metricsDir, metricsFileName(today.AddDate(0, 0, -2)))
+	previousPath := filepath.Join(metricsDir, metricsFileName(today.AddDate(0, 0, -1)))
 	currentPath := filepath.Join(metricsDir, metricsFileName(today))
-	for _, path := range []string{expiredPath, currentPath} {
+	for _, path := range []string{expiredPath, previousPath, currentPath} {
 		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -211,6 +213,9 @@ func TestManagerStartupCleansExpiredMetricsRecords(t *testing.T) {
 
 	if _, err := os.Stat(expiredPath); !os.IsNotExist(err) {
 		t.Fatalf("manager startup should remove expired metrics file: %v", err)
+	}
+	if _, err := os.Stat(previousPath); err != nil {
+		t.Fatalf("manager startup should retain the previous metrics file for last 24h queries: %v", err)
 	}
 	if _, err := os.Stat(currentPath); err != nil {
 		t.Fatalf("manager startup should retain current metrics file: %v", err)
@@ -291,7 +296,7 @@ func TestManagerAPIMetricsUsesProductionWorkerStatusForLiveMetrics(t *testing.T)
 	want := MetricsQueryResponse{
 		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.Add(24 * time.Hour)},
 		Workers: []WorkerMetricsAggregate{
-			{Worker: "app", Port: port, Status: "running", Upstream: "openai", Live: live, Totals: MetricsTotals{Requests: 1, AvgLatencyMS: 120, TotalTokens: 15}},
+			{Worker: "app", Port: port, Status: "running", Upstream: "openai", LiveAvailable: true, Live: live, Totals: MetricsTotals{Requests: 1, AvgLatencyMS: 120, TotalTokens: 15}},
 		},
 		SkippedRecords: 0,
 	}
@@ -308,6 +313,7 @@ func TestManagerAPIMetricsUsesProductionWorkerStatusForLiveMetrics(t *testing.T)
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
+	want.Workers[0].LiveAvailable = false
 	want.Workers[0].Live = worker.MetricsSnapshot{}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("failed status should not expose manager event snapshot:\ngot  %#v\nwant %#v", got, want)
@@ -1043,7 +1049,7 @@ func TestManagerAPIMetricsBoundsLiveHydrationAcrossConcurrentRequests(t *testing
 		workers[name] = config.WorkerConfig{Port: port, Upstream: "openai"}
 		client.statuses[port] = WorkerStatus{Metrics: metrics}
 		wantWorkers = append(wantWorkers, WorkerMetricsAggregate{
-			Worker: name, Port: port, Status: "running", Upstream: "openai", Live: metrics,
+			Worker: name, Port: port, Status: "running", Upstream: "openai", LiveAvailable: true, Live: metrics,
 		})
 	}
 	m := New(Config{
@@ -1170,6 +1176,64 @@ func TestManagerReadsAndQueriesLargeWorkerMetricLines(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("bad metrics response:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerDropsOversizedWorkerMetricLines(t *testing.T) {
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	oversized := worker.RequestMetricEvent{
+		Timestamp: now,
+		Upstream:  "openai",
+		Method:    "POST",
+		Path:      "/" + strings.Repeat("x", metricsQueryMaxLineBytes),
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 15},
+	}
+	valid := worker.RequestMetricEvent{
+		Timestamp: now,
+		Upstream:  "openai",
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    200,
+		Usage:     worker.UsageTokens{Known: true, TotalTokens: 3},
+	}
+	var payload bytes.Buffer
+	for _, event := range []worker.RequestMetricEvent{oversized, valid} {
+		if err := json.NewEncoder(&payload).Encode(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.readWorkerMetricsFrom(workerMetricSource{name: "app", port: 6767}, &payload)
+
+	got, err := m.metricsStore.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767, Status: "configured"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := startOfLocalDay(now)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "configured", Totals: MetricsTotals{Requests: 1, TotalTokens: 3}},
+		},
+		PersistenceErrors: 1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad oversized worker metric handling:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

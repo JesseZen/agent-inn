@@ -71,18 +71,20 @@ type MetricsTotals struct {
 }
 
 type WorkerMetricsAggregate struct {
-	Worker   string                 `json:"worker"`
-	Port     int                    `json:"port"`
-	Status   string                 `json:"status"`
-	Upstream string                 `json:"upstream,omitempty"`
-	Live     worker.MetricsSnapshot `json:"live"`
-	Totals   MetricsTotals          `json:"totals"`
+	Worker        string                 `json:"worker"`
+	Port          int                    `json:"port"`
+	Status        string                 `json:"status"`
+	Upstream      string                 `json:"upstream,omitempty"`
+	LiveAvailable bool                   `json:"live_available"`
+	Live          worker.MetricsSnapshot `json:"live"`
+	Totals        MetricsTotals          `json:"totals"`
 }
 
 type MetricsQueryResponse struct {
 	Range             MetricsRange             `json:"range"`
 	Workers           []WorkerMetricsAggregate `json:"workers"`
 	SkippedRecords    int                      `json:"skipped_records"`
+	QueryLimited      bool                     `json:"query_limited"`
 	PersistenceErrors uint64                   `json:"persistence_errors"`
 }
 
@@ -119,13 +121,27 @@ func (m *Manager) readWorkerMetrics(name string, r io.Reader) {
 }
 
 func (m *Manager) readWorkerMetricsFrom(source workerMetricSource, r io.Reader) {
-	_ = readJSONLLines(r, func(line []byte) {
+	skipped, _ := readJSONLLines(r, func(line []byte) {
 		var event worker.RequestMetricEvent
 		if err := json.Unmarshal(line, &event); err != nil {
 			return
 		}
 		m.handleWorkerMetricEventFrom(source, event)
 	})
+	if skipped == 0 {
+		return
+	}
+	m.mu.RLock()
+	store := m.metricsStore
+	m.mu.RUnlock()
+	if store != nil {
+		store.persistenceErrors.Add(uint64(skipped))
+	}
+	m.logger.Error(logging.EventMetricsPersist,
+		"worker", source.name,
+		"port", source.port,
+		"err", "metrics event exceeds size limit",
+	)
 }
 
 func (m *Manager) handleWorkerMetricEvent(name string, event worker.RequestMetricEvent) {
@@ -207,21 +223,32 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 	}
 }
 
-func readJSONLLines(r io.Reader, handle func([]byte)) error {
-	reader := bufio.NewReader(r)
+func readJSONLLines(r io.Reader, handle func([]byte)) (int, error) {
+	reader := bufio.NewReaderSize(r, metricsQueryMaxLineBytes)
+	skipped := 0
+	oversizedLine := false
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
+		line, err := reader.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			if !oversizedLine {
+				skipped++
+				oversizedLine = true
+			}
+			continue
+		}
+		if oversizedLine {
+			oversizedLine = false
+		} else if len(line) > 0 {
 			line = bytes.TrimRight(line, "\r\n")
 			if len(bytes.TrimSpace(line)) > 0 {
 				handle(line)
 			}
 		}
 		if err == io.EOF {
-			return nil
+			return skipped, nil
 		}
 		if err != nil {
-			return err
+			return skipped, err
 		}
 	}
 }
