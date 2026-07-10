@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 const (
 	DefaultConfigDir = "~/.ainn"
@@ -14,10 +17,38 @@ const (
 )
 
 type Config struct {
-	Settings  Settings                    `yaml:"settings"`
-	Plugins   map[string]PluginDefinition `yaml:"plugins" json:"plugins,omitempty"`
-	Workers   map[string]WorkerConfig     `yaml:"workers"`
-	Upstreams map[string]UpstreamProfile  `yaml:"upstreams"`
+	Settings      Settings                    `yaml:"settings"`
+	Plugins       map[string]PluginDefinition `yaml:"plugins" json:"plugins,omitempty"`
+	Workers       map[string]WorkerConfig     `yaml:"workers"`
+	Upstreams     map[string]UpstreamProfile  `yaml:"upstreams"`
+	UpstreamPools map[string]UpstreamPool     `yaml:"upstream_pools"`
+}
+
+const (
+	DefaultCircuitFailureThreshold         = 3
+	DefaultCircuitRecoverySuccessThreshold = 2
+	DefaultCircuitRecoveryWaitSeconds      = 60
+)
+
+type CircuitBreakerConfig struct {
+	FailureThreshold         int `yaml:"failure_threshold" json:"failure_threshold"`
+	RecoverySuccessThreshold int `yaml:"recovery_success_threshold" json:"recovery_success_threshold"`
+	RecoveryWaitSeconds      int `yaml:"recovery_wait_seconds" json:"recovery_wait_seconds"`
+}
+
+type UpstreamPool struct {
+	Name           string               `yaml:"name,omitempty" json:"name,omitempty"`
+	Upstreams      []string             `yaml:"upstreams" json:"upstreams"`
+	CircuitBreaker CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
+}
+
+type StreamTimeoutConfig struct {
+	FirstByteSeconds int `yaml:"first_byte_seconds" json:"first_byte_seconds"`
+	IdleSeconds      int `yaml:"idle_seconds" json:"idle_seconds"`
+}
+
+type ProtocolProbeConfig struct {
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
 const (
@@ -72,6 +103,7 @@ type WorkerConfig struct {
 	Port           int                     `yaml:"port"`
 	Upstream       string                  `yaml:"upstream,omitempty" json:"upstream,omitempty"`
 	UpstreamID     string                  `yaml:"upstream_id,omitempty" json:"upstream_id,omitempty"`
+	UpstreamPool   string                  `yaml:"upstream_pool,omitempty" json:"upstream_pool,omitempty"`
 	ProxyURL       string                  `yaml:"proxy_url,omitempty" json:"proxy_url,omitempty"`
 	LogLevel       string                  `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	RequestModules map[string]ModuleConfig `yaml:"request_modules" json:"request_modules,omitempty"`
@@ -84,10 +116,12 @@ type ModuleConfig struct {
 }
 
 type UpstreamProfile struct {
-	Name      string `yaml:"name,omitempty" json:"name,omitempty"`
-	BaseURL   string `yaml:"base_url" json:"base_url"`
-	APIKey    string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
-	APIFormat string `yaml:"api_format,omitempty" json:"api_format,omitempty"`
+	Name           string              `yaml:"name,omitempty" json:"name,omitempty"`
+	BaseURL        string              `yaml:"base_url" json:"base_url"`
+	APIKey         string              `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	APIFormat      string              `yaml:"api_format,omitempty" json:"api_format,omitempty"`
+	StreamTimeouts StreamTimeoutConfig `yaml:"stream_timeouts,omitempty" json:"stream_timeouts,omitempty"`
+	ProtocolProbe  ProtocolProbeConfig `yaml:"protocol_probe,omitempty" json:"protocol_probe,omitempty"`
 }
 
 func (c *Config) ApplyDefaults() {
@@ -127,6 +161,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Upstreams == nil {
 		c.Upstreams = map[string]UpstreamProfile{}
 	}
+	if c.UpstreamPools == nil {
+		c.UpstreamPools = map[string]UpstreamPool{}
+	}
 	for name, worker := range c.Workers {
 		if worker.Name == "" {
 			worker.Name = name
@@ -160,6 +197,39 @@ func (c *Config) ApplyDefaults() {
 		}
 		c.Upstreams[name] = profile
 	}
+	for name, pool := range c.UpstreamPools {
+		if pool.Name == "" {
+			pool.Name = name
+		}
+		if pool.CircuitBreaker.FailureThreshold == 0 {
+			pool.CircuitBreaker.FailureThreshold = DefaultCircuitFailureThreshold
+		}
+		if pool.CircuitBreaker.RecoverySuccessThreshold == 0 {
+			pool.CircuitBreaker.RecoverySuccessThreshold = DefaultCircuitRecoverySuccessThreshold
+		}
+		if pool.CircuitBreaker.RecoveryWaitSeconds == 0 {
+			pool.CircuitBreaker.RecoveryWaitSeconds = DefaultCircuitRecoveryWaitSeconds
+		}
+		c.UpstreamPools[name] = pool
+	}
+}
+
+func (c Config) Validate() error {
+	for name, pool := range c.UpstreamPools {
+		if len(pool.Upstreams) == 0 {
+			return fmt.Errorf("upstream pool %q requires at least one upstream", name)
+		}
+		if pool.CircuitBreaker.FailureThreshold < 1 {
+			return fmt.Errorf("upstream pool %q failure_threshold must be positive", name)
+		}
+		if pool.CircuitBreaker.RecoverySuccessThreshold < 1 {
+			return fmt.Errorf("upstream pool %q recovery_success_threshold must be positive", name)
+		}
+		if pool.CircuitBreaker.RecoveryWaitSeconds < 1 {
+			return fmt.Errorf("upstream pool %q recovery_wait_seconds must be positive", name)
+		}
+	}
+	return nil
 }
 
 func defaultDirMode() os.FileMode {

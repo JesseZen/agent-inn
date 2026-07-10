@@ -91,6 +91,92 @@ upstreams:
 	}
 }
 
+func TestLoadFileDecodesUpstreamPoolRouting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+workers:
+  codex:
+    port: 6767
+    upstream: primary
+    upstream_pool: coding-ha
+upstream_pools:
+  coding-ha:
+    upstreams:
+      - primary
+      - backup
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_success_threshold: 3
+      recovery_wait_seconds: 90
+upstreams:
+  primary:
+    base_url: https://primary.example/v1
+    api_key: sk-primary
+    stream_timeouts:
+      first_byte_seconds: 75
+      idle_seconds: 180
+    protocol_probe:
+      model: gpt-5-mini
+  backup:
+    base_url: https://backup.example/v1
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Pool     UpstreamPool
+		Worker   WorkerConfig
+		Upstream UpstreamProfile
+	}{
+		Pool:     cfg.UpstreamPools["coding-ha"],
+		Worker:   cfg.Workers["codex"],
+		Upstream: cfg.Upstreams["primary"],
+	}
+	want := struct {
+		Pool     UpstreamPool
+		Worker   WorkerConfig
+		Upstream UpstreamProfile
+	}{
+		Pool: UpstreamPool{
+			Name:      "coding-ha",
+			Upstreams: []string{"primary", "backup"},
+			CircuitBreaker: CircuitBreakerConfig{
+				FailureThreshold:         5,
+				RecoverySuccessThreshold: 3,
+				RecoveryWaitSeconds:      90,
+			},
+		},
+		Worker: WorkerConfig{
+			Name:           "codex",
+			Role:           "cli",
+			Launcher:       "codex",
+			Port:           6767,
+			Upstream:       "primary",
+			UpstreamID:     "primary",
+			UpstreamPool:   "coding-ha",
+			LogLevel:       "simple",
+			RequestModules: map[string]ModuleConfig{},
+			Hooks:          map[string]ModuleConfig{},
+		},
+		Upstream: UpstreamProfile{
+			Name:           "primary",
+			BaseURL:        "https://primary.example/v1",
+			APIKey:         "sk-primary",
+			StreamTimeouts: StreamTimeoutConfig{FirstByteSeconds: 75, IdleSeconds: 180},
+			ProtocolProbe:  ProtocolProbeConfig{Model: "gpt-5-mini"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pool routing config:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestLoadAppliesSettingsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
