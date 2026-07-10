@@ -48,6 +48,48 @@ func TestUsageObserverBoundsUnknownJSONStringMemory(t *testing.T) {
 	}
 }
 
+func TestUsageObserverBoundsChunkedSSEDataMemory(t *testing.T) {
+	const (
+		unknownStringSize     = 1024 * 1024
+		observerRetainedLimit = 128 * 1024
+		observationChunkSize  = 4093
+	)
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: response.completed\ndata: {\"output\":\""))
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	chunk := strings.Repeat("x", observationChunkSize)
+	for remaining := unknownStringSize; remaining > 0; {
+		writeSize := min(remaining, len(chunk))
+		observer.Observe([]byte(chunk[:writeSize]))
+		remaining -= writeSize
+	}
+
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	retained := uint64(0)
+	if after.HeapAlloc > before.HeapAlloc {
+		retained = after.HeapAlloc - before.HeapAlloc
+	}
+
+	observer.Observe([]byte("\",\"response\":{\"model\":\"gpt-5\",\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}}\n\n"))
+	got := responseUsageMetadata{Usage: observer.Finish(), Model: observer.Model()}
+	want := responseUsageMetadata{
+		Usage: UsageTokens{Known: true, InputTokens: 10, OutputTokens: 4, TotalTokens: 14},
+		Model: "gpt-5",
+	}
+	if got != want {
+		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)
+	}
+	if retained > observerRetainedLimit {
+		t.Fatalf("observer retained %d bytes while scanning SSE data; limit %d", retained, observerRetainedLimit)
+	}
+}
+
 func TestResponseJSONScannerPreservesSupportedShapesAndEscapes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -90,6 +132,19 @@ func TestResponseJSONScannerKeepsNestedTotalSemanticsAfterUnknownUsageField(t *t
 
 	want := responseUsageMetadata{
 		Usage: UsageTokens{Known: true, InputTokens: 10, OutputTokens: 4, CacheReadTokens: 3, TotalTokens: 14},
+	}
+	if got := scanner.Finish(); got != want {
+		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestResponseJSONScannerKeepsDirectCacheTotalsAfterUnknownUsageField(t *testing.T) {
+	body := `{"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3,"cache_creation_input_tokens":2,"unknown":{"value":1}}}`
+	scanner := &responseJSONScanner{}
+	scanner.Write([]byte(body))
+
+	want := responseUsageMetadata{
+		Usage: UsageTokens{Known: true, InputTokens: 10, OutputTokens: 4, CacheReadTokens: 3, CacheWriteTokens: 2, TotalTokens: 19},
 	}
 	if got := scanner.Finish(); got != want {
 		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)

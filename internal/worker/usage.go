@@ -2,8 +2,6 @@ package worker
 
 import (
 	"strings"
-
-	"github.com/jesse/agent-inn/internal/module"
 )
 
 type UsageTokens struct {
@@ -18,9 +16,9 @@ type UsageTokens struct {
 
 type UsageObserver struct {
 	contentType string
-	parser      module.SSEParser
 	usage       UsageTokens
 	model       string
+	sseScanner  *usageSSEScanner
 	jsonScanner *responseJSONScanner
 }
 
@@ -31,6 +29,9 @@ type responseUsageMetadata struct {
 
 func NewUsageObserver(contentType string) *UsageObserver {
 	observer := &UsageObserver{contentType: strings.ToLower(contentType)}
+	if strings.Contains(observer.contentType, "text/event-stream") {
+		observer.sseScanner = &usageSSEScanner{observer: observer}
+	}
 	if strings.Contains(observer.contentType, "json") {
 		observer.jsonScanner = &responseJSONScanner{}
 	}
@@ -38,11 +39,8 @@ func NewUsageObserver(contentType string) *UsageObserver {
 }
 
 func (u *UsageObserver) Observe(chunk []byte) {
-	if strings.Contains(u.contentType, "text/event-stream") {
-		events, _ := u.parser.Push(chunk, false)
-		for _, event := range events {
-			u.processSSEEvent(event)
-		}
+	if u.sseScanner != nil {
+		u.sseScanner.Write(chunk)
 	}
 	if u.jsonScanner != nil {
 		u.jsonScanner.Write(chunk)
@@ -50,11 +48,9 @@ func (u *UsageObserver) Observe(chunk []byte) {
 }
 
 func (u *UsageObserver) Finish() UsageTokens {
-	if strings.Contains(u.contentType, "text/event-stream") {
-		events, _ := u.parser.Push(nil, true)
-		for _, event := range events {
-			u.processSSEEvent(event)
-		}
+	if u.sseScanner != nil {
+		u.sseScanner.Finish()
+		u.sseScanner = nil
 	}
 	if u.jsonScanner != nil {
 		metadata := u.jsonScanner.Finish()
@@ -69,13 +65,9 @@ func (u *UsageObserver) Model() string {
 	return u.model
 }
 
-func (u *UsageObserver) processSSEEvent(event module.SSEEvent) {
-	if event.Done {
-		return
-	}
-	metadata := extractUsageMetadataFromJSON([]byte(event.Data))
+func (u *UsageObserver) processSSEMetadata(messageDelta bool, metadata responseUsageMetadata) {
 	if metadata.Usage.Known {
-		if event.Event == "message_delta" && u.usage.Known {
+		if messageDelta && u.usage.Known {
 			u.usage.InputTokens += metadata.Usage.InputTokens
 			u.usage.OutputTokens += metadata.Usage.OutputTokens
 			u.usage.CacheReadTokens += metadata.Usage.CacheReadTokens

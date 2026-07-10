@@ -269,7 +269,6 @@ func (s *responseJSONScanner) startUsageValue(field responseJSONField, b byte) {
 		s.startNumberValue(field, b)
 		return
 	}
-	s.usage.nested = true
 	var context responseJSONContext
 	var valueField responseJSONField
 	switch field {
@@ -285,6 +284,7 @@ func (s *responseJSONScanner) startUsageValue(field responseJSONField, b byte) {
 		s.startSkipValue(b)
 		return
 	}
+	s.usage.nested = true
 	s.usage.set(valueField, 0, false)
 	if b == '{' {
 		s.pushFrame(context)
