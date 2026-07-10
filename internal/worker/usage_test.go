@@ -64,6 +64,17 @@ func TestUsageObserverExtractsSSECompletionUsage(t *testing.T) {
 	}
 }
 
+func TestUsageObserverIgnoresWhitespaceLineInsideMultilineData(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("data: {\"usage\":{\n \t \n"))
+	observer.Observe([]byte("data: \"input_tokens\":3,\"output_tokens\":2}}\n\n"))
+
+	want := UsageTokens{Known: true, InputTokens: 3, OutputTokens: 2, TotalTokens: 5}
+	if got := observer.Finish(); got != want {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestUsageObserverExtractsCRLFSSEFrames(t *testing.T) {
 	observer := NewUsageObserver("text/event-stream")
 	observer.Observe([]byte("event: response.in_progress\r\ndata: {\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}\r\n\r\nevent: response.completed\r\ndata: {\"response\":{\"model\":\"gpt-5-mini\"}}\r\n\r\n"))
@@ -151,6 +162,29 @@ func TestUsageObserverCombinesAnthropicMessageStartAndDeltaUsage(t *testing.T) {
 	}
 	if got := observer.Model(); got != "claude-sonnet-4-20250514" {
 		t.Fatalf("bad model: got %q want %q", got, "claude-sonnet-4-20250514")
+	}
+}
+
+func TestUsageObserverResetsMessageDeltaForEmptyEvent(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: message_start\ndata: {\"usage\":{\"input_tokens\":9}}\n\n"))
+	observer.Observe([]byte("event: message_delta\ndata: {\"usage\":{\"output_tokens\":5}}\n\n"))
+	observer.Observe([]byte("event:\ndata: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\n\n"))
+
+	want := UsageTokens{Known: true, InputTokens: 1, OutputTokens: 2, TotalTokens: 3}
+	if got := observer.Finish(); got != want {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestUsageObserverEmptyEventOverridesMessageDeltaWithinFrame(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: message_start\ndata: {\"usage\":{\"input_tokens\":9}}\n\n"))
+	observer.Observe([]byte("event: message_delta\nevent:\ndata: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\n\n"))
+
+	want := UsageTokens{Known: true, InputTokens: 1, OutputTokens: 2, TotalTokens: 3}
+	if got := observer.Finish(); got != want {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 

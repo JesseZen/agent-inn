@@ -232,9 +232,38 @@ func TestMetricsEventEmitterCancellationCountsUndrainedEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	emitter.Close(ctx)
+	<-emitter.done
 
 	if writer.CloseCount() != 1 || emitter.dropped.Load() != 3 {
 		t.Fatalf("bad canceled close: closes=%d dropped=%d", writer.CloseCount(), emitter.dropped.Load())
+	}
+}
+
+func TestMetricsEventEmitterCloseReturnsWhenBlockingWriterCannotBeClosed(t *testing.T) {
+	writer := &blockingMetricsWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	emitter := newMetricsEventEmitter(writer)
+	emitter.Emit(RequestMetricEvent{Path: "a"})
+	<-writer.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		emitter.Close(ctx)
+		close(done)
+	}()
+
+	timedOut := false
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		timedOut = true
+	}
+	close(writer.release)
+	<-done
+	<-emitter.done
+	if timedOut {
+		t.Fatal("emitter close did not return after context cancellation")
 	}
 }
 

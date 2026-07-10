@@ -10,11 +10,9 @@ type usageSSEScanner struct {
 	fieldLength         int
 	fieldOverflow       bool
 	lineHasBytes        bool
-	lineNonWhitespace   bool
 	valueStarted        bool
 	eventValueLength    int
 	eventValueMatches   bool
-	eventValueNonEmpty  bool
 	eventIsMessageDelta bool
 	dataSeen            bool
 	skipLF              bool
@@ -60,9 +58,6 @@ func (s *usageSSEScanner) Finish() {
 
 func (s *usageSSEScanner) consumeLineByte(b byte) {
 	s.lineHasBytes = true
-	if b != ' ' && b != '\t' {
-		s.lineNonWhitespace = true
-	}
 	if s.lineMode == usageSSEField {
 		if b == ':' {
 			s.startValue()
@@ -98,7 +93,6 @@ func (s *usageSSEScanner) startValue() {
 		s.lineMode = usageSSEEvent
 		s.eventValueLength = 0
 		s.eventValueMatches = true
-		s.eventValueNonEmpty = false
 	default:
 		s.lineMode = usageSSEIgnore
 	}
@@ -109,7 +103,6 @@ func (s *usageSSEScanner) consumeValueByte(b byte) {
 	case usageSSEData:
 		s.jsonScanner.Write([]byte{b})
 	case usageSSEEvent:
-		s.eventValueNonEmpty = true
 		if s.eventValueLength >= len(messageDeltaEvent) || b != messageDeltaEvent[s.eventValueLength] {
 			s.eventValueMatches = false
 		}
@@ -118,7 +111,7 @@ func (s *usageSSEScanner) consumeValueByte(b byte) {
 }
 
 func (s *usageSSEScanner) finishLine() {
-	if !s.lineNonWhitespace {
+	if !s.lineHasBytes {
 		s.finishEvent()
 		s.resetLine()
 		return
@@ -130,7 +123,7 @@ func (s *usageSSEScanner) finishLine() {
 		case "event":
 		}
 	}
-	if s.lineMode == usageSSEEvent && s.eventValueNonEmpty {
+	if s.lineMode == usageSSEEvent {
 		s.eventIsMessageDelta = s.eventValueMatches && s.eventValueLength == len(messageDeltaEvent)
 	}
 	s.resetLine()
@@ -160,9 +153,7 @@ func (s *usageSSEScanner) resetLine() {
 	s.fieldLength = 0
 	s.fieldOverflow = false
 	s.lineHasBytes = false
-	s.lineNonWhitespace = false
 	s.valueStarted = false
 	s.eventValueLength = 0
 	s.eventValueMatches = false
-	s.eventValueNonEmpty = false
 }

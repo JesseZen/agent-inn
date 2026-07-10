@@ -132,7 +132,6 @@ func (e *metricsEventEmitter) Close(ctx context.Context) {
 	case <-e.done:
 	case <-ctx.Done():
 		e.closeMetricsWriter()
-		<-e.done
 	}
 }
 
