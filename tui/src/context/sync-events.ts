@@ -72,6 +72,7 @@ export type SyncStore = {
   upstreams: RedactedUpstream[]
   upstreamProbes: Record<string, UpstreamProbeResult>
   metrics_generation: number
+  hosted_session_turn_states: Record<string, string>
   manager_config: ProxyConfig
   config_status: ProxyConfigStatus | undefined
   error?: string

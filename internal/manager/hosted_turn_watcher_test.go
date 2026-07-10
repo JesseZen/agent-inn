@@ -67,6 +67,63 @@ func TestHostedTurnWatcherPollOnceMarksInterruptedTurn(t *testing.T) {
 	}
 }
 
+func TestHostedTurnWatcherPollOncePublishesTurnState(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{
+		StateDir: stateDir,
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:  "ainn-test",
+				HostSession: "ainn-test-host",
+			},
+		},
+	}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "", filepath.Join(stateDir, "codex.jsonl"), "turn_1", HostedTurnWatchKindCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(running.TurnTranscriptPath, []byte(`{"type":"turn.completed","turn_id":"turn_1","status":"success"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var published []HostedSessionRecord
+	watcher := newHostedTurnWatcher(settings, registry, hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		return "", nil
+	}))
+	watcher.onTurnStateChanged = func(session HostedSessionRecord) {
+		published = append(published, session)
+	}
+	if err := watcher.pollOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []HostedSessionRecord{{
+		SessionID:      created.SessionID,
+		SessionLabel:   created.SessionLabel,
+		WorkerID:       created.WorkerID,
+		WorkerName:     created.WorkerName,
+		WorkerPort:     created.WorkerPort,
+		TmuxWindowID:   created.TmuxWindowID,
+		TurnState:      HostedTurnStateDone,
+		TurnGeneration: running.TurnGeneration,
+		CreatedAt:      created.CreatedAt,
+		LastOpenedAt:   created.LastOpenedAt,
+	}}
+	if !reflect.DeepEqual(published, want) {
+		t.Fatalf("got %#v, want %#v", published, want)
+	}
+}
+
 func TestHostedTurnWatcherPollOncePreservesTodoMarker(t *testing.T) {
 	stateDir := t.TempDir()
 	settings := config.Settings{

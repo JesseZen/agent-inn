@@ -37,12 +37,13 @@ const (
 )
 
 type hostedTurnWatcher struct {
-	settings       config.Settings
-	registry       *HostedSessionRegistry
-	registryCursor hostedTurnRegistryCursor
-	runner         hostedTMuxRunner
-	files          map[string]hostedTurnTranscriptCursor
-	launcherPaths  map[string]string
+	settings           config.Settings
+	registry           *HostedSessionRegistry
+	registryCursor     hostedTurnRegistryCursor
+	runner             hostedTMuxRunner
+	files              map[string]hostedTurnTranscriptCursor
+	launcherPaths      map[string]string
+	onTurnStateChanged func(HostedSessionRecord)
 }
 
 type hostedTurnRegistryCursor struct {
@@ -79,6 +80,12 @@ func (m *Manager) StartHostedTurnWatcher(interval time.Duration) func() {
 	}
 	done := make(chan struct{})
 	watcher := newHostedTurnWatcher(m.config.Settings, m.hostedSessions, hostedTMuxRunnerFactory())
+	watcher.onTurnStateChanged = func(session HostedSessionRecord) {
+		m.publishEvent(EventHostedSessionTurnStateChanged, map[string]any{
+			"session_id": session.SessionID,
+			"turn_state": session.TurnState,
+		})
+	}
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -98,11 +105,12 @@ func (m *Manager) StartHostedTurnWatcher(interval time.Duration) func() {
 
 func newHostedTurnWatcher(settings config.Settings, registry *HostedSessionRegistry, runner hostedTMuxRunner) *hostedTurnWatcher {
 	return &hostedTurnWatcher{
-		settings:      settings,
-		registry:      registry,
-		runner:        runner,
-		files:         map[string]hostedTurnTranscriptCursor{},
-		launcherPaths: map[string]string{},
+		settings:           settings,
+		registry:           registry,
+		runner:             runner,
+		files:              map[string]hostedTurnTranscriptCursor{},
+		launcherPaths:      map[string]string{},
+		onTurnStateChanged: func(HostedSessionRecord) {},
 	}
 }
 
@@ -202,6 +210,7 @@ func (w *hostedTurnWatcher) pollOnce() error {
 						TurnState:         session.TurnState,
 						SessionSnapshot:   session,
 					})
+					w.onTurnStateChanged(session)
 					if session.TmuxWindowID == "" {
 						continue
 					}
@@ -220,6 +229,7 @@ func (w *hostedTurnWatcher) pollOnce() error {
 				if !ok {
 					continue
 				}
+				w.onTurnStateChanged(session)
 				if session.TmuxWindowID == "" {
 					completed = append(completed, session)
 					continue

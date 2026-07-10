@@ -18,15 +18,16 @@ const (
 type EventType string
 
 const (
-	EventWorkerStarted       EventType = "worker.started"
-	EventWorkerStopped       EventType = "worker.stopped"
-	EventWorkerRestarted     EventType = "worker.restarted"
-	EventWorkerHealthChanged EventType = "worker.health.changed"
-	EventWorkerUpdated       EventType = "worker.updated"
-	EventModuleUpdated       EventType = "module.updated"
-	EventUpstreamUpdated     EventType = "upstream.updated"
-	EventUpstreamProbed      EventType = "upstream.probed"
-	EventConfigStatusChanged EventType = "config.status.changed"
-	EventStreamRawRedacted   EventType = "stream.raw_redacted"
-	EventMetricsUpdated      EventType = "metrics.updated"
+	EventWorkerStarted                 EventType = "worker.started"
+	EventWorkerStopped                 EventType = "worker.stopped"
+	EventWorkerRestarted               EventType = "worker.restarted"
+	EventWorkerHealthChanged           EventType = "worker.health.changed"
+	EventWorkerUpdated                 EventType = "worker.updated"
+	EventModuleUpdated                 EventType = "module.updated"
+	EventUpstreamUpdated               EventType = "upstream.updated"
+	EventUpstreamProbed                EventType = "upstream.probed"
+	EventConfigStatusChanged           EventType = "config.status.changed"
+	EventStreamRawRedacted             EventType = "stream.raw_redacted"
+	EventMetricsUpdated                EventType = "metrics.updated"
+	EventHostedSessionTurnStateChanged EventType = "hosted.session.turn-state.changed"
 )

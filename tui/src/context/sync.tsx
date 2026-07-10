@@ -82,6 +82,7 @@ export const {
       upstreams: [],
       upstreamProbes: {},
       metrics_generation: 0,
+      hosted_session_turn_states: {},
       manager_config: {},
       config_status: undefined,
       error: undefined,
@@ -288,6 +289,11 @@ export const {
       onCleanup(() => unsubscribe())
       void sdk.client
         .subscribeManagerEvents((event) => {
+          if (event.type === "hosted.session.turn-state.changed") {
+            const payload = event.payload as { session_id: string; turn_state: string }
+            setStore("hosted_session_turn_states", payload.session_id, payload.turn_state)
+            return
+          }
           if (event.type === "upstream.probed") {
             const probe = event.payload as { upstream: string; ok: boolean; degraded?: boolean; status_code: number; latency_ms: number; error?: string }
             setStore("upstreamProbes", probe.upstream, reconcile(probe))

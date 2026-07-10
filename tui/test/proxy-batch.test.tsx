@@ -360,7 +360,7 @@ test("batch detail shows hosted session states", async () => {
   }
 })
 
-test("batch detail refreshes when a hosted session state changes", async () => {
+test("batch detail applies hosted session state events without polling", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
@@ -406,12 +406,18 @@ test("batch detail refreshes when a hosted session state changes", async () => {
       return app.frame().includes("ready")
     })
 
-    app.hostedSessions[0].turn_state = "running"
+    app.emitManagerEvent("hosted.session.turn-state.changed", {
+      session_id: "session_1",
+      turn_state: "running",
+    })
 
     await wait(async () => {
       await app.render()
       return app.frame().includes("running")
     })
+
+    await Bun.sleep(600)
+    expect(app.calls.listHostedSessions).toBe(1)
   } finally {
     await app.cleanup()
   }
