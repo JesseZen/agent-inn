@@ -1,8 +1,13 @@
 package worker
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -151,4 +156,162 @@ func TestWorkerMetricsJSONContract(t *testing.T) {
 	if string(gotSnapshot) != wantSnapshot {
 		t.Fatalf("bad metrics snapshot JSON:\ngot  %s\nwant %s", gotSnapshot, wantSnapshot)
 	}
+}
+
+func TestMetricsEventEmitterCountsWriterFailureAndUndrainedEvents(t *testing.T) {
+	writer := &failingMetricsWriteCloser{}
+	emitter := newMetricsEventEmitter(writer)
+	for i := range 3 {
+		emitter.Emit(RequestMetricEvent{Path: string(rune('a' + i))})
+	}
+
+	emitter.Close(context.Background())
+
+	got := struct {
+		Writes  int
+		Closes  int
+		Dropped int64
+	}{writer.writes, writer.closes, emitter.dropped.Load()}
+	want := struct {
+		Writes  int
+		Closes  int
+		Dropped int64
+	}{1, 1, 3}
+	if got != want {
+		t.Fatalf("bad failed delivery lifecycle:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestMetricsEventEmitterDrainsQueuedEventsAndClosesWriter(t *testing.T) {
+	writer := &gatedMetricsWriteCloser{entered: make(chan struct{}), release: make(chan struct{})}
+	emitter := newMetricsEventEmitter(writer)
+	want := []RequestMetricEvent{{Path: "a"}, {Path: "b"}, {Path: "c"}}
+	emitter.Emit(want[0])
+	<-writer.entered
+	emitter.Emit(want[1])
+	emitter.Emit(want[2])
+
+	done := make(chan struct{})
+	go func() {
+		emitter.Close(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("emitter close returned before queued events drained")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(writer.release)
+	<-done
+
+	lines := bytes.Split(bytes.TrimSpace(writer.Bytes()), []byte("\n"))
+	got := make([]RequestMetricEvent, len(lines))
+	for i, line := range lines {
+		if err := json.Unmarshal(line, &got[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad drained events:\ngot  %#v\nwant %#v", got, want)
+	}
+	if writer.CloseCount() != 1 || emitter.dropped.Load() != 0 {
+		t.Fatalf("bad healthy close: closes=%d dropped=%d", writer.CloseCount(), emitter.dropped.Load())
+	}
+}
+
+func TestMetricsEventEmitterCancellationCountsUndrainedEvents(t *testing.T) {
+	writer := &cancelBlockingMetricsWriteCloser{entered: make(chan struct{}), closed: make(chan struct{})}
+	emitter := newMetricsEventEmitter(writer)
+	emitter.Emit(RequestMetricEvent{Path: "a"})
+	<-writer.entered
+	emitter.Emit(RequestMetricEvent{Path: "b"})
+	emitter.Emit(RequestMetricEvent{Path: "c"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	emitter.Close(ctx)
+
+	if writer.CloseCount() != 1 || emitter.dropped.Load() != 3 {
+		t.Fatalf("bad canceled close: closes=%d dropped=%d", writer.CloseCount(), emitter.dropped.Load())
+	}
+}
+
+type failingMetricsWriteCloser struct {
+	writes int
+	closes int
+}
+
+func (w *failingMetricsWriteCloser) Write([]byte) (int, error) {
+	w.writes++
+	return 0, errors.New("metrics pipe failed")
+}
+
+func (w *failingMetricsWriteCloser) Close() error {
+	w.closes++
+	return nil
+}
+
+type gatedMetricsWriteCloser struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	closes  int
+}
+
+func (w *gatedMetricsWriteCloser) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	<-w.release
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *gatedMetricsWriteCloser) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.closes++
+	return nil
+}
+
+func (w *gatedMetricsWriteCloser) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf.Bytes()...)
+}
+
+func (w *gatedMetricsWriteCloser) CloseCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.closes
+}
+
+type cancelBlockingMetricsWriteCloser struct {
+	entered   chan struct{}
+	closed    chan struct{}
+	writeOnce sync.Once
+	closeOnce sync.Once
+	mu        sync.Mutex
+	closes    int
+}
+
+func (w *cancelBlockingMetricsWriteCloser) Write([]byte) (int, error) {
+	w.writeOnce.Do(func() { close(w.entered) })
+	<-w.closed
+	return 0, errors.New("metrics writer closed")
+}
+
+func (w *cancelBlockingMetricsWriteCloser) Close() error {
+	w.closeOnce.Do(func() { close(w.closed) })
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.closes++
+	return nil
+}
+
+func (w *cancelBlockingMetricsWriteCloser) CloseCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.closes
 }

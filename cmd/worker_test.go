@@ -518,31 +518,33 @@ func TestRunWorkerServerStopsOnOrphanEOF(t *testing.T) {
 	}
 }
 
-func TestWorkerShutdownRestoresConfigPatchBeforeDrainingHTTP(t *testing.T) {
+func TestWorkerShutdownRestoresConfigPatchBeforeDrainingHTTPAndMetrics(t *testing.T) {
 	events := []string{}
 	server := &recordingWorkerServer{events: &events}
+	closer := &recordingWorkerCloser{events: &events}
 	patch := &recordingWorkerPatch{events: &events, state: modulehook.ConfigPatchActive}
 
-	shutdown := newWorkerShutdown(server, []modulehook.Hook{patch}, time.Second)
+	shutdown := newWorkerShutdown(server, closer, []modulehook.Hook{patch}, time.Second)
 	shutdown()
 	shutdown()
 
-	if strings.Join(events, ",") != "patch.Stop,server.Shutdown" {
+	if strings.Join(events, ",") != "patch.Stop,server.Shutdown,worker.Close" {
 		t.Fatalf("unexpected shutdown order: %v", events)
 	}
-	if patch.stops != 1 || server.shutdowns != 1 {
-		t.Fatalf("shutdown was not idempotent: patch stops=%d server shutdowns=%d", patch.stops, server.shutdowns)
+	if patch.stops != 1 || server.shutdowns != 1 || closer.closes != 1 {
+		t.Fatalf("shutdown was not idempotent: patch stops=%d server shutdowns=%d worker closes=%d", patch.stops, server.shutdowns, closer.closes)
 	}
 }
 
 func TestWorkerShutdownClosesServerWhenDrainTimesOut(t *testing.T) {
 	events := []string{}
 	server := &recordingWorkerServer{events: &events, waitForDeadline: true}
+	closer := &recordingWorkerCloser{events: &events}
 
-	shutdown := newWorkerShutdown(server, nil, 10*time.Millisecond)
+	shutdown := newWorkerShutdown(server, closer, nil, 10*time.Millisecond)
 	shutdown()
 
-	if strings.Join(events, ",") != "server.Shutdown,server.Close" {
+	if strings.Join(events, ",") != "server.Shutdown,server.Close,worker.Close" {
 		t.Fatalf("expected forced close after shutdown timeout, got %v", events)
 	}
 }
@@ -589,6 +591,16 @@ type recordingWorkerServer struct {
 	shutdowns       int
 	closes          int
 	waitForDeadline bool
+}
+
+type recordingWorkerCloser struct {
+	events *[]string
+	closes int
+}
+
+func (c *recordingWorkerCloser) Close(context.Context) {
+	c.closes++
+	*c.events = append(*c.events, "worker.Close")
 }
 
 type requestWorkerServer struct {

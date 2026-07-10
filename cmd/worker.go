@@ -55,6 +55,10 @@ type workerServer interface {
 	InstallOrphanWatcher(*os.File, func())
 }
 
+type workerCloser interface {
+	Close(context.Context)
+}
+
 var workerRunner = func(cfg WorkerRuntimeConfig) error {
 	return runWorkerServer(cfg, os.Stdin)
 }
@@ -170,7 +174,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		return err
 	}
 	server := newWorkerServer(constants.LocalhostAddr+":"+strconv.Itoa(port), w)
-	shutdown := newWorkerShutdown(server, startedHooks, workerShutdownTimeout)
+	shutdown := newWorkerShutdown(server, w, startedHooks, workerShutdownTimeout)
 	server.InstallOrphanWatcher(stdin, shutdown)
 	stopSignals := make(chan os.Signal, 1)
 	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM)
@@ -186,7 +190,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	return err
 }
 
-func newWorkerShutdown(server workerServer, hooks []modulehook.Hook, timeout time.Duration) func() {
+func newWorkerShutdown(server workerServer, closer workerCloser, hooks []modulehook.Hook, timeout time.Duration) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -198,6 +202,7 @@ func newWorkerShutdown(server workerServer, hooks []modulehook.Hook, timeout tim
 			if err := server.Shutdown(ctx); err != nil && errors.Is(err, context.DeadlineExceeded) {
 				_ = server.Close()
 			}
+			closer.Close(ctx)
 		})
 	}
 }

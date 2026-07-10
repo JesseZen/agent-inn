@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"sync"
@@ -65,22 +66,44 @@ type metricsBucket struct {
 }
 
 type metricsEventEmitter struct {
-	pending chan RequestMetricEvent
-	dropped atomic.Int64
+	pending      chan RequestMetricEvent
+	writer       io.Writer
+	closer       io.Closer
+	done         chan struct{}
+	closePending sync.Once
+	closeWriter  sync.Once
+	dropped      atomic.Int64
 }
 
 func newMetricsEventEmitter(writer io.Writer) *metricsEventEmitter {
 	if writer == nil {
 		return nil
 	}
-	emitter := &metricsEventEmitter{pending: make(chan RequestMetricEvent, metricsEventQueueSize)}
-	go func() {
-		encoder := json.NewEncoder(writer)
-		for event := range emitter.pending {
-			_ = encoder.Encode(event)
-		}
-	}()
+	emitter := &metricsEventEmitter{
+		pending: make(chan RequestMetricEvent, metricsEventQueueSize),
+		writer:  writer,
+		done:    make(chan struct{}),
+	}
+	emitter.closer, _ = writer.(io.Closer)
+	go emitter.run()
 	return emitter
+}
+
+func (e *metricsEventEmitter) run() {
+	defer close(e.done)
+	encoder := json.NewEncoder(e.writer)
+	failed := false
+	for event := range e.pending {
+		if failed {
+			e.dropped.Add(1)
+			continue
+		}
+		if err := encoder.Encode(event); err != nil {
+			e.dropped.Add(1)
+			failed = true
+		}
+	}
+	e.closeMetricsWriter()
 }
 
 func (e *metricsEventEmitter) Emit(event RequestMetricEvent) {
@@ -88,6 +111,28 @@ func (e *metricsEventEmitter) Emit(event RequestMetricEvent) {
 	case e.pending <- event:
 	default:
 		e.dropped.Add(1)
+	}
+}
+
+func (e *metricsEventEmitter) Close(ctx context.Context) {
+	e.closePending.Do(func() { close(e.pending) })
+	select {
+	case <-e.done:
+	case <-ctx.Done():
+		e.closeMetricsWriter()
+		<-e.done
+	}
+}
+
+func (e *metricsEventEmitter) closeMetricsWriter() {
+	if e.closer != nil {
+		e.closeWriter.Do(func() { _ = e.closer.Close() })
+	}
+}
+
+func (w *Worker) Close(ctx context.Context) {
+	if w.metricsEmitter != nil {
+		w.metricsEmitter.Close(ctx)
 	}
 }
 
