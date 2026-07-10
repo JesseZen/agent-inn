@@ -120,8 +120,8 @@ export function DialogMetrics() {
           : worker.worker,
         value: { type: "worker" as const, port: worker.port },
         description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
-        details: worker.live.unknown_usage_requests > 0
-          ? [`${worker.live.unknown_usage_requests} requests missing usage; token totals exclude them`]
+        details: worker.totals.unknown_usage_requests > 0
+          ? [`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`]
           : undefined,
         footer: `:${worker.port} ${worker.status}`,
         ...(worker.status === "removed" ? {} : {

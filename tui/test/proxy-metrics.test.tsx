@@ -41,7 +41,7 @@ test("proxy status warns when metric integrity is incomplete", async () => {
     metricsResponder: (range) => {
       const response = metricsResponse(range, 20)
       response.workers[0].live.dropped_events = 3
-      response.workers[0].live.unknown_usage_requests = 4
+      response.workers[0].totals.unknown_usage_requests = 4
       response.skipped_records = 2
       response.persistence_errors = 1
       return response
