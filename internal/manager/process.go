@@ -35,7 +35,7 @@ type ExecProcess struct {
 	forcedStop      bool
 }
 
-const defaultStopGracePeriod = 3 * time.Second
+const defaultManagerStopGracePeriod = 12 * time.Second
 
 func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	executable := s.Executable
@@ -119,7 +119,7 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	}
 	stopGracePeriod := s.StopGracePeriod
 	if stopGracePeriod <= 0 {
-		stopGracePeriod = defaultStopGracePeriod
+		stopGracePeriod = defaultManagerStopGracePeriod
 	}
 	return &ExecProcess{cmd: cmd, stdin: stdinWrite, stopGracePeriod: stopGracePeriod}, nil
 }

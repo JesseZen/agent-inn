@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-const processTestTimeout = 5 * time.Second
+const (
+	processTestTimeout        = 5 * time.Second
+	workerDrainTestDelay      = 10*time.Second + 100*time.Millisecond
+	managerStopProcessTimeout = 15 * time.Second
+)
 
 func TestExecStarterPassesRuntimeConfigOnFD3NotArgv(t *testing.T) {
 	dir := t.TempDir()
@@ -172,6 +176,52 @@ func TestExecProcessStopSendsSIGTERM(t *testing.T) {
 	}
 }
 
+func TestExecProcessDefaultGraceAllowsWorkerMetricsDrain(t *testing.T) {
+	dir := t.TempDir()
+	signalPath := filepath.Join(dir, "signal.txt")
+	readyPath := filepath.Join(dir, "ready")
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
+	gotMetrics := make(chan string, 1)
+
+	process, err := ExecStarter{Executable: os.Args[0]}.Start(WorkerSpawn{
+		Args:        helperProcessArgs("term-drains-metrics", signalPath, readyPath),
+		RuntimeJSON: []byte(`{}`),
+		MetricsHandler: func(r io.Reader) {
+			data, _ := io.ReadAll(r)
+			gotMetrics <- string(bytes.TrimSpace(data))
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForFile(t, readyPath)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- process.Stop()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(managerStopProcessTimeout):
+		t.Fatal("manager stop did not allow the worker drain to finish")
+	}
+	if process.(*ExecProcess).ForcedStop() {
+		t.Fatal("manager default grace force-killed the worker during its metrics drain window")
+	}
+	select {
+	case got := <-gotMetrics:
+		if got != `{"drained":true}` {
+			t.Fatalf("unexpected drained metrics payload: %q", got)
+		}
+	case <-time.After(processTestTimeout):
+		t.Fatal("timed out waiting for drained metrics payload")
+	}
+}
+
 func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
@@ -214,6 +264,31 @@ func TestExecProcessHelper(t *testing.T) {
 		}
 		if file := os.NewFile(uintptr(4), "metrics-fd"); file != nil {
 			_, _ = file.Write([]byte(`{"ok":true}` + "\n"))
+			_ = file.Close()
+			os.Exit(0)
+		}
+		os.Exit(2)
+	}
+	if len(args) == 5 && args[0] == "term-drains-metrics" {
+		if args[3] != "--metrics-fd" || args[4] != "4" {
+			os.Exit(2)
+		}
+		if file := os.NewFile(uintptr(3), "config-fd"); file != nil {
+			_, _ = io.Copy(io.Discard, file)
+			_ = file.Close()
+		}
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		if err := os.WriteFile(args[2], []byte("ready"), 0600); err != nil {
+			os.Exit(2)
+		}
+		if sig := <-signals; sig == syscall.SIGTERM {
+			_ = os.WriteFile(args[1], []byte("TERM"), 0600)
+		}
+		time.Sleep(workerDrainTestDelay)
+		if file := os.NewFile(uintptr(4), "metrics-fd"); file != nil {
+			_, _ = file.Write([]byte(`{"drained":true}` + "\n"))
 			_ = file.Close()
 			os.Exit(0)
 		}

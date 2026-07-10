@@ -135,6 +135,7 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 		},
 		WorkerClient: &recordingWorkerClient{statusBody: string(statusJSON)},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	m.statuses["app"] = WorkerStateRunning
 	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
@@ -264,6 +265,7 @@ func TestManagerAPIMetricsUsesProductionWorkerStatusForLiveMetrics(t *testing.T)
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	m.statuses["app"] = WorkerStateRunning
 	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
@@ -327,6 +329,7 @@ func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	sub := m.events.Subscribe(0)
 	defer sub.Close()
@@ -526,6 +529,12 @@ func TestManagerCloseCancelsPendingMetricsUpdatedEvent(t *testing.T) {
 		Status:    http.StatusOK,
 	})
 	m.Close()
+	m.mu.RLock()
+	pendingCount := len(m.pendingMetrics)
+	m.mu.RUnlock()
+	if pendingCount != 0 {
+		t.Fatalf("manager close left %d pending metrics timers", pendingCount)
+	}
 
 	for event := range sub.C {
 		if event.Type == EventMetricsUpdated {
@@ -554,6 +563,7 @@ func TestManagerLogsMetricsPersistenceFailureAndPublishesUpdate(t *testing.T) {
 		},
 		Logger: logging.New(&logBuf, "detail", logging.ComponentManagerSuper),
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	sub := m.events.Subscribe(0)
 	defer sub.Close()
@@ -635,6 +645,7 @@ func TestManagerConfigSyncKeepsMetricsStoreDuringConcurrentPersistence(t *testin
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	initialStore := m.metricsStore
 
@@ -735,6 +746,7 @@ func TestManagerMetricsQueryDoesNotBlockRecordOrConfigSync(t *testing.T) {
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 
 	releaseQuery := make(chan struct{})
@@ -863,6 +875,7 @@ func TestManagerRecordsWorkerMetricsUsingEventUpstreamAfterRuntimeChange(t *test
 		},
 		WorkerClient: &recordingWorkerClient{statusBody: string(statusJSON)},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	m.statuses["app"] = WorkerStateRunning
 	source := workerMetricSource{name: "app", port: 6767}
@@ -1036,6 +1049,7 @@ func TestManagerReadsAndQueriesLargeWorkerMetricLines(t *testing.T) {
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	largePath := "/" + strings.Repeat("x", 70*1024)
 	records := []worker.RequestMetricEvent{
@@ -1090,6 +1104,7 @@ func TestManagerAPIMetricsIncludesStoppedWorkerWithZeroLiveMetrics(t *testing.T)
 			},
 		},
 	})
+	defer m.Close()
 	m.clock = func() time.Time { return now }
 	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
 		Timestamp: now,
@@ -4576,6 +4591,7 @@ func TestManagerSettingsRetentionPatchCleansExpiredMetricsRecords(t *testing.T) 
 		}},
 	})
 	defer m.Close()
+	m.store.SetWriterForTest(func(string, []byte, os.FileMode) error { return nil })
 	m.clock = func() time.Time { return now }
 	if _, err := os.Stat(expiredPath); err != nil {
 		t.Fatalf("initial retention should keep metrics file: %v", err)
