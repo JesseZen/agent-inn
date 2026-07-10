@@ -104,6 +104,7 @@ export type MetricsResponse = {
   range: { name: MetricsRangeName; start: string; end: string }
   workers: WorkerMetricsAggregate[]
   skipped_records: number
+  persistence_errors: number
 }
 
 export type WorkerSummary = {

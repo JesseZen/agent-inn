@@ -103,13 +103,14 @@ export function DialogMetrics() {
     const result = metrics()
     return [
       ...RANGES.map((item) => ({
-        title: item.title,
+        title: item.value === range() && result && result.persistence_errors > 0
+          ? `${item.title} • ${result.persistence_errors} persistence error${result.persistence_errors === 1 ? "" : "s"}`
+          : item.title,
         value: { type: "range" as const, range: item.value },
-        description: item.value === range()
-          ? result && result.skipped_records > 0
-            ? `selected • ${result.skipped_records} persisted records unreadable`
-            : "selected"
-          : "",
+        description: item.value === range() ? "selected" : "",
+        details: item.value === range() && result && result.skipped_records > 0
+          ? [`${result.skipped_records} persisted records unreadable`]
+          : undefined,
         category: "Range",
         onSelect: () => loadMetrics(item.value),
       })),
@@ -119,8 +120,10 @@ export function DialogMetrics() {
           : worker.worker,
         value: { type: "worker" as const, port: worker.port },
         description: `RPM ${worker.live.rpm} • TPM ${worker.live.tpm} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
+        details: worker.live.unknown_usage_requests > 0
+          ? [`${worker.live.unknown_usage_requests} requests missing usage; token totals exclude them`]
+          : undefined,
         footer: `:${worker.port} ${worker.status}`,
-        category: "Workers",
         ...(worker.status === "removed" ? {} : {
           onSelect: async () => {
             try {

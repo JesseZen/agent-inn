@@ -16,6 +16,7 @@ function metricsResponse(range: MetricsRangeName, totalTokens: number): MetricsR
       totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: totalTokens, unknown_usage_requests: 0 },
     }],
     skipped_records: 0,
+    persistence_errors: 0,
   }
 }
 
@@ -35,12 +36,14 @@ test("proxy status opens metrics console with today's totals", async () => {
   }
 })
 
-test("proxy status warns about dropped events and skipped records", async () => {
+test("proxy status warns when metric integrity is incomplete", async () => {
   const app = await mountProxyApp({
     metricsResponder: (range) => {
       const response = metricsResponse(range, 20)
       response.workers[0].live.dropped_events = 3
+      response.workers[0].live.unknown_usage_requests = 4
       response.skipped_records = 2
+      response.persistence_errors = 1
       return response
     },
   })
@@ -49,7 +52,11 @@ test("proxy status warns about dropped events and skipped records", async () => 
     await wait(async () => {
       await app.render()
       const frame = app.frame()
-      return frame.includes("3 live events dropped") && frame.includes("2 persisted records unreadable")
+      return frame.includes("3 live events dropped")
+        && frame.includes("4 requests missing usage")
+        && frame.includes("token totals exclude them")
+        && frame.includes("2 persisted records unreadable")
+        && frame.includes("1 persistence error")
     })
   } finally {
     await app.cleanup()

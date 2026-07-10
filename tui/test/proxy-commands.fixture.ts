@@ -270,10 +270,11 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           port: 6767,
           status: "running",
           upstream: "openai",
-          live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: metrics.tpm, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: metrics.total_tokens, unknown_usage_requests: 0 },
+          live: { window_seconds: 60, in_flight: 0, requests: 1, errors: 0, rpm: 1, tpm: metrics.tpm, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: metrics.total_tokens, unknown_usage_requests: 0, dropped_events: 0 },
           totals: { requests: 1, errors: 0, avg_latency_ms: 120, input_tokens: 12, output_tokens: 8, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, total_tokens: metrics.total_tokens, unknown_usage_requests: 0 },
         }],
         skipped_records: 0,
+        persistence_errors: 0,
       })
     }
     if (url.pathname.startsWith("/api/workers/") && url.search === "" && !url.pathname.includes("/modules/")) {
