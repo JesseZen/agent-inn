@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -233,6 +235,53 @@ func TestMetricsEventEmitterCancellationCountsUndrainedEvents(t *testing.T) {
 
 	if writer.CloseCount() != 1 || emitter.dropped.Load() != 3 {
 		t.Fatalf("bad canceled close: closes=%d dropped=%d", writer.CloseCount(), emitter.dropped.Load())
+	}
+}
+
+func TestMetricsEventEmitterConcurrentCloseAndEmitDropsWithoutPanic(t *testing.T) {
+	emitter := newMetricsEventEmitter(io.Discard)
+	const (
+		senderCount = 32
+		emitCount   = 1024
+	)
+	start := make(chan struct{})
+	var panics atomic.Int64
+	var senders sync.WaitGroup
+	senders.Add(senderCount)
+	for range senderCount {
+		go func() {
+			defer senders.Done()
+			<-start
+			for range emitCount {
+				func() {
+					defer func() {
+						if recover() != nil {
+							panics.Add(1)
+						}
+					}()
+					emitter.Emit(RequestMetricEvent{})
+				}()
+			}
+		}()
+	}
+	closed := make(chan struct{})
+	go func() {
+		<-start
+		emitter.Close(context.Background())
+		close(closed)
+	}()
+
+	close(start)
+	senders.Wait()
+	<-closed
+
+	if got := panics.Load(); got != 0 {
+		t.Fatalf("concurrent close/send panicked %d times", got)
+	}
+	dropped := emitter.dropped.Load()
+	emitter.Emit(RequestMetricEvent{})
+	if got := emitter.dropped.Load(); got != dropped+1 {
+		t.Fatalf("post-close emit did not increment dropped count: got %d want %d", got, dropped+1)
 	}
 }
 

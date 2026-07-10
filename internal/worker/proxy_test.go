@@ -467,8 +467,77 @@ func TestWorkerMetricsRecordsUsageFromCompressedUpstreamResponses(t *testing.T) 
 				if gotMetrics != wantMetrics {
 					t.Fatalf("bad compressed metrics event:\ngot  %#v\nwant %#v", gotMetrics, wantMetrics)
 				}
+				gotSnapshot := workerInstance.MetricsSnapshot()
+				wantSnapshot := MetricsSnapshot{
+					WindowSeconds:   MetricsWindowSeconds,
+					Requests:        1,
+					RPM:             1,
+					TPM:             18,
+					AvgLatencyMS:    gotSnapshot.AvgLatencyMS,
+					InputTokens:     11,
+					OutputTokens:    7,
+					CacheReadTokens: 4,
+					ReasoningTokens: 2,
+					TotalTokens:     18,
+				}
+				if gotSnapshot != wantSnapshot {
+					t.Fatalf("compressed request was not counted exactly once:\ngot  %#v\nwant %#v", gotSnapshot, wantSnapshot)
+				}
 			})
 		}
+	}
+}
+
+func TestUsageObservingReadCloserDoesNotWaitForSlowCompressedObservation(t *testing.T) {
+	const compressedBodySize = 2 * 1024 * 1024
+	body := make([]byte, compressedBodySize)
+	state := uint32(1)
+	for i := range body {
+		state ^= state << 13
+		state ^= state >> 17
+		state ^= state << 5
+		body[i] = byte(state)
+	}
+	compressed := compressProxyResponse(t, contentEncodingGzip, body)
+	observer := &blockingUsageObserver{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	observed := newUsageObservingReadCloser(io.NopCloser(bytes.NewReader(compressed)), contentEncodingGzip, observer)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, observed)
+		if closeErr := observed.Close(); err == nil {
+			err = closeErr
+		}
+		done <- err
+	}()
+
+	select {
+	case <-observer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("compressed observation did not start")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(observer.release)
+		<-done
+		t.Fatal("raw compressed copy waited for metrics processing")
+	}
+
+	result := observed.usageResult()
+	if result.pending == nil {
+		t.Fatal("compressed usage result was not asynchronous")
+	}
+	close(observer.release)
+	metadata := <-result.pending
+	if metadata != (responseUsageMetadata{Usage: UsageTokens{Known: false}}) {
+		t.Fatalf("truncated compressed observation should be unknown: %#v", metadata)
 	}
 }
 
@@ -609,6 +678,25 @@ type blockingMetricsWriter struct {
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
+}
+
+type blockingUsageObserver struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (o *blockingUsageObserver) Observe([]byte) {
+	o.once.Do(func() { close(o.entered) })
+	<-o.release
+}
+
+func (o *blockingUsageObserver) Finish() UsageTokens {
+	return UsageTokens{Known: true, TotalTokens: 1}
+}
+
+func (o *blockingUsageObserver) Model() string {
+	return "blocked"
 }
 
 type transformedUsageMiddleware struct{}

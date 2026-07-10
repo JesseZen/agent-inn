@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"fmt"
 	"io"
@@ -36,6 +35,7 @@ type Worker struct {
 	logger         *slog.Logger
 	metrics        *MetricsTracker
 	metricsEmitter *metricsEventEmitter
+	metricFinishes sync.WaitGroup
 }
 
 type Options struct {
@@ -154,9 +154,23 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		Model:         result.Model,
 		Usage:         result.Usage,
 	}
-	w.metrics.Finish(event)
-	if w.metricsEmitter != nil {
-		w.metricsEmitter.Emit(event)
+	if result.pending == nil {
+		w.metrics.Finish(event)
+		if w.metricsEmitter != nil {
+			w.metricsEmitter.Emit(event)
+		}
+	} else {
+		w.metricFinishes.Add(1)
+		go func() {
+			defer w.metricFinishes.Done()
+			metadata := <-result.pending
+			event.Model = metadata.Model
+			event.Usage = metadata.Usage
+			w.metrics.Finish(event)
+			if w.metricsEmitter != nil {
+				w.metricsEmitter.Emit(event)
+			}
+		}()
 	}
 	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventRequestDone,
@@ -295,13 +309,12 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		)
 		return responseCopyResult{}, err
 	}
-	rawObserver := NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type"))
-	defer rawObserver.Finish()
-	upstreamHTTPResp.Body = newUsageObservingReadCloser(
+	observedBody := newUsageObservingReadCloser(
 		upstreamHTTPResp.Body,
 		upstreamHTTPResp.Header.Get("Content-Encoding"),
-		rawObserver,
+		NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type")),
 	)
+	upstreamHTTPResp.Body = observedBody
 	proxyResp := &module.ProxyResponse{
 		StatusCode:  upstreamHTTPResp.StatusCode,
 		Headers:     upstreamHTTPResp.Header.Clone(),
@@ -325,10 +338,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	}
 
 	err = copyProxyResponse(ctx, rw, proxyResp)
-	return responseCopyResult{
-		Usage: rawObserver.Finish(),
-		Model: rawObserver.Model(),
-	}, err
+	return observedBody.usageResult(), err
 }
 
 func readRequestBody(r *http.Request) ([]byte, string, error) {
@@ -366,98 +376,9 @@ func readRequestBody(r *http.Request) ([]byte, string, error) {
 }
 
 type responseCopyResult struct {
-	Usage UsageTokens
-	Model string
-}
-
-type usageObservingReadCloser struct {
-	io.ReadCloser
-	observer      *UsageObserver
-	encodedWriter *io.PipeWriter
-	decodeDone    chan struct{}
-	finishOnce    sync.Once
-}
-
-func newUsageObservingReadCloser(body io.ReadCloser, contentEncoding string, observer *UsageObserver) *usageObservingReadCloser {
-	result := &usageObservingReadCloser{ReadCloser: body, observer: observer}
-	encoding := strings.ToLower(strings.TrimSpace(contentEncoding))
-	if encoding != contentEncodingGzip && encoding != contentEncodingDeflate && encoding != contentEncodingZstd {
-		return result
-	}
-	encodedReader, encodedWriter := io.Pipe()
-	result.encodedWriter = encodedWriter
-	result.decodeDone = make(chan struct{})
-	go observeDecodedUsage(encodedReader, encoding, observer, result.decodeDone)
-	return result
-}
-
-func (r *usageObservingReadCloser) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p)
-	if n > 0 {
-		if r.encodedWriter == nil {
-			r.observer.Observe(p[:n])
-		} else {
-			_, _ = r.encodedWriter.Write(p[:n])
-		}
-	}
-	if err != nil {
-		r.finishDecoding()
-	}
-	return n, err
-}
-
-func (r *usageObservingReadCloser) Close() error {
-	r.finishDecoding()
-	return r.ReadCloser.Close()
-}
-
-func (r *usageObservingReadCloser) finishDecoding() {
-	r.finishOnce.Do(func() {
-		if r.encodedWriter == nil {
-			return
-		}
-		_ = r.encodedWriter.Close()
-		<-r.decodeDone
-	})
-}
-
-func observeDecodedUsage(encodedReader *io.PipeReader, encoding string, observer *UsageObserver, done chan<- struct{}) {
-	defer close(done)
-	defer encodedReader.Close()
-	var reader io.Reader
-	switch encoding {
-	case contentEncodingGzip:
-		decoded, err := gzip.NewReader(encodedReader)
-		if err != nil {
-			return
-		}
-		defer decoded.Close()
-		reader = decoded
-	case contentEncodingDeflate:
-		decoded, err := zlib.NewReader(encodedReader)
-		if err != nil {
-			return
-		}
-		defer decoded.Close()
-		reader = decoded
-	case contentEncodingZstd:
-		decoded, err := zstd.NewReader(encodedReader)
-		if err != nil {
-			return
-		}
-		defer decoded.Close()
-		reader = decoded
-	}
-	buf := make([]byte, proxyResponseBufferSize)
-	for {
-		n, err := reader.Read(buf)
-		if n > 0 {
-			observer.Observe(buf[:n])
-		}
-		if err != nil {
-			return
-		}
-	}
+	Usage   UsageTokens
+	Model   string
+	pending <-chan responseUsageMetadata
 }
 
 func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) error {

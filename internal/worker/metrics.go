@@ -66,13 +66,14 @@ type metricsBucket struct {
 }
 
 type metricsEventEmitter struct {
-	pending      chan RequestMetricEvent
-	writer       io.Writer
-	closer       io.Closer
-	done         chan struct{}
-	closePending sync.Once
-	closeWriter  sync.Once
-	dropped      atomic.Int64
+	mu          sync.Mutex
+	pending     chan RequestMetricEvent
+	writer      io.Writer
+	closer      io.Closer
+	done        chan struct{}
+	closeWriter sync.Once
+	closed      bool
+	dropped     atomic.Int64
 }
 
 func newMetricsEventEmitter(writer io.Writer) *metricsEventEmitter {
@@ -107,6 +108,12 @@ func (e *metricsEventEmitter) run() {
 }
 
 func (e *metricsEventEmitter) Emit(event RequestMetricEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		e.dropped.Add(1)
+		return
+	}
 	select {
 	case e.pending <- event:
 	default:
@@ -115,7 +122,12 @@ func (e *metricsEventEmitter) Emit(event RequestMetricEvent) {
 }
 
 func (e *metricsEventEmitter) Close(ctx context.Context) {
-	e.closePending.Do(func() { close(e.pending) })
+	e.mu.Lock()
+	if !e.closed {
+		e.closed = true
+		close(e.pending)
+	}
+	e.mu.Unlock()
 	select {
 	case <-e.done:
 	case <-ctx.Done():
@@ -131,6 +143,15 @@ func (e *metricsEventEmitter) closeMetricsWriter() {
 }
 
 func (w *Worker) Close(ctx context.Context) {
+	finished := make(chan struct{})
+	go func() {
+		w.metricFinishes.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+	}
 	if w.metricsEmitter != nil {
 		w.metricsEmitter.Close(ctx)
 	}
