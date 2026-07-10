@@ -80,6 +80,35 @@ func TestRuntimeBuilderBuildsCompleteWorkerRuntime(t *testing.T) {
 	}
 }
 
+func TestRuntimeBuilderCarriesUpstreamStreamTimeouts(t *testing.T) {
+	runtime, err := (RuntimeBuilder{}).Build(config.Config{
+		Plugins: testPluginDefinitions(),
+		Workers: map[string]config.WorkerConfig{
+			"app": {Port: 6767, Upstream: "openai"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				StreamTimeouts: config.StreamTimeoutConfig{
+					FirstByteSeconds: 75,
+					IdleSeconds:      180,
+				},
+			},
+		},
+	}, "app", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := appruntime.StreamTimeouts{
+		FirstByteMilliseconds: 75_000,
+		IdleMilliseconds:      180_000,
+	}
+	if !reflect.DeepEqual(runtime.StreamTimeouts, want) {
+		t.Fatalf("unexpected stream timeouts:\n got %#v\nwant %#v", runtime.StreamTimeouts, want)
+	}
+}
+
 func TestRuntimeBuilderRejectsUndefinedWorkerPlugin(t *testing.T) {
 	cfg := runtimeBuilderConfig()
 	worker := cfg.Workers["cli-openai"]

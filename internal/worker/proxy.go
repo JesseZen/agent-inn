@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -153,6 +154,7 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		ResponseBytes: rec.written,
 		Model:         result.Model,
 		Usage:         result.Usage,
+		Failure:       result.Failure,
 	}
 	if result.pending == nil {
 		w.metrics.Finish(event)
@@ -307,7 +309,10 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			"url", upstreamURL,
 			"err", err.Error(),
 		)
-		return responseCopyResult{}, err
+		return responseCopyResult{Failure: &UpstreamFailure{
+			Kind:            UpstreamFailureTransport,
+			BeforeFirstByte: true,
+		}}, err
 	}
 	observedBody := newUsageObservingReadCloser(
 		upstreamHTTPResp.Body,
@@ -336,9 +341,43 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			return responseCopyResult{}, err
 		}
 	}
+	if isEventStreamResponse(proxyResp) {
+		proxyResp.Body = newStreamDeadlineReadCloser(
+			proxyResp.Body,
+			time.Duration(snapshot.StreamTimeouts.FirstByteMilliseconds)*time.Millisecond,
+			time.Duration(snapshot.StreamTimeouts.IdleMilliseconds)*time.Millisecond,
+		)
+	}
 
 	err = copyProxyResponse(ctx, rw, proxyResp)
-	return observedBody.usageResult(), err
+	result := observedBody.usageResult()
+	if upstreamHTTPResp.StatusCode >= http.StatusInternalServerError {
+		result.Failure = &UpstreamFailure{
+			Kind:            UpstreamFailureStatus,
+			BeforeFirstByte: true,
+			StatusCode:      upstreamHTTPResp.StatusCode,
+		}
+	} else if errors.Is(err, ErrStreamFirstByteTimeout) {
+		result.Failure = &UpstreamFailure{
+			Kind:            UpstreamFailureFirstByteTimeout,
+			BeforeFirstByte: true,
+		}
+	} else if errors.Is(err, ErrStreamIdleTimeout) {
+		result.Failure = &UpstreamFailure{
+			Kind:            UpstreamFailureIdleTimeout,
+			BeforeFirstByte: false,
+		}
+	}
+	return result, err
+}
+
+func isEventStreamResponse(response *module.ProxyResponse) bool {
+	for _, contentType := range []string{response.ContentType, response.Headers.Get("Content-Type")} {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream") {
+			return true
+		}
+	}
+	return false
 }
 
 func readRequestBody(r *http.Request) ([]byte, string, error) {
@@ -379,6 +418,7 @@ type responseCopyResult struct {
 	Usage   UsageTokens
 	Model   string
 	pending <-chan responseUsageMetadata
+	Failure *UpstreamFailure
 }
 
 func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) error {

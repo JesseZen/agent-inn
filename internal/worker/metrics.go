@@ -13,16 +13,32 @@ const MetricsWindowSeconds = 60
 const errorStatusFloor = 400
 const metricsEventQueueSize = 256
 
+type UpstreamFailureKind string
+
+const (
+	UpstreamFailureTransport        UpstreamFailureKind = "transport"
+	UpstreamFailureStatus           UpstreamFailureKind = "upstream_status"
+	UpstreamFailureFirstByteTimeout UpstreamFailureKind = "first_byte_timeout"
+	UpstreamFailureIdleTimeout      UpstreamFailureKind = "idle_timeout"
+)
+
+type UpstreamFailure struct {
+	Kind            UpstreamFailureKind `json:"kind"`
+	BeforeFirstByte bool                `json:"before_first_byte"`
+	StatusCode      int                 `json:"status_code,omitempty"`
+}
+
 type RequestMetricEvent struct {
-	Timestamp     time.Time   `json:"timestamp"`
-	Upstream      string      `json:"upstream"`
-	Model         string      `json:"model,omitempty"`
-	Method        string      `json:"method"`
-	Path          string      `json:"path"`
-	Status        int         `json:"status"`
-	DurationMS    int64       `json:"duration_ms"`
-	ResponseBytes int64       `json:"response_bytes"`
-	Usage         UsageTokens `json:"usage"`
+	Timestamp     time.Time        `json:"timestamp"`
+	Upstream      string           `json:"upstream"`
+	Model         string           `json:"model,omitempty"`
+	Method        string           `json:"method"`
+	Path          string           `json:"path"`
+	Status        int              `json:"status"`
+	DurationMS    int64            `json:"duration_ms"`
+	ResponseBytes int64            `json:"response_bytes"`
+	Usage         UsageTokens      `json:"usage"`
+	Failure       *UpstreamFailure `json:"failure,omitempty"`
 }
 
 type MetricsSnapshot struct {
