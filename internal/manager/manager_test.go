@@ -187,6 +187,35 @@ func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 	}
 }
 
+func TestManagerStartupCleansExpiredMetricsRecords(t *testing.T) {
+	stateDir := t.TempDir()
+	metricsDir := filepath.Join(stateDir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	today := startOfLocalDay(time.Now())
+	expiredPath := filepath.Join(metricsDir, metricsFileName(today.AddDate(0, 0, -1)))
+	currentPath := filepath.Join(metricsDir, metricsFileName(today))
+	for _, path := range []string{expiredPath, currentPath} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := New(Config{Config: config.Config{Settings: config.Settings{
+		StateDir: stateDir,
+		Metrics:  config.MetricsSettings{RetentionDays: 1},
+	}}})
+	defer m.Close()
+
+	if _, err := os.Stat(expiredPath); !os.IsNotExist(err) {
+		t.Fatalf("manager startup should remove expired metrics file: %v", err)
+	}
+	if _, err := os.Stat(currentPath); err != nil {
+		t.Fatalf("manager startup should retain current metrics file: %v", err)
+	}
+}
+
 func TestManagerAPIMetricsUsesProductionWorkerStatusForLiveMetrics(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
@@ -338,6 +367,170 @@ func TestManagerPublishesMetricsUpdatedEvent(t *testing.T) {
 	gotWorker, gotPort, gotMetrics, ok = decoded.AsMetricsUpdated()
 	if !ok || gotWorker != "app" || gotPort != 6767 || !reflect.DeepEqual(gotMetrics, wantMetrics) {
 		t.Fatalf("decoded metrics event accessor failed: worker=%q port=%d metrics=%#v ok=%v", gotWorker, gotPort, gotMetrics, ok)
+	}
+}
+
+func TestManagerCoalescesMetricsUpdatedBurstWithLatestSnapshot(t *testing.T) {
+	const eventCount = defaultEventBusCapacity + 128
+
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: t.TempDir()},
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	defer m.Close()
+	m.mu.Lock()
+	m.metricsStore = nil
+	m.mu.Unlock()
+	m.publishEvent(EventConfigStatusChanged, map[string]any{"generation": 1})
+
+	for i := 0; i < eventCount; i++ {
+		m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+			Timestamp: time.Now(),
+			Upstream:  "openai",
+			Method:    "POST",
+			Path:      "/v1/responses",
+			Status:    http.StatusOK,
+			Usage:     worker.UsageTokens{Known: true, TotalTokens: 1},
+		})
+	}
+	time.Sleep(250 * time.Millisecond)
+
+	events := m.events.Replay(0)
+	metricsEvents := make([]Event, 0, len(events))
+	configEvents := 0
+	for _, event := range events {
+		switch event.Type {
+		case EventMetricsUpdated:
+			metricsEvents = append(metricsEvents, event)
+		case EventConfigStatusChanged:
+			configEvents++
+		}
+	}
+	if configEvents != 1 {
+		t.Fatalf("metrics burst evicted manager control event: %#v", events)
+	}
+	if len(metricsEvents) != 1 {
+		t.Fatalf("metrics burst published %d updates, want 1", len(metricsEvents))
+	}
+	workerName, port, snapshot, ok := metricsEvents[0].AsMetricsUpdated()
+	got := struct {
+		Worker   string
+		Port     int
+		Snapshot worker.MetricsSnapshot
+		OK       bool
+	}{workerName, port, snapshot, ok}
+	want := struct {
+		Worker   string
+		Port     int
+		Snapshot worker.MetricsSnapshot
+		OK       bool
+	}{
+		Worker: "app",
+		Port:   6767,
+		Snapshot: worker.MetricsSnapshot{
+			WindowSeconds: worker.MetricsWindowSeconds,
+			Requests:      eventCount,
+			RPM:           eventCount,
+			TPM:           eventCount,
+			TotalTokens:   eventCount,
+		},
+		OK: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("coalesced metrics update did not contain latest snapshot:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerMetricsUpdatedCoalescingPersistsEveryEvent(t *testing.T) {
+	const eventCount = 64
+
+	stateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: stateDir},
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+
+	for i := 0; i < eventCount; i++ {
+		m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+			Timestamp: now,
+			Upstream:  "openai",
+			Method:    "POST",
+			Path:      "/v1/responses",
+			Status:    http.StatusOK,
+			Usage:     worker.UsageTokens{Known: true, TotalTokens: 1},
+		})
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected metrics status %d: %s", res.Code, res.Body.String())
+	}
+	var got MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	start := startOfLocalDay(now)
+	want := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{{
+			Worker: "app", Port: 6767, Status: "configured", Upstream: "openai",
+			Totals: MetricsTotals{Requests: eventCount, TotalTokens: eventCount},
+		}},
+		SkippedRecords: 0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("coalescing dropped persisted metrics events:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerCloseCancelsPendingMetricsUpdatedEvent(t *testing.T) {
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: t.TempDir()},
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+	})
+	m.mu.Lock()
+	m.metricsStore = nil
+	m.mu.Unlock()
+	sub := m.events.Subscribe(0)
+
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+		Timestamp: time.Now(),
+		Upstream:  "openai",
+		Method:    "POST",
+		Path:      "/v1/responses",
+		Status:    http.StatusOK,
+	})
+	m.Close()
+
+	for event := range sub.C {
+		if event.Type == EventMetricsUpdated {
+			t.Fatalf("manager close should cancel pending metrics update: %#v", event)
+		}
 	}
 }
 
@@ -4360,6 +4553,44 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 	}
 	if loaded.Settings.Terminal.Opener != "default" {
 		t.Fatalf("settings patch should preserve omitted terminal opener: %#v", loaded.Settings.Terminal)
+	}
+}
+
+func TestManagerSettingsRetentionPatchCleansExpiredMetricsRecords(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	metricsDir := filepath.Join(stateDir, "metrics")
+	if err := os.MkdirAll(metricsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := startOfLocalDay(time.Now()).Add(12 * time.Hour)
+	expiredPath := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -10)))
+	if err := os.WriteFile(expiredPath, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{
+		ConfigPath: filepath.Join(dir, "config.yaml"),
+		Config: config.Config{Settings: config.Settings{
+			StateDir: stateDir,
+			Metrics:  config.MetricsSettings{RetentionDays: 30},
+		}},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	if _, err := os.Stat(expiredPath); err != nil {
+		t.Fatalf("initial retention should keep metrics file: %v", err)
+	}
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(
+		res,
+		httptest.NewRequest(http.MethodPatch, "http://manager.local/api/settings", strings.NewReader(`{"metrics":{"retention_days":7}}`)),
+	)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(expiredPath); !os.IsNotExist(err) {
+		t.Fatalf("retention patch should immediately remove expired metrics file: %v", err)
 	}
 }
 

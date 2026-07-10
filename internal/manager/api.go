@@ -781,6 +781,15 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, status := m.syncConfigFromStore()
+	if patch.Metrics != nil && patch.Metrics.RetentionDays != nil {
+		m.mu.RLock()
+		store := m.metricsStore
+		m.mu.RUnlock()
+		if err := store.CleanupRetention(); err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err), "status": status})
+			return
+		}
+	}
 	if m.reconcileTurnHooks {
 		if err := hostedhooks.Reconcile(cfg.Settings); err != nil {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err), "status": status})

@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	MetricsRangeToday   MetricsRangeName = "today"
-	MetricsRangeLast24H MetricsRangeName = "last_24h"
+	MetricsRangeToday          MetricsRangeName = "today"
+	MetricsRangeLast24H        MetricsRangeName = "last_24h"
+	metricsUpdatedPublishDelay                  = 100 * time.Millisecond
 )
 
 type MetricsRangeName string
@@ -95,11 +96,18 @@ type metricsStore struct {
 	clock      func() time.Time
 	settingsMu sync.RWMutex
 	writeMu    sync.Mutex
+	cleanupDay time.Time
 }
 
 type workerMetricSource struct {
 	name string
 	port int
+}
+
+type pendingMetricsUpdate struct {
+	port    int
+	metrics worker.MetricsSnapshot
+	timer   *time.Timer
 }
 
 func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
@@ -143,6 +151,11 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
+	cleanupDay := startOfLocalDay(s.clock())
+	if cleanupDay.Equal(s.cleanupDay) {
+		return nil
+	}
+	s.cleanupDay = cleanupDay
 	return s.cleanupRetentionLocked(settings)
 }
 
@@ -255,6 +268,7 @@ func (s *metricsStore) CleanupRetention() error {
 	s.settingsMu.RLock()
 	settings := s.settings
 	s.settingsMu.RUnlock()
+	s.cleanupDay = startOfLocalDay(s.clock())
 	return s.cleanupRetentionLocked(settings)
 }
 
@@ -416,6 +430,31 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 	tracker.Finish(event)
 	snapshot := tracker.Snapshot()
 	store := m.metricsStore
+	pending := m.pendingMetrics[source.name]
+	if pending == nil && m.events != nil {
+		workerName := source.name
+		pending = &pendingMetricsUpdate{}
+		m.pendingMetrics[workerName] = pending
+		pending.timer = time.AfterFunc(metricsUpdatedPublishDelay, func() {
+			m.mu.Lock()
+			latest := m.pendingMetrics[workerName]
+			if latest == nil {
+				m.mu.Unlock()
+				return
+			}
+			delete(m.pendingMetrics, workerName)
+			events := m.events
+			payload := map[string]any{"worker": workerName, "port": latest.port, "metrics": latest.metrics}
+			m.mu.Unlock()
+			if events != nil {
+				events.Publish(EventMetricsUpdated, payload)
+			}
+		})
+	}
+	if pending != nil {
+		pending.port = source.port
+		pending.metrics = snapshot
+	}
 	m.mu.Unlock()
 
 	if store != nil {
@@ -445,7 +484,6 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 			)
 		}
 	}
-	m.publishEvent(EventMetricsUpdated, map[string]any{"worker": source.name, "port": source.port, "metrics": snapshot})
 }
 
 func readJSONLLines(r io.Reader, handle func([]byte)) error {

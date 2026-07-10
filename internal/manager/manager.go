@@ -68,6 +68,7 @@ type Manager struct {
 	hookStatuses       map[string]map[string]modulehook.Status
 	metricsStore       *metricsStore
 	metricsTrackers    map[string]*worker.MetricsTracker
+	pendingMetrics     map[string]*pendingMetricsUpdate
 	metricsStatusSem   chan struct{}
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
@@ -198,12 +199,16 @@ func New(cfg Config) *Manager {
 		logs:               map[string]*logging.WorkerLogSink{},
 		hookStatuses:       map[string]map[string]modulehook.Status{},
 		metricsTrackers:    map[string]*worker.MetricsTracker{},
+		pendingMetrics:     map[string]*pendingMetricsUpdate{},
 		metricsStatusSem:   make(chan struct{}, metricsHydrationConcurrencyLimit),
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
 	m.metricsStore = newMetricsStore(cfg.Config.Settings, func() time.Time { return m.clock() })
+	if err := m.metricsStore.CleanupRetention(); err != nil {
+		m.logger.Error(logging.EventMetricsPersist, "operation", "retention_cleanup", "err", err.Error())
+	}
 	if cfg.ConfigPath != "" {
 		m.stopConfigWriter = store.StartAsyncWriter()
 	}
@@ -259,6 +264,10 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	stopConfigWriter := m.stopConfigWriter
 	m.stopConfigWriter = nil
+	for workerName, pending := range m.pendingMetrics {
+		pending.timer.Stop()
+		delete(m.pendingMetrics, workerName)
+	}
 	events := m.events
 	m.events = nil
 	m.mu.Unlock()

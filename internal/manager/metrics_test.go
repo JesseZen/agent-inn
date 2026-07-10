@@ -550,33 +550,97 @@ func TestMetricsStoreCleanupRetentionKeepsExactNumberOfLocalDates(t *testing.T) 
 	}
 }
 
-func TestMetricsStoreRecordRunsRetentionCleanup(t *testing.T) {
+func TestMetricsStoreCleanupRetentionPreservesNonPositiveDefaults(t *testing.T) {
+	for _, retentionDays := range []int{0, -1} {
+		t.Run(fmt.Sprintf("retention_%d", retentionDays), func(t *testing.T) {
+			dir := t.TempDir()
+			metricsDir := filepath.Join(dir, "metrics")
+			if err := os.MkdirAll(metricsDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"usage-2026-06-10.jsonl", "usage-2026-06-11.jsonl"} {
+				if err := os.WriteFile(filepath.Join(metricsDir, name), []byte("{}\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := newMetricsStore(config.Settings{
+				StateDir: dir,
+				Metrics:  config.MetricsSettings{RetentionDays: retentionDays},
+			}, func() time.Time {
+				return time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+			})
+
+			if err := store.CleanupRetention(); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(metricsDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				got = append(got, entry.Name())
+			}
+			want := []string{"usage-2026-06-11.jsonl"}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("bad files for retention %d: got %v want %v", retentionDays, got, want)
+			}
+		})
+	}
+}
+
+func TestMetricsStoreRecordRunsRetentionCleanupOncePerLocalDay(t *testing.T) {
 	dir := t.TempDir()
 	metricsDir := filepath.Join(dir, "metrics")
 	if err := os.MkdirAll(metricsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	oldPath := filepath.Join(metricsDir, "usage-2026-06-09.jsonl")
-	if err := os.WriteFile(oldPath, []byte("{}\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
 	store := newMetricsStore(config.Settings{StateDir: dir, Metrics: config.MetricsSettings{RetentionDays: 30}}, func() time.Time {
-		return time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+		return now
 	})
 
-	err := store.Record(MetricsRecord{
-		Timestamp:   time.Date(2026, 7, 10, 9, 30, 0, 0, time.Local),
+	if err := store.Record(MetricsRecord{
+		Timestamp:   now,
 		Worker:      "app",
 		Port:        6767,
 		Status:      200,
 		UsageKnown:  true,
 		TotalTokens: 15,
-	})
-	if err != nil {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(metricsDir, metricsFileName(now.AddDate(0, 0, -30)))
+	if err := os.WriteFile(oldPath, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Record(MetricsRecord{
+		Timestamp:   now.Add(time.Hour),
+		Worker:      "app",
+		Port:        6767,
+		Status:      200,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("second record on the same local day should not rescan retention: %v", err)
+	}
+
+	now = now.AddDate(0, 0, 1)
+	if err := store.Record(MetricsRecord{
+		Timestamp:   now,
+		Worker:      "app",
+		Port:        6767,
+		Status:      200,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
-		t.Fatalf("record should run retention cleanup for old metrics file: %v", err)
+		t.Fatalf("first record on the next local day should run retention cleanup: %v", err)
 	}
 }
 
