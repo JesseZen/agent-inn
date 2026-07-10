@@ -188,6 +188,17 @@ func TestUsageObserverEmptyEventOverridesMessageDeltaWithinFrame(t *testing.T) {
 	}
 }
 
+func TestUsageObserverBareEventOverridesMessageDeltaWithinFrame(t *testing.T) {
+	observer := NewUsageObserver("text/event-stream")
+	observer.Observe([]byte("event: message_start\ndata: {\"usage\":{\"input_tokens\":9}}\n\n"))
+	observer.Observe([]byte("event: message_delta\nevent\ndata: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\n\n"))
+
+	want := UsageTokens{Known: true, InputTokens: 1, OutputTokens: 2, TotalTokens: 3}
+	if got := observer.Finish(); got != want {
+		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestExtractUsageFromMissingUsageJSON(t *testing.T) {
 	got := ExtractUsageFromJSON([]byte(`{"model":"gpt-5"}`))
 	want := UsageTokens{Known: false}

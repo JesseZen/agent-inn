@@ -524,7 +524,7 @@ func TestWorkerShutdownRestoresConfigPatchBeforeDrainingHTTPAndMetrics(t *testin
 	closer := &recordingWorkerCloser{events: &events}
 	patch := &recordingWorkerPatch{events: &events, state: modulehook.ConfigPatchActive}
 
-	shutdown := newWorkerShutdown(server, closer, []modulehook.Hook{patch}, time.Second)
+	shutdown := newWorkerShutdown(server, closer, []modulehook.Hook{patch}, time.Second, time.Second)
 	shutdown()
 	shutdown()
 
@@ -541,11 +541,32 @@ func TestWorkerShutdownClosesServerWhenDrainTimesOut(t *testing.T) {
 	server := &recordingWorkerServer{events: &events, waitForDeadline: true}
 	closer := &recordingWorkerCloser{events: &events}
 
-	shutdown := newWorkerShutdown(server, closer, nil, 10*time.Millisecond)
+	shutdown := newWorkerShutdown(server, closer, nil, 10*time.Millisecond, time.Second)
 	shutdown()
 
 	if strings.Join(events, ",") != "server.Shutdown,server.Close,worker.Close" {
 		t.Fatalf("expected forced close after shutdown timeout, got %v", events)
+	}
+}
+
+func TestWorkerShutdownStartsFreshBoundedMetricsDrainAfterHTTPTimeout(t *testing.T) {
+	events := []string{}
+	server := &recordingWorkerServer{events: &events, waitForDeadline: true}
+	closer := &recordingWorkerCloser{events: &events}
+
+	shutdown := newWorkerShutdown(server, closer, nil, 10*time.Millisecond, 20*time.Millisecond)
+	shutdown()
+
+	got := struct {
+		Events       string
+		CloseContext workerCloseContext
+	}{strings.Join(events, ","), closer.context}
+	want := struct {
+		Events       string
+		CloseContext workerCloseContext
+	}{"server.Shutdown,server.Close,worker.Close", workerCloseContext{HasDeadline: true}}
+	if got != want {
+		t.Fatalf("bad metrics drain after HTTP timeout:\ngot  %#v\nwant %#v", got, want)
 	}
 }
 
@@ -594,12 +615,20 @@ type recordingWorkerServer struct {
 }
 
 type recordingWorkerCloser struct {
-	events *[]string
-	closes int
+	events  *[]string
+	closes  int
+	context workerCloseContext
 }
 
-func (c *recordingWorkerCloser) Close(context.Context) {
+type workerCloseContext struct {
+	Canceled    bool
+	HasDeadline bool
+}
+
+func (c *recordingWorkerCloser) Close(ctx context.Context) {
 	c.closes++
+	_, c.context.HasDeadline = ctx.Deadline()
+	c.context.Canceled = ctx.Err() != nil
 	*c.events = append(*c.events, "worker.Close")
 }
 

@@ -63,12 +63,14 @@ var workerRunner = func(cfg WorkerRuntimeConfig) error {
 	return runWorkerServer(cfg, os.Stdin)
 }
 
-var (
-	newWorkerServer = func(addr string, w *worker.Worker) workerServer {
-		return worker.NewServer(addr, w)
-	}
-	workerShutdownTimeout = 10 * time.Second
+const (
+	workerHTTPShutdownTimeout = 10 * time.Second
+	workerMetricsDrainTimeout = 2 * time.Second
 )
+
+var newWorkerServer = func(addr string, w *worker.Worker) workerServer {
+	return worker.NewServer(addr, w)
+}
 
 func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	externalRequest := map[string]module.ExternalRequestRuntime{}
@@ -174,7 +176,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 		return err
 	}
 	server := newWorkerServer(constants.LocalhostAddr+":"+strconv.Itoa(port), w)
-	shutdown := newWorkerShutdown(server, w, startedHooks, workerShutdownTimeout)
+	shutdown := newWorkerShutdown(server, w, startedHooks, workerHTTPShutdownTimeout, workerMetricsDrainTimeout)
 	server.InstallOrphanWatcher(stdin, shutdown)
 	stopSignals := make(chan os.Signal, 1)
 	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM)
@@ -190,19 +192,22 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	return err
 }
 
-func newWorkerShutdown(server workerServer, closer workerCloser, hooks []modulehook.Hook, timeout time.Duration) func() {
+func newWorkerShutdown(server workerServer, closer workerCloser, hooks []modulehook.Hook, httpTimeout, metricsTimeout time.Duration) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			for i := len(hooks) - 1; i >= 0; i-- {
 				_ = hooks[i].Stop()
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-			if err := server.Shutdown(ctx); err != nil && errors.Is(err, context.DeadlineExceeded) {
+			httpCtx, cancelHTTP := context.WithTimeout(context.Background(), httpTimeout)
+			if err := server.Shutdown(httpCtx); err != nil && errors.Is(err, context.DeadlineExceeded) {
 				_ = server.Close()
 			}
-			closer.Close(ctx)
+			cancelHTTP()
+
+			metricsCtx, cancelMetrics := context.WithTimeout(context.Background(), metricsTimeout)
+			closer.Close(metricsCtx)
+			cancelMetrics()
 		})
 	}
 }

@@ -121,6 +121,7 @@ func (s *usageSSEScanner) finishLine() {
 		case "data":
 			s.startDataLine()
 		case "event":
+			s.eventIsMessageDelta = false
 		}
 	}
 	if s.lineMode == usageSSEEvent {
