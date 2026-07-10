@@ -543,6 +543,70 @@ func TestManagerCloseCancelsPendingMetricsUpdatedEvent(t *testing.T) {
 	}
 }
 
+func TestManagerCloseStopsOwnedWorkersBeforeEventTeardown(t *testing.T) {
+	starter := &recordingStarter{}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: t.TempDir(), LogDir: t.TempDir()},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: starter,
+	})
+	t.Cleanup(m.Close)
+	if err := m.StartWorker("app"); err != nil {
+		t.Fatal(err)
+	}
+	startedEvents := m.events.Replay(0)
+	sub := m.events.Subscribe(startedEvents[len(startedEvents)-1].ID)
+	starter.processes[0].onStop = func() {
+		m.publishEvent(EventMetricsUpdated, map[string]any{"worker": "app"})
+	}
+
+	m.Close()
+
+	var eventTypes []EventType
+	for event := range sub.C {
+		eventTypes = append(eventTypes, event.Type)
+	}
+	m.mu.RLock()
+	got := struct {
+		Stops        int
+		ProcessCount int
+		Status       WorkerState
+		EventsNil    bool
+		EventTypes   []EventType
+	}{
+		Stops:        starter.processes[0].stops,
+		ProcessCount: len(m.processes),
+		Status:       m.statuses["app"],
+		EventsNil:    m.events == nil,
+		EventTypes:   eventTypes,
+	}
+	m.mu.RUnlock()
+	want := struct {
+		Stops        int
+		ProcessCount int
+		Status       WorkerState
+		EventsNil    bool
+		EventTypes   []EventType
+	}{
+		Stops:        1,
+		ProcessCount: 0,
+		Status:       WorkerStateStopped,
+		EventsNil:    true,
+		EventTypes:   []EventType{EventMetricsUpdated, EventWorkerStopped},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad manager close lifecycle:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerLogsMetricsPersistenceFailureAndPublishesUpdate(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "blocked-state")
 	if err := os.WriteFile(stateDir, []byte("blocked"), 0600); err != nil {
@@ -582,6 +646,26 @@ func TestManagerLogsMetricsPersistenceFailureAndPublishesUpdate(t *testing.T) {
 		if !strings.Contains(logOutput, value) {
 			t.Fatalf("missing %q in metrics persistence log: %s", value, logOutput)
 		}
+	}
+	m.metricsStore.UpdateSettings(config.Settings{StateDir: t.TempDir()})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/metrics?range=today", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected metrics status %d: %s", res.Code, res.Body.String())
+	}
+	var metricsResponse MetricsQueryResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &metricsResponse); err != nil {
+		t.Fatal(err)
+	}
+	start := startOfLocalDay(now)
+	wantResponse := MetricsQueryResponse{
+		Range:             MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers:           []WorkerMetricsAggregate{{Worker: "app", Port: 6767, Status: "configured", Upstream: "openai"}},
+		SkippedRecords:    0,
+		PersistenceErrors: 1,
+	}
+	if !reflect.DeepEqual(metricsResponse, wantResponse) {
+		t.Fatalf("bad metrics integrity response:\ngot  %#v\nwant %#v", metricsResponse, wantResponse)
 	}
 
 	event := nextEventOfType(t, sub, EventMetricsUpdated)
@@ -4428,10 +4512,14 @@ func (s *recordingStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 type recordingProcess struct {
 	stops      int
 	forcedStop bool
+	onStop     func()
 }
 
 func (p *recordingProcess) Stop() error {
 	p.stops++
+	if p.onStop != nil {
+		p.onStop()
+	}
 	return nil
 }
 

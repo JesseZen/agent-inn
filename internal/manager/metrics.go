@@ -80,9 +80,10 @@ type WorkerMetricsAggregate struct {
 }
 
 type MetricsQueryResponse struct {
-	Range          MetricsRange             `json:"range"`
-	Workers        []WorkerMetricsAggregate `json:"workers"`
-	SkippedRecords int                      `json:"skipped_records"`
+	Range             MetricsRange             `json:"range"`
+	Workers           []WorkerMetricsAggregate `json:"workers"`
+	SkippedRecords    int                      `json:"skipped_records"`
+	PersistenceErrors uint64                   `json:"persistence_errors"`
 }
 
 type workerMetricSource struct {

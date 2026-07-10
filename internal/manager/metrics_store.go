@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -14,11 +15,12 @@ import (
 )
 
 type metricsStore struct {
-	settings   config.Settings
-	clock      func() time.Time
-	settingsMu sync.RWMutex
-	writeMu    sync.Mutex
-	cleanupDay time.Time
+	settings          config.Settings
+	clock             func() time.Time
+	settingsMu        sync.RWMutex
+	writeMu           sync.Mutex
+	cleanupDay        time.Time
+	persistenceErrors atomic.Uint64
 }
 
 func newMetricsStore(settings config.Settings, clock func() time.Time) *metricsStore {
@@ -38,7 +40,12 @@ func (s *metricsStore) UpdateSettings(settings config.Settings) {
 	s.settingsMu.Unlock()
 }
 
-func (s *metricsStore) Record(record MetricsRecord) error {
+func (s *metricsStore) Record(record MetricsRecord) (err error) {
+	defer func() {
+		if err != nil {
+			s.persistenceErrors.Add(1)
+		}
+	}()
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -76,7 +83,7 @@ func (s *metricsStore) Query(query MetricsQuery, workers []WorkerSummary) (Metri
 	s.settingsMu.RUnlock()
 	resolved := s.resolveRange(query.Range)
 	paths := filesForRange(metricsDir(settings), resolved)
-	response := MetricsQueryResponse{Range: resolved}
+	response := MetricsQueryResponse{Range: resolved, PersistenceErrors: s.persistenceErrors.Load()}
 	aggregates := map[string]*WorkerMetricsAggregate{}
 	summaries := map[string]WorkerSummary{}
 	for _, summary := range workers {

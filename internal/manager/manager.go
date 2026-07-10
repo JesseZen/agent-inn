@@ -261,6 +261,19 @@ func (m *Manager) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) Close() {
+	m.mu.RLock()
+	workerNames := make([]string, 0, len(m.processes))
+	for workerName := range m.processes {
+		workerNames = append(workerNames, workerName)
+	}
+	m.mu.RUnlock()
+	sort.Strings(workerNames)
+	for _, workerName := range workerNames {
+		if err := m.StopWorker(workerName); err != nil {
+			m.logger.Error(logging.EventWorkerExit, "worker", workerName, "status", string(WorkerStateFailed), "err", err.Error())
+		}
+	}
+
 	m.mu.Lock()
 	stopConfigWriter := m.stopConfigWriter
 	m.stopConfigWriter = nil

@@ -95,6 +95,67 @@ settings:
 	}
 }
 
+func TestMetricsStorePersistenceErrorsRetainUntilStoreRecreated(t *testing.T) {
+	const persistenceFailureCount = 2
+
+	blockedStateDir := filepath.Join(t.TempDir(), "blocked-state")
+	if err := os.WriteFile(blockedStateDir, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writableStateDir := t.TempDir()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
+	store := newMetricsStore(config.Settings{StateDir: blockedStateDir}, func() time.Time { return now })
+	record := MetricsRecord{
+		Timestamp:   now,
+		Worker:      "app",
+		Port:        6767,
+		Status:      200,
+		UsageKnown:  true,
+		TotalTokens: 15,
+	}
+	for i := 0; i < persistenceFailureCount; i++ {
+		if err := store.Record(record); err == nil {
+			t.Fatal("expected metrics persistence failure")
+		}
+	}
+	store.UpdateSettings(config.Settings{StateDir: writableStateDir})
+	if err := store.Record(record); err != nil {
+		t.Fatal(err)
+	}
+	workers := []WorkerSummary{{Name: "app", Port: 6767, Status: "running"}}
+	retained, err := store.Query(MetricsQuery{Range: MetricsRangeToday}, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := newMetricsStore(config.Settings{StateDir: writableStateDir}, func() time.Time { return now }).Query(
+		MetricsQuery{Range: MetricsRangeToday}, workers,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := startOfLocalDay(now)
+	baseResponse := MetricsQueryResponse{
+		Range: MetricsRange{Name: MetricsRangeToday, Start: start, End: start.AddDate(0, 0, 1)},
+		Workers: []WorkerMetricsAggregate{
+			{Worker: "app", Port: 6767, Status: "running", Totals: MetricsTotals{Requests: 1, TotalTokens: 15}},
+		},
+		SkippedRecords: 0,
+	}
+	wantRetained := baseResponse
+	wantRetained.PersistenceErrors = persistenceFailureCount
+	want := struct {
+		Retained  MetricsQueryResponse
+		Recreated MetricsQueryResponse
+	}{wantRetained, baseResponse}
+	got := struct {
+		Retained  MetricsQueryResponse
+		Recreated MetricsQueryResponse
+	}{retained, recreated}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad persistence error reset semantics:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func TestMetricsStoreQueryTodayUsesLocalDay(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Date(2026, 7, 10, 0, 0, 0, 0, time.Local)

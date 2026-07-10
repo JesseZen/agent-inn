@@ -31,6 +31,7 @@ type ExecProcess struct {
 	cmd             *exec.Cmd
 	stdin           *os.File
 	configRead      *os.File
+	metricsDone     <-chan struct{}
 	stopGracePeriod time.Duration
 	forcedStop      bool
 }
@@ -99,11 +100,16 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	}
 	_ = configRead.Close()
 	_ = stdinRead.Close()
+	var metricsDone chan struct{}
 	if spawn.MetricsHandler != nil {
 		_ = metricsWrite.Close()
+		metricsDone = make(chan struct{})
 		go func() {
+			defer func() {
+				_ = metricsRead.Close()
+				close(metricsDone)
+			}()
 			spawn.MetricsHandler(metricsRead)
-			_ = metricsRead.Close()
 		}()
 	}
 	if _, err := configWrite.Write(spawn.RuntimeJSON); err != nil {
@@ -121,7 +127,7 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	if stopGracePeriod <= 0 {
 		stopGracePeriod = defaultManagerStopGracePeriod
 	}
-	return &ExecProcess{cmd: cmd, stdin: stdinWrite, stopGracePeriod: stopGracePeriod}, nil
+	return &ExecProcess{cmd: cmd, stdin: stdinWrite, metricsDone: metricsDone, stopGracePeriod: stopGracePeriod}, nil
 }
 
 func sanitizedWorkerEnv(env []string) []string {
@@ -166,9 +172,11 @@ func (p *ExecProcess) Stop() error {
 	p.mu.Lock()
 	cmd := p.cmd
 	stdin := p.stdin
+	metricsDone := p.metricsDone
 	stopGracePeriod := p.stopGracePeriod
 	p.cmd = nil
 	p.stdin = nil
+	p.metricsDone = nil
 	p.mu.Unlock()
 
 	if cmd == nil {
@@ -188,17 +196,20 @@ func (p *ExecProcess) Stop() error {
 		done <- cmd.Wait()
 	}()
 
+	var err error
 	select {
-	case err := <-done:
-		return ignoreManagedStopExit(err)
+	case err = <-done:
 	case <-time.After(stopGracePeriod):
 		p.markForcedStop()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		err := <-done
-		return ignoreManagedStopExit(err)
+		err = <-done
 	}
+	if metricsDone != nil {
+		<-metricsDone
+	}
+	return ignoreManagedStopExit(err)
 }
 
 func (p *ExecProcess) ForcedStop() bool {

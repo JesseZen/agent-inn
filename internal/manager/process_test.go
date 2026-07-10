@@ -222,6 +222,51 @@ func TestExecProcessDefaultGraceAllowsWorkerMetricsDrain(t *testing.T) {
 	}
 }
 
+func TestExecProcessStopWaitsForMetricsHandler(t *testing.T) {
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+
+	process, err := ExecStarter{Executable: os.Args[0]}.Start(WorkerSpawn{
+		Args:        helperProcessArgs("metrics-fd", "", ""),
+		RuntimeJSON: []byte(`{}`),
+		MetricsHandler: func(r io.Reader) {
+			_, _ = io.ReadAll(r)
+			close(handlerStarted)
+			<-releaseHandler
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(processTestTimeout):
+		t.Fatal("metrics handler did not start")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- process.Stop()
+	}()
+	select {
+	case err := <-done:
+		close(releaseHandler)
+		t.Fatalf("Stop returned before metrics handler drained: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseHandler)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(processTestTimeout):
+		t.Fatal("Stop did not return after metrics handler drained")
+	}
+}
+
 func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
