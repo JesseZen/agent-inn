@@ -1,0 +1,442 @@
+package manager
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/worker"
+)
+
+func TestCircuitBreakerTransitionsFromClosedToOpenToHalfOpen(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 0, 0, 0, 0, time.UTC)
+	breaker := newCircuitBreaker(func() time.Time { return now })
+	policy := config.CircuitBreakerConfig{
+		FailureThreshold:         2,
+		RecoverySuccessThreshold: 2,
+		RecoveryWaitSeconds:      60,
+	}
+
+	breaker.RecordFailure("primary", policy)
+	breaker.RecordFailure("primary", policy)
+
+	wantOpen := CircuitStatus{
+		State:               CircuitStateOpen,
+		ConsecutiveFailures: 2,
+		OpenedAt:            now,
+	}
+	if got := breaker.Status("primary", policy); !reflect.DeepEqual(got, wantOpen) {
+		t.Fatalf("unexpected open circuit:\n got %#v\nwant %#v", got, wantOpen)
+	}
+	if breaker.Allow("primary", policy) {
+		t.Fatal("open circuit allowed a request before recovery wait elapsed")
+	}
+
+	now = now.Add(time.Minute)
+	if !breaker.Allow("primary", policy) {
+		t.Fatal("circuit did not allow the half-open probe")
+	}
+	wantHalfOpen := CircuitStatus{
+		State:               CircuitStateHalfOpen,
+		ConsecutiveFailures: 2,
+		OpenedAt:            time.Date(2026, time.July, 10, 0, 0, 0, 0, time.UTC),
+	}
+	if got := breaker.Status("primary", policy); !reflect.DeepEqual(got, wantHalfOpen) {
+		t.Fatalf("unexpected half-open circuit:\n got %#v\nwant %#v", got, wantHalfOpen)
+	}
+}
+
+func TestCircuitBreakerReopensOnHalfOpenFailureAndClosesAfterRecoverySuccesses(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 0, 0, 0, 0, time.UTC)
+	breaker := newCircuitBreaker(func() time.Time { return now })
+	policy := config.CircuitBreakerConfig{
+		FailureThreshold:         1,
+		RecoverySuccessThreshold: 2,
+		RecoveryWaitSeconds:      30,
+	}
+
+	breaker.RecordFailure("primary", policy)
+	now = now.Add(30 * time.Second)
+	if !breaker.Allow("primary", policy) {
+		t.Fatal("circuit did not enter half-open state")
+	}
+	breaker.RecordFailure("primary", policy)
+
+	wantReopened := CircuitStatus{
+		State:               CircuitStateOpen,
+		ConsecutiveFailures: 2,
+		OpenedAt:            now,
+	}
+	if got := breaker.Status("primary", policy); !reflect.DeepEqual(got, wantReopened) {
+		t.Fatalf("unexpected reopened circuit:\n got %#v\nwant %#v", got, wantReopened)
+	}
+
+	now = now.Add(30 * time.Second)
+	if !breaker.Allow("primary", policy) {
+		t.Fatal("circuit did not re-enter half-open state")
+	}
+	breaker.RecordSuccess("primary", policy)
+	breaker.RecordSuccess("primary", policy)
+
+	wantClosed := CircuitStatus{State: CircuitStateClosed}
+	if got := breaker.Status("primary", policy); !reflect.DeepEqual(got, wantClosed) {
+		t.Fatalf("unexpected recovered circuit:\n got %#v\nwant %#v", got, wantClosed)
+	}
+}
+
+func TestManagerFailoverSwitchesEveryWorkerInPool(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+				"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"primary": {BaseURL: "https://primary.example/v1"},
+				"backup":  {BaseURL: "https://backup.example/v1"},
+			},
+			UpstreamPools: map[string]config.UpstreamPool{
+				"coding-ha": {
+					Upstreams: []string{"primary", "backup"},
+					CircuitBreaker: config.CircuitBreakerConfig{
+						FailureThreshold:         1,
+						RecoverySuccessThreshold: 1,
+						RecoveryWaitSeconds:      60,
+					},
+				},
+			},
+		},
+		WorkerClient: client,
+	})
+	defer m.Close()
+	m.statuses["app"] = WorkerStateRunning
+	m.statuses["cli"] = WorkerStateRunning
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{
+			"app": workerUpstreamID(m.config.Workers["app"]),
+			"cli": workerUpstreamID(m.config.Workers["cli"]),
+		},
+		Applied: map[int]string{
+			6767: string(client.appliedRuntimes[6767].Upstream.ID),
+			6768: string(client.appliedRuntimes[6768].Upstream.ID),
+		},
+	}
+	want := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{"app": "backup", "cli": "backup"},
+		Applied:    map[int]string{6767: "backup", 6768: "backup"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pool failover:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerFailoverRestoresPreferredUpstreamAfterRecovery(t *testing.T) {
+	now := time.Date(2026, time.July, 11, 0, 0, 0, 0, time.UTC)
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"primary": {BaseURL: "https://primary.example/v1"},
+				"backup":  {BaseURL: "https://backup.example/v1"},
+			},
+			UpstreamPools: map[string]config.UpstreamPool{
+				"coding-ha": {
+					Upstreams: []string{"primary", "backup"},
+					CircuitBreaker: config.CircuitBreakerConfig{
+						FailureThreshold:         1,
+						RecoverySuccessThreshold: 2,
+						RecoveryWaitSeconds:      30,
+					},
+				},
+			},
+		},
+		WorkerClient: client,
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	m.statuses["app"] = WorkerStateRunning
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(30 * time.Second)
+	if err := m.recordUpstreamProbeResult("primary", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.recordUpstreamProbeResult("primary", true); err != nil {
+		t.Fatal(err)
+	}
+
+	pool := m.config.UpstreamPools["coding-ha"]
+	got := struct {
+		Configured string
+		Applied    string
+		Circuit    CircuitStatus
+	}{
+		Configured: workerUpstreamID(m.config.Workers["app"]),
+		Applied:    string(client.appliedRuntimes[6767].Upstream.ID),
+		Circuit:    m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker),
+	}
+	want := struct {
+		Configured string
+		Applied    string
+		Circuit    CircuitStatus
+	}{
+		Configured: "primary",
+		Applied:    "primary",
+		Circuit:    CircuitStatus{State: CircuitStateClosed},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected preferred recovery:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerWorkerFailureEventTriggersOnlyCurrentUpstreamFailover(t *testing.T) {
+	tests := []struct {
+		name        string
+		current     string
+		wantCurrent string
+		wantApplied map[int]appliedUpstream
+	}{
+		{
+			name:        "current upstream failure",
+			current:     "primary",
+			wantCurrent: "backup",
+			wantApplied: map[int]appliedUpstream{6767: {ID: "backup"}},
+		},
+		{
+			name:        "stale upstream failure",
+			current:     "backup",
+			wantCurrent: "backup",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &recordingWorkerClient{}
+			m := New(Config{
+				Config: config.Config{
+					Settings: config.Settings{StateDir: t.TempDir()},
+					Plugins:  testPluginDefinitions(),
+					Workers: map[string]config.WorkerConfig{
+						"app": {Port: 6767, Upstream: test.current, UpstreamPool: "coding-ha"},
+					},
+					Upstreams: map[string]config.UpstreamProfile{
+						"primary": {BaseURL: "https://primary.example/v1"},
+						"backup":  {BaseURL: "https://backup.example/v1"},
+					},
+					UpstreamPools: map[string]config.UpstreamPool{
+						"coding-ha": {
+							Upstreams: []string{"primary", "backup"},
+							CircuitBreaker: config.CircuitBreakerConfig{
+								FailureThreshold:         1,
+								RecoverySuccessThreshold: 1,
+								RecoveryWaitSeconds:      60,
+							},
+						},
+					},
+				},
+				WorkerClient: client,
+			})
+			defer m.Close()
+			m.statuses["app"] = WorkerStateRunning
+
+			m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
+				Timestamp: time.Now(),
+				Upstream:  "primary",
+				Method:    "POST",
+				Path:      "/v1/responses",
+				Status:    502,
+				Failure: &worker.UpstreamFailure{
+					Kind:            worker.UpstreamFailureTransport,
+					BeforeFirstByte: true,
+				},
+			})
+
+			applied := map[int]appliedUpstream(nil)
+			if client.appliedRuntimes != nil {
+				applied = make(map[int]appliedUpstream, len(client.appliedRuntimes))
+				for port, runtime := range client.appliedRuntimes {
+					applied[port] = appliedUpstream{ID: string(runtime.Upstream.ID)}
+				}
+			}
+			got := struct {
+				Current string
+				Applied map[int]appliedUpstream
+			}{Current: workerUpstreamID(m.config.Workers["app"]), Applied: applied}
+			want := struct {
+				Current string
+				Applied map[int]appliedUpstream
+			}{Current: test.wantCurrent, Applied: test.wantApplied}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected failure event routing:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestManagerSuccessfulWorkerRequestResetsConsecutiveFailures(t *testing.T) {
+	client := &recordingWorkerClient{}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: t.TempDir()},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"primary": {BaseURL: "https://primary.example/v1"},
+				"backup":  {BaseURL: "https://backup.example/v1"},
+			},
+			UpstreamPools: map[string]config.UpstreamPool{
+				"coding-ha": {
+					Upstreams: []string{"primary", "backup"},
+					CircuitBreaker: config.CircuitBreakerConfig{
+						FailureThreshold:         2,
+						RecoverySuccessThreshold: 1,
+						RecoveryWaitSeconds:      60,
+					},
+				},
+			},
+		},
+		WorkerClient: client,
+	})
+	defer m.Close()
+	m.statuses["app"] = WorkerStateRunning
+	failure := &worker.UpstreamFailure{Kind: worker.UpstreamFailureTransport, BeforeFirstByte: true}
+
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 502, Failure: failure})
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 200})
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 502, Failure: failure})
+
+	pool := m.config.UpstreamPools["coding-ha"]
+	got := struct {
+		Current string
+		Circuit CircuitStatus
+	}{
+		Current: workerUpstreamID(m.config.Workers["app"]),
+		Circuit: m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker),
+	}
+	want := struct {
+		Current string
+		Circuit CircuitStatus
+	}{
+		Current: "primary",
+		Circuit: CircuitStatus{State: CircuitStateClosed, ConsecutiveFailures: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected consecutive failure reset:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+type appliedUpstream struct {
+	ID string
+}
+
+func TestManagerAPIUpdatesWorkerUpstreamPool(t *testing.T) {
+	m := New(Config{Config: config.Config{
+		Settings: config.Settings{StateDir: t.TempDir()},
+		Plugins:  testPluginDefinitions(),
+		Workers: map[string]config.WorkerConfig{
+			"app": {Port: 6767, Upstream: "primary"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"primary": {BaseURL: "https://primary.example/v1"},
+			"backup":  {BaseURL: "https://backup.example/v1"},
+		},
+		UpstreamPools: map[string]config.UpstreamPool{
+			"coding-ha": {Upstreams: []string{"primary", "backup"}},
+		},
+	}})
+	defer m.Close()
+
+	response := httptest.NewRecorder()
+	m.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPatch,
+		"http://manager.local/api/workers/app",
+		strings.NewReader(`{"upstream_pool":"coding-ha"}`),
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Configured string
+		Response   any
+	}{Configured: m.config.Workers["app"].UpstreamPool, Response: body["upstream_pool"]}
+	want := struct {
+		Configured string
+		Response   any
+	}{Configured: "coding-ha", Response: "coding-ha"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected worker pool update:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestFailoverEventAccessors(t *testing.T) {
+	circuitEvent := Event{
+		Type: EventUpstreamCircuitChanged,
+		Payload: map[string]any{
+			"upstream": "primary",
+			"state":    CircuitStateOpen,
+		},
+	}
+	poolEvent := Event{
+		Type: EventUpstreamPoolSwitched,
+		Payload: map[string]any{
+			"pool":              "coding-ha",
+			"previous_upstream": "primary",
+			"upstream":          "backup",
+		},
+	}
+
+	upstreamName, state, circuitOK := circuitEvent.AsUpstreamCircuitChanged()
+	poolName, previous, current, poolOK := poolEvent.AsUpstreamPoolSwitched()
+	got := struct {
+		Upstream string
+		State    CircuitState
+		Circuit  bool
+		Pool     string
+		Previous string
+		Current  string
+		Switched bool
+	}{upstreamName, state, circuitOK, poolName, previous, current, poolOK}
+	want := struct {
+		Upstream string
+		State    CircuitState
+		Circuit  bool
+		Pool     string
+		Previous string
+		Current  string
+		Switched bool
+	}{"primary", CircuitStateOpen, true, "coding-ha", "primary", "backup", true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected failover event accessors:\n got %#v\nwant %#v", got, want)
+	}
+}
