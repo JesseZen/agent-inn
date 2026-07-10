@@ -800,6 +800,9 @@ func TestRunLaunchHostedTerminalKeepsExistingTurnStatusOwner(t *testing.T) {
 				if len(args) > 3 && args[3] == "show" {
 					return "on\n", nil
 				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
+					return "", nil
+				}
 				if len(args) > 3 && args[3] == "show-option" {
 					return configDir + "\n", nil
 				}
