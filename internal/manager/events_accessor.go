@@ -114,6 +114,30 @@ func (e Event) AsUpstreamUpdated() (upstream string, ok bool) {
 	return upstream, true
 }
 
+func (e Event) AsUpstreamCircuitChanged() (upstream string, state CircuitState, ok bool) {
+	if e.Type != EventUpstreamCircuitChanged {
+		return "", "", false
+	}
+	upstream, _ = e.Payload["upstream"].(string)
+	switch value := e.Payload["state"].(type) {
+	case CircuitState:
+		state = value
+	case string:
+		state = CircuitState(value)
+	}
+	return upstream, state, true
+}
+
+func (e Event) AsUpstreamPoolSwitched() (pool string, previous string, upstream string, ok bool) {
+	if e.Type != EventUpstreamPoolSwitched {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	previous, _ = e.Payload["previous_upstream"].(string)
+	upstream, _ = e.Payload["upstream"].(string)
+	return pool, previous, upstream, true
+}
+
 // AsConfigStatusChanged 解析 config.status.changed 事件。ok=false 表示类型不匹配。
 func (e Event) AsConfigStatusChanged() (dirty bool, generation int, ok bool) {
 	if e.Type != EventConfigStatusChanged {

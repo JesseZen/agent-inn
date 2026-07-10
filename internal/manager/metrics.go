@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -220,6 +221,35 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 				"err", err.Error(),
 			)
 		}
+	}
+	if event.Failure != nil && qualifiedUpstreamFailure(event.Failure.Kind) {
+		if err := m.recordWorkerUpstreamFailure(source.name, event.Upstream); err != nil {
+			m.logger.Error(logging.EventUpstreamFailover,
+				"worker", source.name,
+				"upstream", event.Upstream,
+				"err", redactedErrorMessage(err),
+			)
+		}
+	} else if event.Status >= http.StatusOK && event.Status < http.StatusMultipleChoices {
+		if err := m.recordWorkerUpstreamSuccess(source.name, event.Upstream); err != nil {
+			m.logger.Error(logging.EventUpstreamFailover,
+				"worker", source.name,
+				"upstream", event.Upstream,
+				"err", redactedErrorMessage(err),
+			)
+		}
+	}
+}
+
+func qualifiedUpstreamFailure(kind worker.UpstreamFailureKind) bool {
+	switch kind {
+	case worker.UpstreamFailureTransport,
+		worker.UpstreamFailureStatus,
+		worker.UpstreamFailureFirstByteTimeout,
+		worker.UpstreamFailureIdleTimeout:
+		return true
+	default:
+		return false
 	}
 }
 

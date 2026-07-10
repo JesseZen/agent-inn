@@ -122,6 +122,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		Port           int                            `json:"port"`
 		Launcher       string                         `json:"launcher"`
 		Upstream       string                         `json:"upstream"`
+		UpstreamPool   string                         `json:"upstream_pool"`
 		ProxyURL       string                         `json:"proxy_url"`
 		RequestModules map[string]config.ModuleConfig `json:"request_modules"`
 		Hooks          map[string]config.ModuleConfig `json:"hooks"`
@@ -172,6 +173,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		Launcher:       strings.TrimSpace(payload.Launcher),
 		Port:           payload.Port,
 		Upstream:       payload.Upstream,
+		UpstreamPool:   strings.TrimSpace(payload.UpstreamPool),
 		ProxyURL:       strings.TrimSpace(payload.ProxyURL),
 		RequestModules: payload.RequestModules,
 		Hooks:          payload.Hooks,

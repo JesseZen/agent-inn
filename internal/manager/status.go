@@ -26,6 +26,8 @@ const (
 	EventModuleUpdated                 EventType = "module.updated"
 	EventUpstreamUpdated               EventType = "upstream.updated"
 	EventUpstreamProbed                EventType = "upstream.probed"
+	EventUpstreamCircuitChanged        EventType = "upstream.circuit.changed"
+	EventUpstreamPoolSwitched          EventType = "upstream.pool.switched"
 	EventConfigStatusChanged           EventType = "config.status.changed"
 	EventStreamRawRedacted             EventType = "stream.raw_redacted"
 	EventMetricsUpdated                EventType = "metrics.updated"

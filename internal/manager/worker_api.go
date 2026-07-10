@@ -68,6 +68,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			Launcher       string                         `json:"launcher"`
 			Upstream       string                         `json:"upstream"`
 			UpstreamID     string                         `json:"upstream_id"`
+			UpstreamPool   string                         `json:"upstream_pool"`
 			ProxyURL       string                         `json:"proxy_url"`
 			LogLevel       string                         `json:"log_level"`
 			RequestModules map[string]config.ModuleConfig `json:"request_modules"`
@@ -100,6 +101,9 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := fields["log_level"]; ok {
 			next.LogLevel = patch.LogLevel
+		}
+		if _, ok := fields["upstream_pool"]; ok {
+			next.UpstreamPool = strings.TrimSpace(patch.UpstreamPool)
 		}
 		if _, ok := fields["request_modules"]; ok {
 			next.RequestModules = patch.RequestModules

@@ -42,6 +42,7 @@ type Config struct {
 
 type Manager struct {
 	mu                 sync.RWMutex
+	failoverMu         sync.Mutex
 	config             config.Config
 	configPath         string
 	configStatus       config.Status
@@ -70,6 +71,7 @@ type Manager struct {
 	metricsTrackers    map[string]*worker.MetricsTracker
 	pendingMetrics     map[string]*pendingMetricsUpdate
 	metricsStatusSem   chan struct{}
+	circuits           *circuitBreaker
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -82,6 +84,7 @@ type WorkerSummary struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	UpstreamID         string                                      `json:"upstream_id"`
+	UpstreamPool       string                                      `json:"upstream_pool,omitempty"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -144,6 +147,7 @@ type WorkerDetail struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	UpstreamID         string                                      `json:"upstream_id"`
+	UpstreamPool       string                                      `json:"upstream_pool,omitempty"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -205,6 +209,7 @@ func New(cfg Config) *Manager {
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
+	m.circuits = newCircuitBreaker(func() time.Time { return m.clock() })
 	m.metricsStore = newMetricsStore(cfg.Config.Settings, func() time.Time { return m.clock() })
 	if err := m.metricsStore.CleanupRetention(); err != nil {
 		m.logger.Error(logging.EventMetricsPersist, "operation", "retention_cleanup", "err", err.Error())
@@ -355,6 +360,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Role:               seed.worker.Role,
 			Launcher:           seed.worker.Launcher,
 			UpstreamID:         upstreamID,
+			UpstreamPool:       seed.worker.UpstreamPool,
 			Upstream:           redactedUpstream,
 			ProxyURL:           appruntime.RedactProxyURL(seed.worker.ProxyURL),
 			ProxyURLRedacted:   appruntime.ProxyURLRedacted(seed.worker.ProxyURL),
@@ -394,6 +400,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Role:               worker.Role,
 		Launcher:           worker.Launcher,
 		UpstreamID:         upstreamID,
+		UpstreamPool:       worker.UpstreamPool,
 		Upstream:           redactedUpstream,
 		ProxyURL:           appruntime.RedactProxyURL(worker.ProxyURL),
 		ProxyURLRedacted:   appruntime.ProxyURLRedacted(worker.ProxyURL),
@@ -983,6 +990,7 @@ func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) 
 		"role":               worker.Role,
 		"launcher":           worker.Launcher,
 		"upstream":           worker.Upstream,
+		"upstream_pool":      worker.UpstreamPool,
 		"proxy_url":          appruntime.RedactProxyURL(worker.ProxyURL),
 		"proxy_url_redacted": appruntime.ProxyURLRedacted(worker.ProxyURL),
 		"log_level":          workerLogLevel(worker),
@@ -1325,16 +1333,21 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 func cloneConfig(cfg config.Config) config.Config {
 	out := config.Config{
-		Settings:  cfg.Settings,
-		Plugins:   clonePluginDefinitions(cfg.Plugins),
-		Workers:   make(map[string]config.WorkerConfig, len(cfg.Workers)),
-		Upstreams: make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
+		Settings:      cfg.Settings,
+		Plugins:       clonePluginDefinitions(cfg.Plugins),
+		Workers:       make(map[string]config.WorkerConfig, len(cfg.Workers)),
+		Upstreams:     make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
+		UpstreamPools: make(map[string]config.UpstreamPool, len(cfg.UpstreamPools)),
 	}
 	for name, worker := range cfg.Workers {
 		out.Workers[name] = cloneWorkerConfig(worker)
 	}
 	for name, profile := range cfg.Upstreams {
 		out.Upstreams[name] = profile
+	}
+	for name, pool := range cfg.UpstreamPools {
+		pool.Upstreams = append([]string(nil), pool.Upstreams...)
+		out.UpstreamPools[name] = pool
 	}
 	return out
 }
@@ -1363,6 +1376,7 @@ func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
 		Port:           worker.Port,
 		Upstream:       worker.Upstream,
 		UpstreamID:     worker.UpstreamID,
+		UpstreamPool:   worker.UpstreamPool,
 		ProxyURL:       worker.ProxyURL,
 		LogLevel:       workerLogLevel(worker),
 		RequestModules: cloneModules(worker.RequestModules),
