@@ -1,14 +1,14 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
+import { TextAttributes } from "@opentui/core"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useSDK, type MetricsRangeName, type MetricsResponse } from "../context/sdk"
 import { useSync } from "../context/sync"
+import { useTheme } from "../context/theme"
 import { useToast } from "../ui/toast"
 import { DialogWorkerStatus } from "./dialog-worker-status"
 
-type MetricsOption =
-  | { type: "range"; range: MetricsRangeName }
-  | { type: "worker"; port: number }
+type MetricsOption = { type: "worker"; port: number }
 
 const RANGES: Array<{ title: string; value: MetricsRangeName }> = [
   { title: "Today", value: "today" },
@@ -28,6 +28,7 @@ export function DialogMetrics() {
   const sync = useSync()
   const dialog = useDialog()
   const toast = useToast()
+  const { theme } = useTheme()
   const [range, setRange] = createSignal<MetricsRangeName>("today")
   const [metrics, setMetrics] = createSignal<MetricsResponse>()
   let refreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -99,43 +100,42 @@ export function DialogMetrics() {
     pendingRange = undefined
   })
 
+  const rangeDetails = createMemo(() => {
+    const result = metrics()
+    if (!result) return []
+    const details: string[] = []
+    if (result.persistence_errors > 0) {
+      details.push(`${result.persistence_errors} manager-session persistence error${result.persistence_errors === 1 ? "" : "s"}`)
+    }
+    if (result.query_limited && result.skipped_records > 0) {
+      details.push(`query limit; totals incomplete; ${result.skipped_records} unreadable records`)
+    } else if (result.query_limited) {
+      details.push("query limit: persisted totals incomplete")
+    } else if (result.skipped_records > 0) {
+      details.push(`${result.skipped_records} persisted records unreadable`)
+    }
+    return details
+  })
+
   const options = createMemo<DialogSelectOption<MetricsOption>[]>(() => {
     const result = metrics()
     return [
-      ...RANGES.map((item) => {
-        const selected = item.value === range()
-        const details: string[] = []
-        if (selected && result?.query_limited && result.skipped_records > 0) {
-          details.push(`query limit; totals incomplete; ${result.skipped_records} unreadable records`)
-        } else if (selected && result?.query_limited) {
-          details.push("query limit: persisted totals incomplete")
-        } else if (selected && result && result.skipped_records > 0) {
-          details.push(`${result.skipped_records} persisted records unreadable`)
-        }
-        return {
-          title: selected && result && result.persistence_errors > 0
-            ? `${item.title} • ${result.persistence_errors} manager-session persistence error${result.persistence_errors === 1 ? "" : "s"}`
-            : item.title,
-          value: { type: "range" as const, range: item.value },
-          description: selected ? "selected" : "",
-          details: details.length > 0 ? details : undefined,
-          category: "Range",
-          onSelect: () => loadMetrics(item.value),
-        }
-      }),
       ...(result?.workers ?? []).map((worker) => {
         const liveRates = worker.live_available
           ? `RPM ${worker.live.rpm} • TPM ${worker.live.tpm}`
           : "RPM unavailable • TPM unavailable"
+        const details: string[] = []
+        if (worker.live.dropped_events > 0) {
+          details.push(`${worker.live.dropped_events} live events dropped`)
+        }
+        if (worker.totals.unknown_usage_requests > 0) {
+          details.push(`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`)
+        }
         return {
-          title: worker.live.dropped_events > 0
-            ? `${worker.worker} • ${worker.live.dropped_events} live events dropped`
-            : worker.worker,
+          title: worker.worker,
           value: { type: "worker" as const, port: worker.port },
           description: `${liveRates} • ${formatTokens(worker.totals.total_tokens)} • ${worker.totals.requests} req • ${worker.totals.errors} err • ${worker.totals.avg_latency_ms} ms`,
-          details: worker.totals.unknown_usage_requests > 0
-            ? [`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`]
-            : undefined,
+          details: details.length > 0 ? details : undefined,
           footer: `:${worker.port} ${worker.status}`,
           ...(worker.status === "removed" ? {} : {
             onSelect: async () => {
@@ -156,8 +156,41 @@ export function DialogMetrics() {
   return (
     <DialogSelect
       title="Worker Metrics"
+      titleView={
+        <box flexDirection="row" gap={2}>
+          <text fg={theme.text} attributes={TextAttributes.BOLD}>Worker Metrics</text>
+          <For each={RANGES}>
+            {(item) => {
+              const selected = () => range() === item.value
+              return (
+                <box
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={selected() ? theme.primary : undefined}
+                  onMouseUp={() => loadMetrics(item.value)}
+                >
+                  <text fg={selected() ? theme.selectedListItemText : theme.textMuted} attributes={selected() ? TextAttributes.BOLD : undefined}>
+                    {item.title}
+                  </text>
+                </box>
+              )
+            }}
+          </For>
+        </box>
+      }
       options={options()}
       placeholder="Search metrics..."
+      footer={
+        rangeDetails().length > 0 ? (
+          <box flexDirection="column">
+            <For each={rangeDetails()}>{(detail) => <text fg={theme.warning}>{detail}</text>}</For>
+          </box>
+        ) : undefined
+      }
+      bindings={[
+        { key: "left", desc: "Today", group: "Metrics", cmd: () => loadMetrics("today") },
+        { key: "right", desc: "Last 24h", group: "Metrics", cmd: () => loadMetrics("last_24h") },
+      ]}
     />
   )
 }

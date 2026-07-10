@@ -39,6 +39,28 @@ test("proxy status opens metrics console with today's totals", async () => {
   }
 })
 
+test("proxy status keeps range controls out of the worker list", async () => {
+  const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
+  try {
+    app.api.keymap.dispatchCommand("proxy.status")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Worker Metrics")
+    })
+
+    expect(app.frame()).not.toContain("Range")
+    app.mockInput.pressArrow("right")
+    await wait(() => app.calls.getMetrics.includes("last_24h"))
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("app (:6767)")
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy status limits live metric refreshes to once a second", async () => {
   const app = await mountProxyApp({ metricsResponder: (range) => metricsResponse(range, 20) })
   try {
@@ -136,8 +158,6 @@ test("proxy status keeps removed metrics rows historical", async () => {
       return app.frame().includes("Worker Metrics") && app.frame().includes(":9999 removed")
     })
 
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
 
     await Bun.sleep(METRICS_REFRESH_DELAY_MS)
@@ -162,8 +182,7 @@ test("proxy status switches to last 24 hours", async () => {
       await app.render()
       return app.frame().includes("Worker Metrics")
     })
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    app.mockInput.pressArrow("right")
     await wait(() => app.calls.getMetrics.includes("last_24h"))
     expect(app.frame()).toContain("Last 24h")
   } finally {
@@ -180,8 +199,7 @@ test("proxy status refreshes active range on metrics update events", async () =>
       await app.render()
       return app.frame().includes("Worker Metrics")
     })
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    app.mockInput.pressArrow("right")
     await wait(() => app.calls.getMetrics.includes("last_24h"))
 
     totalTokens = 40
@@ -227,8 +245,7 @@ test("proxy status ignores stale metric responses and coalesces update bursts", 
       await app.render()
       return app.frame().includes("Worker Metrics")
     })
-    app.api.keymap.dispatchCommand("dialog.select.next")
-    app.api.keymap.dispatchCommand("dialog.select.submit")
+    app.mockInput.pressArrow("right")
     expect(app.calls.getMetrics).toEqual(["today"])
 
     resolveFirstToday(metricsResponse("today", 10))
