@@ -26,6 +26,10 @@ function installLaunchMock() {
       launchCalls.push(opts)
       return true
     },
+    async setupHostedTerminalSession(opts: unknown) {
+      launchCalls.push(opts)
+      return true
+    },
   }))
 }
 
@@ -67,7 +71,17 @@ test("proxy batch create flow sets up variants before opening one hosted termina
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch")
+      return app.frame().includes("Create a worktree race")
+    })
+
+    expect({
+      hasBatchRunsTitle: app.frame().includes("Batch Runs"),
+      hasRaceDescription: app.frame().includes("Create isolated worktrees"),
+      hasPromptClaim: app.frame().includes("Race variants from one prompt"),
+    }).toEqual({
+      hasBatchRunsTitle: true,
+      hasRaceDescription: true,
+      hasPromptClaim: false,
     })
 
     await runCommand(app, "dialog.select.submit")
@@ -146,7 +160,7 @@ test("proxy batch create flow does not inspect tmux windows", async () => {
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch")
+      return app.frame().includes("Create a worktree race")
     })
 
     await runCommand(app, "dialog.select.submit")
@@ -193,7 +207,7 @@ test("proxy batch create flow omits blank count so the backend default applies",
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch")
+      return app.frame().includes("Create a worktree race")
     })
 
     await runCommand(app, "dialog.select.submit")
@@ -232,7 +246,7 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch")
+      return app.frame().includes("Create a worktree race")
     })
 
     await runCommand(app, "dialog.select.submit")
@@ -325,7 +339,7 @@ test("batch detail shows hosted session states", async () => {
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+      return app.frame().includes("Create a worktree race") && app.frame().includes("fix scroll")
     })
 
     await runCommand(app, "dialog.select.next")
@@ -382,7 +396,7 @@ test("batch detail refreshes when a hosted session state changes", async () => {
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+      return app.frame().includes("Create a worktree race") && app.frame().includes("fix scroll")
     })
 
     await runCommand(app, "dialog.select.next")
@@ -429,7 +443,7 @@ test("batch detail deletes all variants after confirmation", async () => {
     app.api.keymap.dispatchCommand("proxy.batch")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Create new batch") && app.frame().includes("fix scroll")
+      return app.frame().includes("Create a worktree race") && app.frame().includes("fix scroll")
     })
 
     await runCommand(app, "dialog.select.next")

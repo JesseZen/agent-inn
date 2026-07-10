@@ -10,6 +10,7 @@ import { rebindHostedSession } from "./hosted-session-rebind"
 import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
+import { DialogHostedTerminalBulkActions } from "./dialog-hosted-terminal-bulk-actions"
 import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
 import { Global } from "@agent-inn/core/global"
 import { useWorkerFrecency } from "./worker-frecency-context"
@@ -22,6 +23,9 @@ type HostedTerminalOption =
     }
   | {
       type: "delete"
+    }
+  | {
+      type: "bulk-actions"
     }
   | {
       type: "refresh"
@@ -91,6 +95,12 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         category: "Existing sessions",
       }
     }),
+    {
+      title: "Bulk session actions",
+      value: { type: "bulk-actions" },
+      description: "Change worker or delete selected sessions",
+      category: "Bulk actions",
+    },
   ])
 
   async function createSession() {
@@ -337,6 +347,10 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               onSessionsChanged={(nextSessions) => setSessions(nextSessions)}
             />
           ))
+          return
+        }
+        if (option.value.type === "bulk-actions") {
+          dialog.push(() => <DialogHostedTerminalBulkActions sessions={sessions()} mode={mode} onComplete={refreshSessions} />)
           return
         }
         const session = option.value.session

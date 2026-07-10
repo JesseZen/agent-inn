@@ -39,9 +39,9 @@ export function DialogBatch() {
 
   const options = createMemo<DialogSelectOption<BatchListOption>[]>(() => [
     {
-      title: "Create new batch",
+      title: "Create a worktree race",
       value: { type: "create" },
-      description: "Race variants from one prompt",
+      description: "Create isolated worktrees",
       category: "Action",
     },
     ...batches().map((batch) => ({
