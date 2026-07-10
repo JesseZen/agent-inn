@@ -720,8 +720,7 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		Tmux   *tmuxPatch `json:"tmux"`
 	}
 	type metricsPatch struct {
-		PersistEnabled *bool `json:"persist_enabled"`
-		RetentionDays  *int  `json:"retention_days"`
+		RetentionDays *int `json:"retention_days"`
 	}
 	var patch struct {
 		StateDir *string        `json:"state_dir"`
@@ -771,9 +770,6 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if patch.Metrics != nil {
-			if patch.Metrics.PersistEnabled != nil {
-				cfgRoot.Settings.Metrics.PersistEnabled = patch.Metrics.PersistEnabled
-			}
 			if patch.Metrics.RetentionDays != nil {
 				cfgRoot.Settings.Metrics.RetentionDays = *patch.Metrics.RetentionDays
 			}

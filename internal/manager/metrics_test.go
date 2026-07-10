@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -58,17 +59,27 @@ func TestMetricsStoreRecordWritesDailyJSONL(t *testing.T) {
 	}
 }
 
-func TestMetricsStoreRecordSkipsPersistenceWhenDisabled(t *testing.T) {
+func TestMetricsStoreRecordAlwaysWrites(t *testing.T) {
 	dir := t.TempDir()
-	disabled := false
-	store := newMetricsStore(config.Settings{
-		StateDir: dir,
-		Metrics:  config.MetricsSettings{PersistEnabled: &disabled, RetentionDays: 30},
-	}, func() time.Time {
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(fmt.Sprintf(`
+settings:
+  state_dir: %s
+  metrics:
+    persist_enabled: false
+    retention_days: 30
+`, dir)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newMetricsStore(cfg.Settings, func() time.Time {
 		return time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
 	})
 
-	err := store.Record(MetricsRecord{
+	err = store.Record(MetricsRecord{
 		Timestamp: time.Date(2026, 7, 10, 9, 30, 0, 0, time.Local),
 		Worker:    "app",
 		Port:      6767,
@@ -79,8 +90,8 @@ func TestMetricsStoreRecordSkipsPersistenceWhenDisabled(t *testing.T) {
 	}
 
 	path := filepath.Join(dir, "metrics", "usage-2026-07-10.jsonl")
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("disabled persistence should not write %s: %v", path, err)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("metrics record was not persisted to %s: %v", path, err)
 	}
 }
 

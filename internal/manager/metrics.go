@@ -122,9 +122,6 @@ func (s *metricsStore) Record(record MetricsRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.settings.Metrics.PersistEnabled != nil && !*s.settings.Metrics.PersistEnabled {
-		return nil
-	}
 	if err := os.MkdirAll(s.metricsDir(), 0700); err != nil {
 		return err
 	}

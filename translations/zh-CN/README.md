@@ -136,7 +136,6 @@ settings:
   state_dir: ~/.ainn
   log_dir: ~/.ainn/logs
   metrics:
-    persist_enabled: true
     retention_days: 30
   launch:
     default_mode: hosted-terminal
@@ -191,7 +190,7 @@ upstreams:
 
 `settings.state_dir` 用于存放 AINN 运行时状态，例如 hosted terminal 会话。`settings.log_dir` 用于存放 Worker 日志。
 
-`settings.metrics.persist_enabled` 控制是否持久化每日 Worker 指标。`settings.metrics.retention_days` 控制持久化指标保留天数。
+Worker 指标按日持久化。`settings.metrics.retention_days` 控制持久化指标保留天数。
 
 `settings.terminal.tmux.host_start_mode` 默认是 `new-window`。
 

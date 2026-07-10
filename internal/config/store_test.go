@@ -1,12 +1,15 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadAppliesDefaultsAndKeepsSecretRefs(t *testing.T) {
@@ -108,7 +111,6 @@ upstreams:
 		t.Fatal(err)
 	}
 
-	enabled := true
 	want := Settings{
 		StateDir: "~/.ainn",
 		LogDir:   "~/.ainn/logs",
@@ -126,12 +128,41 @@ upstreams:
 			},
 		},
 		Metrics: MetricsSettings{
-			PersistEnabled: &enabled,
-			RetentionDays:  30,
+			RetentionDays: 30,
 		},
 	}
 	if !reflect.DeepEqual(cfg.Settings, want) {
 		t.Fatalf("unexpected settings defaults:\n got %#v\nwant %#v", cfg.Settings, want)
+	}
+}
+
+func TestMetricsSettingsExposeOnlyRetention(t *testing.T) {
+	settings := MetricsSettings{RetentionDays: 14}
+
+	jsonData, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotJSON map[string]any
+	if err := json.Unmarshal(jsonData, &gotJSON); err != nil {
+		t.Fatal(err)
+	}
+	wantJSON := map[string]any{"retention_days": float64(14)}
+	if !reflect.DeepEqual(gotJSON, wantJSON) {
+		t.Fatalf("unexpected metrics JSON:\n got %#v\nwant %#v", gotJSON, wantJSON)
+	}
+
+	yamlData, err := yaml.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotYAML map[string]any
+	if err := yaml.Unmarshal(yamlData, &gotYAML); err != nil {
+		t.Fatal(err)
+	}
+	wantYAML := map[string]any{"retention_days": 14}
+	if !reflect.DeepEqual(gotYAML, wantYAML) {
+		t.Fatalf("unexpected metrics YAML:\n got %#v\nwant %#v", gotYAML, wantYAML)
 	}
 }
 

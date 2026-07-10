@@ -179,7 +179,6 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         },
       },
       metrics: {
-        persist_enabled: true,
         retention_days: 30,
       },
     },

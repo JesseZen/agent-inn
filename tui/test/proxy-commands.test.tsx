@@ -156,7 +156,7 @@ test("proxy settings editor patches settings through manager API", async () => {
   }
 })
 
-test("proxy settings shows metrics persistence rows", async () => {
+test("proxy settings shows metrics retention without a persistence toggle", async () => {
   const app = await mountProxyApp()
 
   try {
@@ -166,18 +166,17 @@ test("proxy settings shows metrics persistence rows", async () => {
       const frame = app.frame()
       return frame.includes("Settings") && frame.includes("State Dir")
     })
-    for (let i = 0; i < 20 && !app.frame().includes("Metrics Persist enabled"); i++) {
+    for (let i = 0; i < 20 && !app.frame().includes("Metrics Retention 30"); i++) {
       app.api.keymap.dispatchCommand("dialog.select.next")
       await app.render()
     }
     await wait(async () => {
       await app.render()
-      const frame = app.frame()
-      return frame.includes("Metrics Persist enabled") && frame.includes("Metrics Retention 30")
+      return app.frame().includes("Metrics Retention 30")
     })
 
-    expect(app.frame()).toContain("Metrics Persist enabled")
     expect(app.frame()).toContain("Metrics Retention 30")
+    expect(app.frame()).not.toContain("Metrics Persist")
   } finally {
     await app.cleanup()
   }

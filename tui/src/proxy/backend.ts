@@ -156,7 +156,6 @@ export type ProxySettings = {
     }
   }
   metrics: {
-    persist_enabled: boolean
     retention_days: number
   }
 }

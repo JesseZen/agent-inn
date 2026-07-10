@@ -136,7 +136,6 @@ settings:
   state_dir: ~/.ainn
   log_dir: ~/.ainn/logs
   metrics:
-    persist_enabled: true
     retention_days: 30
   launch:
     default_mode: hosted-terminal
@@ -197,7 +196,7 @@ Leaving `api_format` empty or unset = native Responses API passthrough, no trans
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
 
-`settings.metrics.persist_enabled` controls daily worker metrics persistence. `settings.metrics.retention_days` controls how long persisted metrics are retained.
+Worker metrics are persisted daily. `settings.metrics.retention_days` controls how long persisted metrics are retained.
 
 `settings.terminal.tmux.host_start_mode` defaults to `new-window`.
 
