@@ -387,6 +387,12 @@ func TestTmuxHostedPopupOwnerCommandsForSettings(t *testing.T) {
 	if !reflect.DeepEqual(gotList, wantList) {
 		t.Fatalf("got %#v, want %#v", gotList, wantList)
 	}
+
+	gotUnbind := TmuxUnbindHostedPopupBindingCommandForSettings(settings, "H")
+	wantUnbind := []string{"tmux", "-L", "ainn-test", "unbind-key", "-T", "prefix", "H"}
+	if !reflect.DeepEqual(gotUnbind, wantUnbind) {
+		t.Fatalf("got %#v, want %#v", gotUnbind, wantUnbind)
+	}
 }
 
 func TestTmuxHostedPopupCommandsForSettings(t *testing.T) {

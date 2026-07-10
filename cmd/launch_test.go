@@ -113,14 +113,14 @@ func hostedTestPopupBindingInstallCommands(t *testing.T, settings config.Setting
 	}
 	commands := [][]string{
 		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxHostedPopupKeyCommandForSettings(settings),
 	}
 	if key != "" {
 		commands = append(commands,
-			manager.TmuxHostedPopupKeyCommandForSettings(settings),
 			manager.TmuxListHostedPopupBindingCommandForSettings(settings, key),
 			manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir),
-			hostedTestPopupMouseBindingCommand(t, settings, configDir, managerURL, manager.TmuxHostedPopupMouseModeAcknowledge),
 			manager.TmuxSetHostedPopupKeyCommandForSettings(settings, key),
+			hostedTestPopupMouseBindingCommand(t, settings, configDir, managerURL, manager.TmuxHostedPopupMouseModeAcknowledge),
 			manager.TmuxHostedPopupBindingCommandForSettings(settings, key, configDir, managerURL, exe),
 		)
 	} else {
@@ -1086,7 +1086,6 @@ func TestRunLaunchHostedTerminalHostedPopupKeyOmittedOrEmptyInstallsSelectMouseB
 				}
 			}
 			for _, command := range [][]string{
-				manager.TmuxHostedPopupKeyCommandForSettings(tc.settings),
 				manager.TmuxListHostedPopupBindingCommandForSettings(tc.settings, ""),
 				manager.TmuxSetHostedPopupKeyCommandForSettings(tc.settings, ""),
 				manager.TmuxHostedPopupBindingCommandForSettings(tc.settings, "", configDir, defaultManagerURL, hostedSessionExecutable()),
@@ -1279,6 +1278,199 @@ func TestRunLaunchHostedTerminalHostedPopupExistingAinnBindingWithOldGeometryRef
 	if !hostedTestHasCommand(got, manager.TmuxHostedPopupBindingCommandForSettings(tmuxSettings, "H", configDir, defaultManagerURL, hostedSessionExecutable())) {
 		t.Fatalf("missing refreshed popup binding command in %#v", got)
 	}
+}
+
+func TestInstallTmuxHostedPopupBindingReplacesOwnedPrefixKey(t *testing.T) {
+	configDir := filepath.Join(hostedTestTempDir(t), "config")
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "J"}}}
+	oldBinding := "bind-key -T prefix H display-popup -E -x R -y 0 -w \"40%\" -h \"100%\" -T \"Hosted Terminal\" '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n"
+	var got [][]string
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		switch {
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(settings)):
+			return configDir + "\n", nil
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(settings)):
+			return "H\n", nil
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "J")):
+			return "", errors.New("exit status 1: unknown key: J")
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H")):
+			return oldBinding, nil
+		default:
+			return "", nil
+		}
+	})
+
+	err := installTmuxHostedPopupBinding(runner, settings, configDir, "/tmp/ainn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxHostedPopupKeyCommandForSettings(settings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H"),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "J"),
+		manager.TmuxUnbindHostedPopupBindingCommandForSettings(settings, "H"),
+		manager.TmuxSetHostedPopupKeyCommandForSettings(settings, "J"),
+		manager.TmuxHostedPopupMouseBindingCommandForSettings(settings, configDir, defaultManagerURL, "/tmp/ainn", manager.TmuxHostedPopupMouseModeSelect),
+		manager.TmuxHostedPopupBindingCommandForSettings(settings, "J", configDir, defaultManagerURL, "/tmp/ainn"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestInstallTmuxHostedPopupBindingRemovesOwnedPrefixKeyWhenDisabled(t *testing.T) {
+	configDir := filepath.Join(hostedTestTempDir(t), "config")
+	settings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+	oldBinding := "bind-key -T prefix H display-popup -E -x R -y 0 -w \"80%\" -h \"70%\" -T \"Hosted Terminal\" '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n"
+	var got [][]string
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		switch {
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(settings)):
+			return configDir + "\n", nil
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(settings)):
+			return "H\n", nil
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H")):
+			return oldBinding, nil
+		default:
+			return "", nil
+		}
+	})
+
+	err := installTmuxHostedPopupBinding(runner, settings, configDir, "/tmp/ainn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxHostedPopupKeyCommandForSettings(settings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H"),
+		manager.TmuxUnbindHostedPopupBindingCommandForSettings(settings, "H"),
+		manager.TmuxSetHostedPopupKeyCommandForSettings(settings, ""),
+		manager.TmuxHostedPopupMouseBindingCommandForSettings(settings, configDir, defaultManagerURL, "/tmp/ainn", manager.TmuxHostedPopupMouseModeSelect),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestInstallTmuxHostedPopupBindingReplacementConflictDoesNotModifyPriorOwnedKey(t *testing.T) {
+	configDir := filepath.Join(hostedTestTempDir(t), "config")
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "J"}}}
+	oldBinding := "bind-key -T prefix H display-popup -E -x R -y 0 -w \"40%\" -h \"100%\" -T \"Hosted Terminal\" '/tmp/ainn' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n"
+	var got [][]string
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		switch {
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(settings)):
+			return configDir + "\n", nil
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(settings)):
+			return "H\n", nil
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "J")):
+			return "bind-key -T prefix J display-message user-binding\n", nil
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H")):
+			return oldBinding, nil
+		default:
+			return "", nil
+		}
+	})
+
+	err := installTmuxHostedPopupBinding(runner, settings, configDir, "/tmp/ainn")
+	if err == nil || !strings.Contains(err.Error(), "J") {
+		t.Fatalf("got error %v, want replacement binding conflict", err)
+	}
+	want := [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxHostedPopupKeyCommandForSettings(settings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H"),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "J"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestInstallTmuxHostedPopupBindingDoesNotRemoveNonAinnPriorBinding(t *testing.T) {
+	configDir := filepath.Join(hostedTestTempDir(t), "config")
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "J"}}}
+	var got [][]string
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		got = append(got, append([]string{}, args...))
+		switch {
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(settings)):
+			return configDir + "\n", nil
+		case reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(settings)):
+			return "H\n", nil
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "J")):
+			return "", errors.New("exit status 1: unknown key: J")
+		case reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H")):
+			return "bind-key -T prefix H display-message user-binding\n", nil
+		default:
+			return "", nil
+		}
+	})
+
+	err := installTmuxHostedPopupBinding(runner, settings, configDir, "/tmp/ainn")
+	if err == nil || !strings.Contains(err.Error(), "H") {
+		t.Fatalf("got error %v, want prior binding conflict", err)
+	}
+	want := [][]string{
+		manager.TmuxHostedPopupOwnerCommandForSettings(settings),
+		manager.TmuxHostedPopupKeyCommandForSettings(settings),
+		manager.TmuxListHostedPopupBindingCommandForSettings(settings, "H"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunLaunchHostedTerminalHostedPopupQuotedGeometryInShellPathDoesNotAllowRewrite(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config -w 40% -h 100%")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	appendHostedPopupKeyToLaunchConfig(t, configDir, "      hosted_popup_key: H\n")
+	tmuxSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host", HostedPopupKey: "H"}}}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxTurnStatusOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupOwnerCommandForSettings(tmuxSettings)) {
+					return configDir + "\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxHostedPopupKeyCommandForSettings(tmuxSettings)) {
+					return "H\n", nil
+				}
+				if reflect.DeepEqual(args, manager.TmuxListHostedPopupBindingCommandForSettings(tmuxSettings, "H")) {
+					return "bind-key -T prefix H display-popup -E -T \"Hosted Terminal\" -h \"100%\" -w \"60%\" -x R -y 0 '/tmp/ainn -w 40% -h 100%' hosted-session popup --config-dir '" + configDir + "' --manager-url 'http://127.0.0.1:9090'\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-label", "solve problem A", "--no-attach"}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected custom popup geometry to fail")
+	}
+	if !strings.Contains(stderr.String(), "non-AINN binding") || !strings.Contains(stderr.String(), "H") {
+		t.Fatalf("expected popup binding conflict, got %q", stderr.String())
+	}
+	hostedTestAssertNoPopupWritesOrTheme(t, got, tmuxSettings, configDir, "H")
 }
 
 func TestRunLaunchHostedTerminalHostedPopupSameOwnerSameKeyCustomGeometryFails(t *testing.T) {

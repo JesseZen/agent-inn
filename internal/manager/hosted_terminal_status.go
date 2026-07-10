@@ -182,6 +182,10 @@ func TmuxListHostedPopupBindingCommandForSettings(settings config.Settings, key 
 	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "prefix", key)
 }
 
+func TmuxUnbindHostedPopupBindingCommandForSettings(settings config.Settings, key string) []string {
+	return append(tmuxPrefixForSettings(settings), "unbind-key", "-T", "prefix", key)
+}
+
 func TmuxDisplayHostedPopupCommandForSettings(settings config.Settings, configDir string, managerURL string, executable string) []string {
 	shellCommand := tmuxShellQuote(executable) +
 		" hosted-session popup --config-dir " + tmuxShellQuote(configDir) +

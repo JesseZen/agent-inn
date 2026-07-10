@@ -525,14 +525,21 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 		return fmt.Errorf("tmux hosted popup binding is owned by config dir %q, current config dir is %q; use a unique tmux socket/session for test instances", owner, configDir)
 	}
 
-	ownedKey := ""
-	if key != "" {
-		keyOut, err := runner.Run(manager.TmuxHostedPopupKeyCommandForSettings(settings))
+	storedKeyOut, err := runner.Run(manager.TmuxHostedPopupKeyCommandForSettings(settings))
+	if err != nil {
+		return fmt.Errorf("inspect tmux hosted popup key owner: %w", err)
+	}
+	storedKey := strings.TrimSpace(storedKeyOut)
+	if storedKey != key && storedKey != "" {
+		bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, storedKey))
 		if err != nil {
-			return fmt.Errorf("inspect tmux hosted popup key owner: %w", err)
+			return fmt.Errorf("inspect tmux hosted popup binding: %w", err)
 		}
-		ownedKey = strings.TrimSpace(keyOut)
-
+		if !isAINNHostedPopupBinding(bindingOut, storedKey, configDir) {
+			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", storedKey)
+		}
+	}
+	if key != "" {
 		bindingOut, err := runner.Run(manager.TmuxListHostedPopupBindingCommandForSettings(settings, key))
 		if err != nil {
 			if !strings.HasSuffix(strings.TrimSpace(err.Error()), "unknown key: "+key) {
@@ -540,41 +547,8 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 			}
 			bindingOut = ""
 		}
-		binding := strings.TrimSpace(bindingOut)
-		if binding != "" && owner == "" {
-			return fmt.Errorf("tmux hosted popup key %q already has a binding and no AINN owner; choose a different hosted_popup_key or use a unique tmux socket/session", key)
-		}
-		if binding != "" && ownedKey != key {
-			return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
-		}
-		if binding != "" {
-			popupWidth := ""
-			popupHeight := ""
-			bindingFields := strings.Fields(binding)
-			for i, field := range bindingFields {
-				if i+1 == len(bindingFields) {
-					break
-				}
-				switch field {
-				case "-w":
-					popupWidth = strings.Trim(bindingFields[i+1], "\"'")
-				case "-h":
-					popupHeight = strings.Trim(bindingFields[i+1], "\"'")
-				}
-			}
-			recognizedGeometry := popupWidth == manager.TmuxHostedPopupWidth && popupHeight == manager.TmuxHostedPopupHeight ||
-				popupWidth == legacyHostedPopupWidth && popupHeight == legacyHostedPopupHeight
-			ownedBinding := strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
-				strings.Contains(binding, "display-popup") &&
-				strings.Contains(binding, "-E") &&
-				strings.Contains(binding, "-x R") &&
-				strings.Contains(binding, "-y 0") &&
-				recognizedGeometry &&
-				strings.Contains(binding, manager.TmuxHostedPopupTitle) &&
-				strings.Contains(binding, "hosted-session popup") &&
-				strings.Contains(binding, "--config-dir") &&
-				strings.Contains(binding, configDir)
-			if !ownedBinding {
+		if strings.TrimSpace(bindingOut) != "" {
+			if owner == "" || !isAINNHostedPopupBinding(bindingOut, key, configDir) {
 				return fmt.Errorf("tmux hosted popup key %q already has a non-AINN binding; choose a different hosted_popup_key or use a unique tmux socket/session", key)
 			}
 		}
@@ -583,6 +557,16 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 	if owner == "" {
 		if _, err := runner.Run(manager.TmuxSetHostedPopupOwnerCommandForSettings(settings, configDir)); err != nil {
 			return fmt.Errorf("set tmux hosted popup owner: %w", err)
+		}
+	}
+	if storedKey != key {
+		if storedKey != "" {
+			if _, err := runner.Run(manager.TmuxUnbindHostedPopupBindingCommandForSettings(settings, storedKey)); err != nil {
+				return fmt.Errorf("remove tmux hosted popup binding: %w", err)
+			}
+		}
+		if _, err := runner.Run(manager.TmuxSetHostedPopupKeyCommandForSettings(settings, key)); err != nil {
+			return fmt.Errorf("set tmux hosted popup key owner: %w", err)
 		}
 	}
 
@@ -600,16 +584,62 @@ func installTmuxHostedPopupBinding(runner launchRunner, settings config.Settings
 	if key == "" {
 		return nil
 	}
-	if ownedKey != key {
-		if _, err := runner.Run(manager.TmuxSetHostedPopupKeyCommandForSettings(settings, key)); err != nil {
-			return fmt.Errorf("set tmux hosted popup key owner: %w", err)
-		}
-	}
-
 	if _, err := runner.Run(manager.TmuxHostedPopupBindingCommandForSettings(settings, key, configDir, managerURL, executable)); err != nil {
 		return fmt.Errorf("install tmux hosted popup binding: %w", err)
 	}
 	return nil
+}
+
+func isAINNHostedPopupBinding(binding string, key string, configDir string) bool {
+	popupIndex := strings.Index(binding, "display-popup ")
+	if popupIndex < 0 {
+		return false
+	}
+	popupArgs := binding[popupIndex+len("display-popup "):]
+	popupWidth := ""
+	popupHeight := ""
+	fields := strings.Fields(popupArgs)
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		switch field {
+		case "-E":
+		case "-w", "-h", "-x", "-y":
+			i++
+			if i == len(fields) {
+				return false
+			}
+			value := strings.Trim(fields[i], "\"'")
+			if field == "-w" {
+				popupWidth = value
+			}
+			if field == "-h" {
+				popupHeight = value
+			}
+		case "-T":
+			i++
+			for i < len(fields) && !strings.HasSuffix(fields[i], "\"") && !strings.HasSuffix(fields[i], "'") {
+				i++
+			}
+			if i == len(fields) {
+				return false
+			}
+		default:
+			if !strings.HasPrefix(field, "-") {
+				i = len(fields)
+			}
+		}
+	}
+	recognizedGeometry := popupWidth == manager.TmuxHostedPopupWidth && popupHeight == manager.TmuxHostedPopupHeight ||
+		popupWidth == legacyHostedPopupWidth && popupHeight == legacyHostedPopupHeight
+	return strings.Contains(binding, "bind-key -T prefix "+key+" ") &&
+		strings.Contains(binding, "-E") &&
+		strings.Contains(binding, "-x R") &&
+		strings.Contains(binding, "-y 0") &&
+		recognizedGeometry &&
+		strings.Contains(binding, manager.TmuxHostedPopupTitle) &&
+		strings.Contains(binding, "hosted-session popup") &&
+		strings.Contains(binding, "--config-dir") &&
+		strings.Contains(binding, configDir)
 }
 
 func managedTurnStatusConfigDir(hooksOutput string, acknowledgeBindingOutput string, todoBindingOutput string) (string, bool, error) {
