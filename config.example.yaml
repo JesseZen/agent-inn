@@ -38,6 +38,7 @@ workers:
     codex-app:
         port: 6767
         upstream: joycode
+        upstream_pool: codex-ha
         launcher: codex
         # Optional outbound HTTP proxy for this worker.
         # proxy_url: http://127.0.0.1:7890
@@ -67,3 +68,24 @@ upstreams:
         base_url: https://api.anthropic.com/v1
         api_key: sk-...
         api_format: anthropic
+    openrouter:
+        base_url: https://openrouter.ai/api/v1
+        api_key: sk-...
+        api_format: chat_completions
+        stream_timeouts:
+            first_byte_seconds: 60
+            idle_seconds: 120
+        protocol_probe:
+            model: openai/gpt-5-mini
+
+# Reusable priority-ordered fallback routes. The active member is applied to
+# every worker using the pool when its current upstream circuit opens.
+upstream_pools:
+    codex-ha:
+        upstreams:
+            - joycode
+            - openrouter
+        circuit_breaker:
+            failure_threshold: 3
+            recovery_success_threshold: 2
+            recovery_wait_seconds: 60

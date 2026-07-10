@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
@@ -81,6 +82,9 @@ func (m *Manager) probeUpstreamByName(ctx context.Context, name string) upstream
 		return upstreamProbeResponse{Upstream: name, OK: false, Error: redactedErrorMessage(err)}
 	}
 	probe := upstream.Probe(ctx, compiled)
+	if profile.ProtocolProbe.Model != "" {
+		probe = upstream.ProbeProtocol(ctx, compiled, profile.ProtocolProbe.Model)
+	}
 	resp := upstreamProbeResponse{
 		Upstream:   name,
 		OK:         probe.OK,
@@ -97,5 +101,11 @@ func (m *Manager) probeUpstreamByName(ctx context.Context, name string) upstream
 		"latency_ms":  probe.LatencyMS,
 		"error":       probe.Error,
 	})
+	if err := m.recordUpstreamProbeResult(name, probe.OK); err != nil {
+		m.logger.Error(logging.EventUpstreamFailover,
+			"upstream", name,
+			"err", redactedErrorMessage(err),
+		)
+	}
 	return resp
 }

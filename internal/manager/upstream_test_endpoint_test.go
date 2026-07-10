@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 )
@@ -112,5 +113,83 @@ func TestManagerAPIUpstreamTestAllProbesAllUpstreams(t *testing.T) {
 	}
 	if !reflect.DeepEqual(results, want) {
 		t.Fatalf("got %+v, want %+v", results, want)
+	}
+}
+
+func TestManagerProtocolProbeRestoresPreferredPoolUpstream(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {}\n\n"))
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, time.July, 11, 0, 0, 0, 0, time.UTC)
+	client := &recordingWorkerClient{}
+	pool := config.UpstreamPool{
+		Upstreams: []string{"primary", "backup"},
+		CircuitBreaker: config.CircuitBreakerConfig{
+			FailureThreshold:         1,
+			RecoverySuccessThreshold: 1,
+			RecoveryWaitSeconds:      30,
+		},
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{StateDir: t.TempDir()},
+			Plugins:  testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "backup", UpstreamPool: "coding-ha"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"primary": {
+					BaseURL:       server.URL,
+					ProtocolProbe: config.ProtocolProbeConfig{Model: "probe-model"},
+				},
+				"backup": {BaseURL: "https://backup.example/v1"},
+			},
+			UpstreamPools: map[string]config.UpstreamPool{"coding-ha": pool},
+		},
+		WorkerClient: client,
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	m.statuses["app"] = WorkerStateRunning
+	m.circuits.RecordFailure(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
+	now = now.Add(30 * time.Second)
+
+	result := m.probeUpstreamByName(t.Context(), "primary")
+	got := struct {
+		Method     string
+		Path       string
+		ProbeOK    bool
+		Configured string
+		Applied    string
+	}{
+		Method:     gotMethod,
+		Path:       gotPath,
+		ProbeOK:    result.OK,
+		Configured: workerUpstreamID(m.config.Workers["app"]),
+		Applied:    string(client.appliedRuntimes[6767].Upstream.ID),
+	}
+	want := struct {
+		Method     string
+		Path       string
+		ProbeOK    bool
+		Configured string
+		Applied    string
+	}{
+		Method:     http.MethodPost,
+		Path:       "/responses",
+		ProbeOK:    true,
+		Configured: "primary",
+		Applied:    "primary",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected protocol recovery:\n got %#v\nwant %#v", got, want)
 	}
 }

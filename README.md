@@ -152,6 +152,7 @@ workers:
   codex-app:              # Worker name
     port: 6767            # Local listen port
     upstream: joycode     # Bound Upstream
+    upstream_pool: codex-ha # Optional ordered fallback pool
     role: cli             # "cli" (default) or "app"
     launcher: codex       # "codex" (default) or "claudecode"
     log_level: simple     # "simple" or "detail"
@@ -188,11 +189,25 @@ upstreams:
     base_url: https://api.anthropic.com/v1
     api_key: sk-...
     api_format: anthropic              # Native Anthropic API passthrough for Claude Code
+
+# Optional reusable fallback routes. Members must be compatible with every
+# worker that uses the pool.
+upstream_pools:
+  codex-ha:
+    upstreams:
+      - joycode
+      - openrouter
+    circuit_breaker:
+      failure_threshold: 3
+      recovery_success_threshold: 2
+      recovery_wait_seconds: 60
 ```
 
 Leaving `api_format` empty or unset = native Responses API passthrough, no translation.
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `launcher` defaults to `"codex"`, and `log_level` defaults to `"simple"`.
+
+`upstream_pool` is optional. A pool keeps its members in priority order: the Manager opens a member's circuit after qualified upstream failures, hot-switches the pool's workers to the next healthy member, and automatically returns to the preferred member after recovery. `stream_timeouts` can set the first SSE byte and SSE idle limits for an upstream. `protocol_probe.model` enables a low-output streaming request that verifies the upstream's configured API protocol; without it, AINN uses the lightweight base URL probe.
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
 
