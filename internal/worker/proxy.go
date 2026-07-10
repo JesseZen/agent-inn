@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,8 +35,7 @@ type Worker struct {
 	client         *http.Client
 	logger         *slog.Logger
 	metrics        *MetricsTracker
-	metricsWriter  io.Writer
-	metricsWriteMu sync.Mutex
+	metricsEmitter *metricsEventEmitter
 }
 
 type Options struct {
@@ -70,16 +69,20 @@ func New(opts Options) (*Worker, error) {
 		return nil, err
 	}
 	return &Worker{
-		snapshots:     newSnapshotHolder(snapshot),
-		client:        client,
-		logger:        logger,
-		metrics:       NewMetricsTracker(time.Now),
-		metricsWriter: opts.MetricsWriter,
+		snapshots:      newSnapshotHolder(snapshot),
+		client:         client,
+		logger:         logger,
+		metrics:        NewMetricsTracker(time.Now),
+		metricsEmitter: newMetricsEventEmitter(opts.MetricsWriter),
 	}, nil
 }
 
 func (w *Worker) MetricsSnapshot() MetricsSnapshot {
-	return w.metrics.Snapshot()
+	snapshot := w.metrics.Snapshot()
+	if w.metricsEmitter != nil {
+		snapshot.DroppedEvents = w.metricsEmitter.dropped.Load()
+	}
+	return snapshot
 }
 
 func (w *Worker) UpdateRuntime(runtime appruntime.WorkerRuntime) (appruntime.Generation, error) {
@@ -152,10 +155,8 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		Usage:         result.Usage,
 	}
 	w.metrics.Finish(event)
-	if w.metricsWriter != nil {
-		w.metricsWriteMu.Lock()
-		_ = json.NewEncoder(w.metricsWriter).Encode(event)
-		w.metricsWriteMu.Unlock()
+	if w.metricsEmitter != nil {
+		w.metricsEmitter.Emit(event)
 	}
 	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventRequestDone,
@@ -295,6 +296,7 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		return responseCopyResult{}, err
 	}
 	rawObserver := NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type"))
+	defer rawObserver.Finish()
 	upstreamHTTPResp.Body = newUsageObservingReadCloser(
 		upstreamHTTPResp.Body,
 		upstreamHTTPResp.Header.Get("Content-Encoding"),
@@ -322,14 +324,11 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		}
 	}
 
-	result, err := copyProxyResponse(ctx, rw, proxyResp)
-	if rawUsage := rawObserver.Finish(); rawUsage.Known {
-		result.Usage = rawUsage
-	}
-	if rawModel := rawObserver.Model(); rawModel != "" {
-		result.Model = rawModel
-	}
-	return result, err
+	err = copyProxyResponse(ctx, rw, proxyResp)
+	return responseCopyResult{
+		Usage: rawObserver.Finish(),
+		Model: rawObserver.Model(),
+	}, err
 }
 
 func readRequestBody(r *http.Request) ([]byte, string, error) {
@@ -435,7 +434,10 @@ func observeDecodedUsage(encodedReader *io.PipeReader, encoding string, observer
 		defer decoded.Close()
 		reader = decoded
 	case contentEncodingDeflate:
-		decoded := flate.NewReader(encodedReader)
+		decoded, err := zlib.NewReader(encodedReader)
+		if err != nil {
+			return
+		}
 		defer decoded.Close()
 		reader = decoded
 	case contentEncodingZstd:
@@ -458,13 +460,8 @@ func observeDecodedUsage(encodedReader *io.PipeReader, encoding string, observer
 	}
 }
 
-func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) (responseCopyResult, error) {
+func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module.ProxyResponse) error {
 	defer resp.Body.Close()
-	contentType := resp.ContentType
-	if contentType == "" {
-		contentType = resp.Headers.Get("Content-Type")
-	}
-	observer := NewUsageObserver(contentType)
 	for key, values := range resp.Headers {
 		for _, value := range values {
 			rw.Header().Add(key, value)
@@ -479,29 +476,24 @@ func copyProxyResponse(ctx context.Context, rw http.ResponseWriter, resp *module
 	for {
 		select {
 		case <-ctx.Done():
-			usage := observer.Finish()
-			return responseCopyResult{Usage: usage, Model: observer.Model()}, ctx.Err()
+			return ctx.Err()
 		default:
 		}
 
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
-			observer.Observe(buf[:n])
 			if _, writeErr := rw.Write(buf[:n]); writeErr != nil {
-				usage := observer.Finish()
-				return responseCopyResult{Usage: usage, Model: observer.Model()}, writeErr
+				return writeErr
 			}
 			if flusher != nil {
 				flusher.Flush()
 			}
 		}
 		if err == io.EOF {
-			usage := observer.Finish()
-			return responseCopyResult{Usage: usage, Model: observer.Model()}, nil
+			return nil
 		}
 		if err != nil {
-			usage := observer.Finish()
-			return responseCopyResult{Usage: usage, Model: observer.Model()}, err
+			return err
 		}
 	}
 }

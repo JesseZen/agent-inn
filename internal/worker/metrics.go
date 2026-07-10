@@ -1,12 +1,16 @@
 package worker
 
 import (
+	"encoding/json"
+	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const MetricsWindowSeconds = 60
 const errorStatusFloor = 400
+const metricsEventQueueSize = 256
 
 type RequestMetricEvent struct {
 	Timestamp     time.Time   `json:"timestamp"`
@@ -35,6 +39,7 @@ type MetricsSnapshot struct {
 	ReasoningTokens      int64 `json:"reasoning_tokens"`
 	TotalTokens          int64 `json:"total_tokens"`
 	UnknownUsageRequests int64 `json:"unknown_usage_requests"`
+	DroppedEvents        int64 `json:"dropped_events"`
 }
 
 type MetricsTracker struct {
@@ -57,6 +62,33 @@ type metricsBucket struct {
 	reasoningTokens      int64
 	totalTokens          int64
 	unknownUsageRequests int64
+}
+
+type metricsEventEmitter struct {
+	pending chan RequestMetricEvent
+	dropped atomic.Int64
+}
+
+func newMetricsEventEmitter(writer io.Writer) *metricsEventEmitter {
+	if writer == nil {
+		return nil
+	}
+	emitter := &metricsEventEmitter{pending: make(chan RequestMetricEvent, metricsEventQueueSize)}
+	go func() {
+		encoder := json.NewEncoder(writer)
+		for event := range emitter.pending {
+			_ = encoder.Encode(event)
+		}
+	}()
+	return emitter
+}
+
+func (e *metricsEventEmitter) Emit(event RequestMetricEvent) {
+	select {
+	case e.pending <- event:
+	default:
+		e.dropped.Add(1)
+	}
 }
 
 func NewMetricsTracker(clock func() time.Time) *MetricsTracker {

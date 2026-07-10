@@ -1,6 +1,10 @@
 package worker
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestExtractUsageFromResponsesJSON(t *testing.T) {
 	got := ExtractUsageFromJSON([]byte(`{"model":"gpt-5","usage":{"input_tokens":10,"output_tokens":4,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}`))
@@ -23,6 +27,30 @@ func TestExtractUsageFromAnthropicJSON(t *testing.T) {
 	want := UsageTokens{Known: true, InputTokens: 9, OutputTokens: 5, CacheReadTokens: 4, CacheWriteTokens: 2, TotalTokens: 20}
 	if got != want {
 		t.Fatalf("bad usage:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestUsageObserverDoesNotRetainLargeJSONResponse(t *testing.T) {
+	const largeFieldSize = 4 * 1024 * 1024
+	body := `{"output":"` + strings.Repeat("x", largeFieldSize) + `","model":"gpt-5","usage":{"input_tokens":10,"output_tokens":4}}`
+	observer := NewUsageObserver("application/json")
+	observer.Observe([]byte(body))
+
+	got := responseUsageMetadata{Usage: observer.Finish(), Model: observer.Model()}
+	want := responseUsageMetadata{
+		Usage: UsageTokens{Known: true, InputTokens: 10, OutputTokens: 4, TotalTokens: 14},
+		Model: "gpt-5",
+	}
+	if got != want {
+		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)
+	}
+
+	value := reflect.ValueOf(observer).Elem()
+	for i := range value.NumField() {
+		field := value.Field(i)
+		if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.Uint8 && field.Cap() >= largeFieldSize {
+			t.Fatalf("observer retained full JSON body capacity: %d bytes", field.Cap())
+		}
 	}
 }
 

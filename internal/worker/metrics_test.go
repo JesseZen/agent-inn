@@ -147,7 +147,7 @@ func TestWorkerMetricsJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSnapshot := `{"window_seconds":60,"in_flight":1,"requests":2,"errors":1,"rpm":2,"tpm":200,"avg_latency_ms":500,"input_tokens":100,"output_tokens":40,"cache_read_tokens":30,"cache_write_tokens":20,"reasoning_tokens":10,"total_tokens":200,"unknown_usage_requests":1}`
+	wantSnapshot := `{"window_seconds":60,"in_flight":1,"requests":2,"errors":1,"rpm":2,"tpm":200,"avg_latency_ms":500,"input_tokens":100,"output_tokens":40,"cache_read_tokens":30,"cache_write_tokens":20,"reasoning_tokens":10,"total_tokens":200,"unknown_usage_requests":1,"dropped_events":0}`
 	if string(gotSnapshot) != wantSnapshot {
 		t.Fatalf("bad metrics snapshot JSON:\ngot  %s\nwant %s", gotSnapshot, wantSnapshot)
 	}

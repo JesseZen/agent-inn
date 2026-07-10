@@ -2,8 +2,8 @@ package worker
 
 import (
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"io"
@@ -107,13 +107,13 @@ func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	var metrics bytes.Buffer
+	metrics := &concurrencyDetectingWriter{}
 	w, err := New(Options{
 		Snapshot: RuntimeConfigSnapshot{
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
 		},
-		MetricsWriter: &metrics,
+		MetricsWriter: metrics,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,11 +140,94 @@ func TestWorkerRecordsMetricsAndWritesCompletionEvent(t *testing.T) {
 		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", gotSnapshot, wantSnapshot)
 	}
 	var event RequestMetricEvent
-	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
 		t.Fatal(err)
 	}
 	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusOK || event.Model != "gpt-5" || event.Usage.TotalTokens != 20 {
 		t.Fatalf("bad metrics event: %#v", event)
+	}
+}
+
+func TestWorkerMetricsWriterDoesNotBlockRequestCompletion(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstreamServer.Close()
+
+	metrics := &blockingMetricsWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		workerInstance.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)),
+		)
+		close(done)
+	}()
+
+	select {
+	case <-metrics.entered:
+	case <-time.After(time.Second):
+		t.Fatal("metrics writer was not called")
+	}
+	select {
+	case <-done:
+		close(metrics.release)
+	case <-time.After(100 * time.Millisecond):
+		close(metrics.release)
+		<-done
+		t.Fatal("request completion waited for the metrics writer")
+	}
+}
+
+func TestWorkerMetricsEmitterReportsDroppedEvents(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstreamServer.Close()
+
+	metrics := &blockingMetricsWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	defer close(metrics.release)
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workerInstance.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil))
+	select {
+	case <-metrics.entered:
+	case <-time.After(time.Second):
+		t.Fatal("metrics writer was not called")
+	}
+	for range metricsEventQueueSize + 1 {
+		workerInstance.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil))
+	}
+
+	if got := workerInstance.MetricsSnapshot().DroppedEvents; got != 1 {
+		t.Fatalf("bad dropped event count: got %d want 1", got)
 	}
 }
 
@@ -194,7 +277,7 @@ func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
 			}))
 			defer upstreamServer.Close()
 
-			var metrics bytes.Buffer
+			metrics := &concurrencyDetectingWriter{}
 			workerInstance, err := New(Options{
 				Runtime: appruntime.WorkerRuntime{
 					ID:         "cli-openai",
@@ -208,7 +291,7 @@ func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
 						"api_translate": {Enabled: true},
 					},
 				},
-				MetricsWriter: &metrics,
+				MetricsWriter: metrics,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -229,7 +312,7 @@ func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
 			}
 
 			var event RequestMetricEvent
-			if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+			if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
 				t.Fatal(err)
 			}
 			gotMetrics := struct {
@@ -240,6 +323,41 @@ func TestWorkerRecordsRawChatCompletionUsageBeforeTranslation(t *testing.T) {
 				t.Fatalf("bad metrics event:\ngot  %#v\nwant %#v", gotMetrics, wantMetrics)
 			}
 		})
+	}
+}
+
+func TestWorkerMetricsIgnoresTransformedResponseUsage(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstreamServer.Close()
+
+	metrics := &concurrencyDetectingWriter{}
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
+			Modules:    []module.Middleware{transformedUsageMiddleware{}},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	workerInstance.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)))
+	if res.Body.String() != `{"model":"transformed","usage":{"input_tokens":50,"output_tokens":25}}` {
+		t.Fatalf("unexpected transformed response %q", res.Body.String())
+	}
+
+	var event RequestMetricEvent
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Model != "" || event.Usage != (UsageTokens{Known: false}) {
+		t.Fatalf("metrics used transformed response usage: %#v", event)
 	}
 }
 
@@ -287,13 +405,13 @@ func TestWorkerMetricsRecordsUsageFromCompressedUpstreamResponses(t *testing.T) 
 				}))
 				defer upstreamServer.Close()
 
-				var metrics bytes.Buffer
+				metrics := &concurrencyDetectingWriter{}
 				workerInstance, err := New(Options{
 					Snapshot: RuntimeConfigSnapshot{
 						Generation: 1,
 						Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
 					},
-					MetricsWriter: &metrics,
+					MetricsWriter: metrics,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -339,7 +457,7 @@ func TestWorkerMetricsRecordsUsageFromCompressedUpstreamResponses(t *testing.T) 
 				}
 
 				var event RequestMetricEvent
-				if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+				if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
 					t.Fatal(err)
 				}
 				gotMetrics := struct {
@@ -364,13 +482,13 @@ func TestWorkerMetricsPreservesResponseWhenDecompressionFails(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	var metrics bytes.Buffer
+	metrics := &concurrencyDetectingWriter{}
 	workerInstance, err := New(Options{
 		Snapshot: RuntimeConfigSnapshot{
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: upstreamServer.URL},
 		},
-		MetricsWriter: &metrics,
+		MetricsWriter: metrics,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +514,7 @@ func TestWorkerMetricsPreservesResponseWhenDecompressionFails(t *testing.T) {
 	}
 
 	var event RequestMetricEvent
-	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
 		t.Fatal(err)
 	}
 	if event.Model != "" || event.Usage != (UsageTokens{}) {
@@ -412,11 +530,7 @@ func compressProxyResponse(t *testing.T, encoding string, body []byte) []byte {
 	case "gzip":
 		writer = gzip.NewWriter(&compressed)
 	case "deflate":
-		var err error
-		writer, err = flate.NewWriter(&compressed, flate.DefaultCompression)
-		if err != nil {
-			t.Fatal(err)
-		}
+		writer = zlib.NewWriter(&compressed)
 	case "zstd":
 		var err error
 		writer, err = zstd.NewWriter(&compressed)
@@ -472,7 +586,7 @@ func TestWorkerSerializesConcurrentMetricsWrites(t *testing.T) {
 	if atomic.LoadInt32(&metrics.concurrent) != 0 {
 		t.Fatal("metrics writer was entered concurrently")
 	}
-	lines := bytes.Split(bytes.TrimSpace(metrics.Bytes()), []byte("\n"))
+	lines := bytes.Split(waitForMetricEvents(t, metrics, requestCount), []byte("\n"))
 	if len(lines) != requestCount {
 		t.Fatalf("bad metrics line count: got %d want %d", len(lines), requestCount)
 	}
@@ -489,6 +603,46 @@ type concurrencyDetectingWriter struct {
 	concurrent int32
 	mu         sync.Mutex
 	buf        bytes.Buffer
+}
+
+type blockingMetricsWriter struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type transformedUsageMiddleware struct{}
+
+func (transformedUsageMiddleware) Name() string { return "transformed_usage" }
+
+func (transformedUsageMiddleware) ProcessRequest(context.Context, *module.ProxyRequest) error {
+	return nil
+}
+
+func (transformedUsageMiddleware) WrapResponse(_ context.Context, _ *module.ProxyRequest, upstream *module.ProxyResponse) (*module.ProxyResponse, error) {
+	_, err := io.Copy(io.Discard, upstream.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := upstream.Body.Close(); err != nil {
+		return nil, err
+	}
+	upstream.Body = io.NopCloser(strings.NewReader(`{"model":"transformed","usage":{"input_tokens":50,"output_tokens":25}}`))
+	return upstream, nil
+}
+
+func (transformedUsageMiddleware) Config() module.ModuleConfig { return module.ModuleConfig{} }
+
+func (transformedUsageMiddleware) UpdateConfig(module.ModuleConfig) error { return nil }
+
+func (transformedUsageMiddleware) RequestBodyMode(module.ProxyRequestMeta) module.RequestBodyMode {
+	return module.RequestBodyStream
+}
+
+func (w *blockingMetricsWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	<-w.release
+	return len(p), nil
 }
 
 func (w *concurrencyDetectingWriter) Write(p []byte) (int, error) {
@@ -509,14 +663,29 @@ func (w *concurrencyDetectingWriter) Bytes() []byte {
 	return append([]byte(nil), w.buf.Bytes()...)
 }
 
+func waitForMetricEvents(t *testing.T, metrics *concurrencyDetectingWriter, count int) []byte {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		data := bytes.TrimSpace(metrics.Bytes())
+		if len(data) > 0 && len(bytes.Split(data, []byte("\n"))) >= count {
+			return data
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d metrics events", count)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestWorkerRecordsFailedUpstreamMetricsAndUnknownUsage(t *testing.T) {
-	var metrics bytes.Buffer
+	metrics := &concurrencyDetectingWriter{}
 	w, err := New(Options{
 		Snapshot: RuntimeConfigSnapshot{
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: "http://127.0.0.1:1"},
 		},
-		MetricsWriter: &metrics,
+		MetricsWriter: metrics,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -540,7 +709,7 @@ func TestWorkerRecordsFailedUpstreamMetricsAndUnknownUsage(t *testing.T) {
 		t.Fatalf("bad metrics snapshot:\ngot  %#v\nwant %#v", gotSnapshot, wantSnapshot)
 	}
 	var event RequestMetricEvent
-	if err := json.Unmarshal(bytes.TrimSpace(metrics.Bytes()), &event); err != nil {
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
 		t.Fatal(err)
 	}
 	if event.Method != http.MethodPost || event.Path != "/v1/responses" || event.Status != http.StatusBadGateway || event.Usage.Known {
@@ -802,13 +971,13 @@ func TestWorkerMetricsEventsKeepRequestSnapshotUpstream(t *testing.T) {
 	}))
 	defer second.Close()
 
-	var metrics bytes.Buffer
+	metrics := &concurrencyDetectingWriter{}
 	w, err := New(Options{
 		Snapshot: RuntimeConfigSnapshot{
 			Generation: 1,
 			Upstream:   upstream.RuntimeUpstream{Name: "openai", BaseURL: first.URL},
 		},
-		MetricsWriter: &metrics,
+		MetricsWriter: metrics,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -847,7 +1016,7 @@ func TestWorkerMetricsEventsKeepRequestSnapshotUpstream(t *testing.T) {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
 
-	lines := bytes.Split(bytes.TrimSpace(metrics.Bytes()), []byte("\n"))
+	lines := bytes.Split(waitForMetricEvents(t, metrics, 2), []byte("\n"))
 	if len(lines) != 2 {
 		t.Fatalf("bad metrics line count: got %d want 2", len(lines))
 	}
@@ -1413,7 +1582,7 @@ func TestCopyResponseSkipsEmptyReads(t *testing.T) {
 		Body:       body,
 	}
 
-	_, err := copyProxyResponse(context.Background(), writer, resp)
+	err := copyProxyResponse(context.Background(), writer, resp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1430,7 +1599,7 @@ func TestCopyResponseFlushesThroughResponseRecorder(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader("ok")),
 	}
 
-	_, err := copyProxyResponse(context.Background(), rec, resp)
+	err := copyProxyResponse(context.Background(), rec, resp)
 	if err != nil {
 		t.Fatal(err)
 	}

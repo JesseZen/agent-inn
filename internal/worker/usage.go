@@ -3,6 +3,8 @@ package worker
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/module"
@@ -20,10 +22,11 @@ type UsageTokens struct {
 
 type UsageObserver struct {
 	contentType string
-	buffer      []byte
 	parser      module.SSEParser
 	usage       UsageTokens
 	model       string
+	jsonWriter  *io.PipeWriter
+	jsonResult  <-chan responseUsageMetadata
 }
 
 type responseUsageMetadata struct {
@@ -32,7 +35,20 @@ type responseUsageMetadata struct {
 }
 
 func NewUsageObserver(contentType string) *UsageObserver {
-	return &UsageObserver{contentType: strings.ToLower(contentType)}
+	observer := &UsageObserver{contentType: strings.ToLower(contentType)}
+	if strings.Contains(observer.contentType, "json") {
+		reader, writer := io.Pipe()
+		result := make(chan responseUsageMetadata, 1)
+		observer.jsonWriter = writer
+		observer.jsonResult = result
+		go func() {
+			metadata := extractUsageMetadataFromJSONDecoder(json.NewDecoder(reader))
+			_, _ = io.Copy(io.Discard, reader)
+			_ = reader.Close()
+			result <- metadata
+		}()
+	}
+	return observer
 }
 
 func (u *UsageObserver) Observe(chunk []byte) {
@@ -42,8 +58,8 @@ func (u *UsageObserver) Observe(chunk []byte) {
 			u.processSSEEvent(event)
 		}
 	}
-	if strings.Contains(u.contentType, "json") {
-		u.buffer = append(u.buffer, chunk...)
+	if u.jsonWriter != nil {
+		_, _ = u.jsonWriter.Write(chunk)
 	}
 }
 
@@ -54,10 +70,12 @@ func (u *UsageObserver) Finish() UsageTokens {
 			u.processSSEEvent(event)
 		}
 	}
-	if strings.Contains(u.contentType, "json") {
-		metadata := extractUsageMetadataFromJSON(u.buffer)
+	if u.jsonWriter != nil {
+		_ = u.jsonWriter.Close()
+		metadata := <-u.jsonResult
 		u.usage = metadata.Usage
 		u.model = metadata.Model
+		u.jsonWriter = nil
 	}
 	return u.usage
 }
@@ -93,127 +111,296 @@ func ExtractUsageFromJSON(data []byte) UsageTokens {
 }
 
 func extractUsageMetadataFromJSON(data []byte) responseUsageMetadata {
-	var root map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	return extractUsageMetadataFromJSONDecoder(decoder)
+}
+
+func extractUsageMetadataFromJSONDecoder(decoder *json.Decoder) responseUsageMetadata {
 	decoder.UseNumber()
-	if err := decoder.Decode(&root); err != nil {
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
 		return responseUsageMetadata{Usage: UsageTokens{Known: false}}
 	}
 
-	model, _ := stringField(root, "model")
-	usage, ok := mapField(root, "usage")
-	if !ok {
-		if response, responseOK := mapField(root, "response"); responseOK {
-			usage, ok = mapField(response, "usage")
-			if model == "" {
-				model, _ = stringField(response, "model")
-			}
+	var root responseUsageMetadata
+	var response responseUsageMetadata
+	var message responseUsageMetadata
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return responseUsageMetadata{Usage: UsageTokens{Known: false}}
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return responseUsageMetadata{Usage: UsageTokens{Known: false}}
+		}
+		switch key {
+		case "model":
+			root.Model, _, err = decodeJSONString(decoder)
+		case "usage":
+			root.Usage, err = decodeUsageTokens(decoder)
+		case "response":
+			response, err = decodeResponseUsageMetadata(decoder)
+		case "message":
+			message, err = decodeResponseUsageMetadata(decoder)
+		default:
+			err = skipJSONValue(decoder)
+		}
+		if err != nil {
+			return responseUsageMetadata{Usage: UsageTokens{Known: false}}
 		}
 	}
-	if !ok {
-		if message, messageOK := mapField(root, "message"); messageOK {
-			usage, ok = mapField(message, "usage")
-			if model == "" {
-				model, _ = stringField(message, "model")
-			}
+	if _, err := decoder.Token(); err != nil {
+		return responseUsageMetadata{Usage: UsageTokens{Known: false}}
+	}
+	if !root.Usage.Known {
+		root.Usage = response.Usage
+	}
+	if !root.Usage.Known {
+		root.Usage = message.Usage
+	}
+	if root.Model == "" {
+		root.Model = response.Model
+	}
+	if root.Model == "" {
+		root.Model = message.Model
+	}
+	return root
+}
+
+func decodeResponseUsageMetadata(decoder *json.Decoder) (responseUsageMetadata, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return responseUsageMetadata{}, err
+	}
+	if token != json.Delim('{') {
+		return responseUsageMetadata{}, skipJSONToken(decoder, token)
+	}
+	var result responseUsageMetadata
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return responseUsageMetadata{}, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return responseUsageMetadata{}, fmt.Errorf("json object key is not a string")
+		}
+		switch key {
+		case "model":
+			result.Model, _, err = decodeJSONString(decoder)
+		case "usage":
+			result.Usage, err = decodeUsageTokens(decoder)
+		default:
+			err = skipJSONValue(decoder)
+		}
+		if err != nil {
+			return responseUsageMetadata{}, err
 		}
 	}
-	if !ok {
-		return responseUsageMetadata{Usage: UsageTokens{Known: false}, Model: model}
+	_, err = decoder.Token()
+	return result, err
+}
+
+func decodeUsageTokens(decoder *json.Decoder) (UsageTokens, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return UsageTokens{}, err
+	}
+	if token != json.Delim('{') {
+		return UsageTokens{}, skipJSONToken(decoder, token)
 	}
 
 	result := UsageTokens{Known: true}
-	if value, ok := int64Field(usage, "input_tokens"); ok {
-		result.InputTokens = value
-	}
-	if value, ok := int64Field(usage, "prompt_tokens"); ok {
-		result.InputTokens = value
-	}
-	if value, ok := int64Field(usage, "output_tokens"); ok {
-		result.OutputTokens = value
-	}
-	if value, ok := int64Field(usage, "completion_tokens"); ok {
-		result.OutputTokens = value
-	}
-	if value, ok := int64Field(usage, "cache_read_input_tokens"); ok {
-		result.CacheReadTokens = value
-	}
-	if value, ok := int64Field(usage, "cache_creation_input_tokens"); ok {
-		result.CacheWriteTokens = value
-	}
-	if details, ok := mapField(usage, "input_tokens_details"); ok {
-		if value, valueOK := int64Field(details, "cached_tokens"); valueOK {
-			result.CacheReadTokens = value
+	var inputTokens int64
+	var promptTokens int64
+	var hasPromptTokens bool
+	var outputTokens int64
+	var completionTokens int64
+	var hasCompletionTokens bool
+	var cacheReadTokens int64
+	var inputCachedTokens int64
+	var hasInputCachedTokens bool
+	var promptCachedTokens int64
+	var hasPromptCachedTokens bool
+	var outputReasoningTokens int64
+	var hasOutputReasoningTokens bool
+	var completionReasoningTokens int64
+	var hasCompletionReasoningTokens bool
+	var totalTokens int64
+	var hasTotalTokens bool
+	var hasNestedDetails bool
+
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return UsageTokens{}, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return UsageTokens{}, fmt.Errorf("json object key is not a string")
+		}
+		switch key {
+		case "input_tokens":
+			inputTokens, _, err = decodeJSONInt64(decoder)
+		case "prompt_tokens":
+			promptTokens, hasPromptTokens, err = decodeJSONInt64(decoder)
+		case "output_tokens":
+			outputTokens, _, err = decodeJSONInt64(decoder)
+		case "completion_tokens":
+			completionTokens, hasCompletionTokens, err = decodeJSONInt64(decoder)
+		case "cache_read_input_tokens":
+			cacheReadTokens, _, err = decodeJSONInt64(decoder)
+		case "cache_creation_input_tokens":
+			result.CacheWriteTokens, _, err = decodeJSONInt64(decoder)
+		case "input_tokens_details":
+			hasNestedDetails = true
+			inputCachedTokens, hasInputCachedTokens, err = decodeUsageDetail(decoder, "cached_tokens")
+		case "prompt_tokens_details":
+			hasNestedDetails = true
+			promptCachedTokens, hasPromptCachedTokens, err = decodeUsageDetail(decoder, "cached_tokens")
+		case "output_tokens_details":
+			hasNestedDetails = true
+			outputReasoningTokens, hasOutputReasoningTokens, err = decodeUsageDetail(decoder, "reasoning_tokens")
+		case "completion_tokens_details":
+			hasNestedDetails = true
+			completionReasoningTokens, hasCompletionReasoningTokens, err = decodeUsageDetail(decoder, "reasoning_tokens")
+		case "total_tokens":
+			totalTokens, hasTotalTokens, err = decodeJSONInt64(decoder)
+		default:
+			err = skipJSONValue(decoder)
+		}
+		if err != nil {
+			return UsageTokens{}, err
 		}
 	}
-	if details, ok := mapField(usage, "prompt_tokens_details"); ok {
-		if value, valueOK := int64Field(details, "cached_tokens"); valueOK {
-			result.CacheReadTokens = value
-		}
-	}
-	if details, ok := mapField(usage, "output_tokens_details"); ok {
-		if value, valueOK := int64Field(details, "reasoning_tokens"); valueOK {
-			result.ReasoningTokens = value
-		}
-	}
-	if details, ok := mapField(usage, "completion_tokens_details"); ok {
-		if value, valueOK := int64Field(details, "reasoning_tokens"); valueOK {
-			result.ReasoningTokens = value
-		}
+	if _, err := decoder.Token(); err != nil {
+		return UsageTokens{}, err
 	}
 
-	totalTokens, hasTotalTokens := int64Field(usage, "total_tokens")
-	hasNestedDetails := result.ReasoningTokens > 0 || mapHasField(usage, "input_tokens_details") || mapHasField(usage, "prompt_tokens_details") || mapHasField(usage, "output_tokens_details") || mapHasField(usage, "completion_tokens_details")
+	result.InputTokens = inputTokens
+	if hasPromptTokens {
+		result.InputTokens = promptTokens
+	}
+	result.OutputTokens = outputTokens
+	if hasCompletionTokens {
+		result.OutputTokens = completionTokens
+	}
+	result.CacheReadTokens = cacheReadTokens
+	if hasInputCachedTokens {
+		result.CacheReadTokens = inputCachedTokens
+	}
+	if hasPromptCachedTokens {
+		result.CacheReadTokens = promptCachedTokens
+	}
+	if hasOutputReasoningTokens {
+		result.ReasoningTokens = outputReasoningTokens
+	}
+	if hasCompletionReasoningTokens {
+		result.ReasoningTokens = completionReasoningTokens
+	}
+
 	if !hasTotalTokens && hasNestedDetails {
 		totalTokens = result.InputTokens + result.OutputTokens
 		hasTotalTokens = true
 	}
-	return responseUsageMetadata{Usage: finalizeUsageTotal(result, totalTokens, hasTotalTokens), Model: model}
+	return finalizeUsageTotal(result, totalTokens, hasTotalTokens), nil
 }
 
-func int64Field(values map[string]any, name string) (int64, bool) {
-	value, ok := values[name]
-	if !ok {
-		return 0, false
+func decodeUsageDetail(decoder *json.Decoder, fieldName string) (int64, bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return 0, false, err
 	}
-	switch typed := value.(type) {
-	case json.Number:
-		parsed, err := typed.Int64()
+	if token != json.Delim('{') {
+		return 0, false, skipJSONToken(decoder, token)
+	}
+	var result int64
+	var found bool
+	for decoder.More() {
+		keyToken, err := decoder.Token()
 		if err != nil {
-			return 0, false
+			return 0, false, err
 		}
-		return parsed, true
-	case float64:
-		return int64(typed), true
-	case int64:
-		return typed, true
-	case int:
-		return int64(typed), true
+		key, ok := keyToken.(string)
+		if !ok {
+			return 0, false, fmt.Errorf("json object key is not a string")
+		}
+		if key == fieldName {
+			result, found, err = decodeJSONInt64(decoder)
+		} else {
+			err = skipJSONValue(decoder)
+		}
+		if err != nil {
+			return 0, false, err
+		}
 	}
-	return 0, false
+	_, err = decoder.Token()
+	return result, found, err
 }
 
-func mapField(values map[string]any, name string) (map[string]any, bool) {
-	value, ok := values[name]
+func decodeJSONInt64(decoder *json.Decoder) (int64, bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return 0, false, err
+	}
+	number, ok := token.(json.Number)
 	if !ok {
-		return nil, false
+		return 0, false, skipJSONToken(decoder, token)
 	}
-	typed, ok := value.(map[string]any)
-	return typed, ok
+	value, err := number.Int64()
+	if err != nil {
+		return 0, false, nil
+	}
+	return value, true, nil
 }
 
-func stringField(values map[string]any, name string) (string, bool) {
-	value, ok := values[name]
+func decodeJSONString(decoder *json.Decoder) (string, bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", false, err
+	}
+	value, ok := token.(string)
 	if !ok {
-		return "", false
+		return "", false, skipJSONToken(decoder, token)
 	}
-	typed, ok := value.(string)
-	return typed, ok
+	return value, true, nil
 }
 
-func mapHasField(values map[string]any, name string) bool {
-	_, ok := values[name]
-	return ok
+func skipJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	return skipJSONToken(decoder, token)
+}
+
+func skipJSONToken(decoder *json.Decoder, token json.Token) error {
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		for decoder.More() {
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil
+	}
+	_, err := decoder.Token()
+	return err
 }
 
 func finalizeUsageTotal(usage UsageTokens, totalTokens int64, hasTotalTokens bool) UsageTokens {
