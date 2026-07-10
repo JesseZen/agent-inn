@@ -82,3 +82,16 @@ func TestResponseJSONScannerPreservesSupportedShapesAndEscapes(t *testing.T) {
 		})
 	}
 }
+
+func TestResponseJSONScannerKeepsNestedTotalSemanticsAfterUnknownUsageField(t *testing.T) {
+	body := `{"usage":{"input_tokens":10,"output_tokens":4,"input_tokens_details":{"cached_tokens":3},"unknown":"value"}}`
+	scanner := &responseJSONScanner{}
+	scanner.Write([]byte(body))
+
+	want := responseUsageMetadata{
+		Usage: UsageTokens{Known: true, InputTokens: 10, OutputTokens: 4, CacheReadTokens: 3, TotalTokens: 14},
+	}
+	if got := scanner.Finish(); got != want {
+		t.Fatalf("bad response metadata:\ngot  %#v\nwant %#v", got, want)
+	}
+}

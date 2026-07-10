@@ -282,7 +282,6 @@ func (s *responseJSONScanner) startUsageValue(field responseJSONField, b byte) {
 	case responseJSONCompletionDetailsField:
 		context, valueField = responseJSONCompletionDetails, responseJSONCompletionReasoningTokens
 	default:
-		s.usage.nested = false
 		s.startSkipValue(b)
 		return
 	}
