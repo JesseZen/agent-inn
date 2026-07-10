@@ -6,6 +6,7 @@ import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogAlert } from "../ui/dialog-alert"
 import { launchProxySession } from "./launch"
+import { rebindHostedSession } from "./hosted-session-rebind"
 import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
@@ -147,22 +148,14 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         workers={workers}
         onSelect={async (worker) => {
           try {
-            const updated = await sdk.client.patchHostedSession(session.session_id, { worker_id: worker.id })
-            if (session.status === "active" && session.turn_state !== "running") {
-              const settings = await sdk.client.getSettings()
-              const launched = await launchProxySession({
-                executable: import.meta.env?.AINN_EXECUTABLE || undefined,
-                workerPort: worker.port,
-                profile: worker.id,
-                configDir: Global.Path.config,
-                mode: "hosted-terminal",
-                sessionID: updated.session_id,
-                opener: settings.settings.terminal.opener,
-                tmuxSocketName: settings.settings.terminal.tmux.socket_name,
-                tmuxHostSession: settings.settings.terminal.tmux.host_session,
-              })
-              if (launched) workerFrecency.record(worker.id)
-            }
+            const { launched } = await rebindHostedSession({
+              client: sdk.client,
+              session,
+              worker,
+              configDir: Global.Path.config,
+              executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+            })
+            if (launched) workerFrecency.record(worker.id)
             await refreshSessions()
             dialog.pop()
           } catch (err) {

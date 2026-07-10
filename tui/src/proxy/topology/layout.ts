@@ -1,16 +1,16 @@
-import type { WorkerSummary, RedactedUpstream } from "../backend"
+import type { HostedSessionSummary, WorkerSummary, RedactedUpstream } from "../backend"
 import { displaySlice, promptOffsetWidth } from "../../prompt/display"
 
 export type TopologyNode = {
   id: string
-  kind: "upstream" | "worker"
+  kind: "upstream" | "worker" | "session"
   label: string
   meta: string
   displayLabel: string
   displayMeta: string
   width: number
   height: number
-  data: WorkerSummary | RedactedUpstream
+  data: WorkerSummary | RedactedUpstream | HostedSessionSummary
 }
 
 export type TopologyWorkerRow = {
@@ -22,6 +22,7 @@ export type TopologyGroup = {
   upstream: TopologyNode
   workers: TopologyNode[]
   workerRows: TopologyWorkerRow[]
+  sessions: Record<string, TopologyNode[]>
   width: number
 }
 
@@ -35,6 +36,8 @@ export type TopologyLayout = {
   groupRows: TopologyGroupRow[]
   orphans: TopologyNode[]
   orphanRows: TopologyNode[][]
+  unboundSessions: TopologyNode[]
+  unboundSessionRows: TopologyNode[][]
   rows: number
 }
 
@@ -74,11 +77,11 @@ function fitNodeDisplay(label: string, meta: string, availableWidth: number) {
 }
 
 function makeNode(
-  kind: "upstream" | "worker",
+  kind: "upstream" | "worker" | "session",
   rawId: string,
   label: string,
   meta: string,
-  data: WorkerSummary | RedactedUpstream,
+  data: WorkerSummary | RedactedUpstream | HostedSessionSummary,
   availableWidth: number,
 ): TopologyNode {
   const { displayLabel, displayMeta } = fitNodeDisplay(label, meta, availableWidth)
@@ -166,11 +169,20 @@ export function computeLayout(
   workers: WorkerSummary[],
   upstreams: RedactedUpstream[],
   availableWidth = Number.POSITIVE_INFINITY,
+  sessions: HostedSessionSummary[] = [],
 ): TopologyLayout {
-  if (workers.length === 0 && upstreams.length === 0) {
-    return { groups: [], groupRows: [], orphans: [], orphanRows: [], rows: 0 }
+  if (workers.length === 0 && upstreams.length === 0 && sessions.length === 0) {
+    return { groups: [], groupRows: [], orphans: [], orphanRows: [], unboundSessions: [], unboundSessionRows: [], rows: 0 }
   }
 
+  const sessionsByWorker = new Map<string, HostedSessionSummary[]>()
+  const workerIDs = new Set(workers.map((worker) => worker.id))
+  for (const session of sessions) {
+    const workerID = session.worker_id ?? session.worker_name
+    const items = sessionsByWorker.get(workerID) ?? []
+    items.push(session)
+    sessionsByWorker.set(workerID, items)
+  }
   const rawGroups = groupWorkers(workers, upstreams)
   const orphans = orphanUpstreams(upstreams, rawGroups)
   const groups: TopologyGroup[] = rawGroups.map((group) => {
@@ -180,22 +192,56 @@ export function computeLayout(
       workers: row,
       width: nodeRowWidth(row),
     }))
+    const topologySessions = Object.fromEntries(
+      workerNodes.map((workerNode) => {
+        const worker = workerNode.data as WorkerSummary
+        const nodes = (sessionsByWorker.get(worker.id) ?? []).map((session) => {
+          const node = makeNode("session", session.session_id, session.session_label, session.status, session, workerNode.width)
+          return { ...node, width: workerNode.width }
+        })
+        return [worker.id, nodes]
+      }),
+    )
     const widestWorkerRow = workerRows.reduce((max, row) => Math.max(max, row.width), 0)
     return {
       upstream: upstreamNode,
       workers: workerNodes,
       workerRows,
+      sessions: topologySessions,
       width: Math.max(upstreamNode.width, widestWorkerRow),
     }
   })
 
   const orphanNodes = orphans.map((u) => makeNode("upstream", u.id, u.name, "idle", u, availableWidth))
+  const unboundSessions = sessions
+    .filter((session) => !workerIDs.has(session.worker_id ?? session.worker_name))
+    .map((session) => {
+      const workerID = session.worker_id ?? session.worker_name
+      return makeNode("session", session.session_id, session.session_label, `missing worker: ${workerID}`, session, availableWidth)
+    })
   const groupRows = packGroups(groups, availableWidth)
   const orphanRows = packNodes(orphanNodes, availableWidth)
+  const unboundSessionRows = packNodes(unboundSessions, availableWidth)
   const connectedRows = groupRows.reduce((sum, row) => {
-    const rowHeight = Math.max(...row.groups.map((group) => NODE_HEIGHT + group.workerRows.length * (NODE_HEIGHT + 1)))
+    const rowHeight = Math.max(
+      ...row.groups.map((group) =>
+        group.workerRows.reduce((height, workerRow) => {
+          const sessionCount = Math.max(...workerRow.workers.map((worker) => group.sessions[(worker.data as WorkerSummary).id].length), 0)
+          return height + NODE_HEIGHT + 1 + sessionCount * (NODE_HEIGHT + 1)
+        }, NODE_HEIGHT),
+      ),
+    )
     return sum + rowHeight
   }, 0)
   const orphanRowHeight = orphanRows.length * NODE_HEIGHT
-  return { groups, groupRows, orphans: orphanNodes, orphanRows, rows: connectedRows + orphanRowHeight }
+  const unboundSessionRowHeight = unboundSessionRows.length * NODE_HEIGHT
+  return {
+    groups,
+    groupRows,
+    orphans: orphanNodes,
+    orphanRows,
+    unboundSessions,
+    unboundSessionRows,
+    rows: connectedRows + orphanRowHeight + unboundSessionRowHeight,
+  }
 }

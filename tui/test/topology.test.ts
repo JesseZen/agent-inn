@@ -3,7 +3,7 @@ import { computeLayout, TOPOLOGY_COL_GAP } from "../src/proxy/topology/layout"
 import { computeGroupEdges } from "../src/proxy/topology/edges"
 import { isValidDrop, toDropPair, dropLabel } from "../src/proxy/topology/drag"
 import { promptOffsetWidth } from "../src/prompt/display"
-import type { WorkerSummary, RedactedUpstream } from "../src/proxy/backend"
+import type { HostedSessionSummary, WorkerSummary, RedactedUpstream } from "../src/proxy/backend"
 
 function makeUpstream(name: string, hasKey = true): RedactedUpstream {
   return { id: name, name, base_url: `https://${name}.example.com/v1`, has_api_key: hasKey }
@@ -11,6 +11,19 @@ function makeUpstream(name: string, hasKey = true): RedactedUpstream {
 
 function makeWorker(name: string, upstream: RedactedUpstream, status = "running"): WorkerSummary {
   return { id: name, name, upstream_id: upstream.id, port: 10000, upstream, status, snapshot_generation: 1, log_level: "simple" }
+}
+
+function makeSession(workerID: string, sessionID = "hs_1", status: "active" | "stale" = "active"): HostedSessionSummary {
+  return {
+    session_id: sessionID,
+    session_label: "plan",
+    worker_id: workerID,
+    worker_name: workerID,
+    worker_port: 10000,
+    created_at: "2026-07-10T00:00:00Z",
+    last_opened_at: "2026-07-10T00:00:00Z",
+    status,
+  }
 }
 
 function sortCells(cells: Array<{ x: number; y: number; char: string }>) {
@@ -22,7 +35,7 @@ function findGroup(layout: ReturnType<typeof computeLayout>, upstreamName: strin
 }
 
 test("computeLayout returns empty for no workers and no upstreams", () => {
-  expect(computeLayout([], [])).toEqual({ groups: [], groupRows: [], orphans: [], orphanRows: [], rows: 0 })
+  expect(computeLayout([], [])).toEqual({ groups: [], groupRows: [], orphans: [], orphanRows: [], unboundSessions: [], unboundSessionRows: [], rows: 0 })
 })
 
 test("computeLayout places upstream above single worker", () => {
@@ -91,6 +104,60 @@ test("computeLayout uses stable ids while displaying names", () => {
   expect(layout.groups[0].upstream.label).toBe("OpenAI Main")
   expect(layout.groups[0].workers[0].id).toBe("worker:worker-app")
   expect(layout.groups[0].workers[0].label).toBe("Codex Main")
+})
+
+test("computeLayout attaches sessions to workers by stable id", () => {
+  const upstream = makeUpstream("openai")
+  const worker = makeWorker("app", upstream)
+  const session = makeSession("app")
+  const layout = computeLayout([worker], [upstream], Number.POSITIVE_INFINITY, [session])
+
+  expect({ sessions: layout.groups[0].sessions, unboundSessions: layout.unboundSessions, unboundSessionRows: layout.unboundSessionRows }).toEqual({
+    sessions: {
+      app: [
+        {
+          id: "session:hs_1",
+          kind: "session",
+          label: "plan",
+          meta: "active",
+          displayLabel: "plan",
+          displayMeta: "active",
+          width: 17,
+          height: 3,
+          data: session,
+        },
+      ],
+    },
+    unboundSessions: [],
+    unboundSessionRows: [],
+  })
+})
+
+test("computeLayout keeps sessions whose worker is missing in the unbound section", () => {
+  const session = {
+    ...makeSession("vanished", "hs_2", "stale"),
+    session_label: "orphan plan",
+    worker: { id: "vanished", name: "vanished", missing: true },
+  }
+  const layout = computeLayout([], [], Number.POSITIVE_INFINITY, [session])
+
+  expect({ groups: layout.groups, unboundSessions: layout.unboundSessions, unboundSessionRows: layout.unboundSessionRows }).toEqual({
+    groups: [],
+    unboundSessions: [
+      {
+        id: "session:hs_2",
+        kind: "session",
+        label: "orphan plan",
+        meta: "missing worker: vanished",
+        displayLabel: "orphan plan",
+        displayMeta: "missing worker: vanished",
+        width: 42,
+        height: 3,
+        data: session,
+      },
+    ],
+    unboundSessionRows: [layout.unboundSessions],
+  })
 })
 
 test("computeLayout groups missing upstream workers by stable upstream id", () => {
@@ -364,6 +431,7 @@ test("computeGroupEdges returns empty for group with no workers", () => {
     },
     workers: [],
     workerRows: [{ workers: [], width: 0 }],
+    sessions: {},
     width: 10,
   }
   expect(computeGroupEdges(syntheticGroup, syntheticGroup.workerRows[0]).cells).toEqual([])
@@ -423,6 +491,22 @@ test("isValidDrop accepts worker↔upstream, rejects same kind or same node", ()
   expect(isValidDrop(upstreamNode, workerNode)).toBe(true)
   expect(isValidDrop(workerNode, workerNode)).toBe(false)
   expect(isValidDrop(upstreamNode, upstreamNode)).toBe(false)
+})
+
+test("isValidDrop accepts non-running session to worker and rejects running session", () => {
+  const upstream = makeUpstream("openai")
+  const worker = makeWorker("app", upstream)
+  const readySession = makeSession("app", "hs_1")
+  const runningSession = { ...makeSession("app", "hs_2"), turn_state: "running" as const }
+  const readyLayout = computeLayout([worker], [upstream], Number.POSITIVE_INFINITY, [readySession])
+  const runningLayout = computeLayout([worker], [upstream], Number.POSITIVE_INFINITY, [runningSession])
+  const workerNode = readyLayout.groups[0].workers[0]
+
+  expect({
+    ready: isValidDrop(readyLayout.groups[0].sessions.app[0], workerNode),
+    reversed: isValidDrop(workerNode, readyLayout.groups[0].sessions.app[0]),
+    running: isValidDrop(runningLayout.groups[0].sessions.app[0], workerNode),
+  }).toEqual({ ready: true, reversed: false, running: false })
 })
 
 test("toDropPair identifies worker and upstream roles regardless of source order", () => {

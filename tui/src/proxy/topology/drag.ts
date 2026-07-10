@@ -1,9 +1,14 @@
 import type { TopologyNode } from "./layout"
+import type { HostedSessionSummary } from "../backend"
 
 export type DropPair = { worker: TopologyNode; upstream: TopologyNode }
 
 export function isValidDrop(source: TopologyNode, target: TopologyNode): boolean {
-  return source.kind !== target.kind && source.id !== target.id
+  if (source.kind === "session") {
+    const session = source.data as HostedSessionSummary
+    return target.kind === "worker" && session.turn_state !== "running"
+  }
+  return (source.kind === "worker" && target.kind === "upstream") || (source.kind === "upstream" && target.kind === "worker")
 }
 
 export function toDropPair(source: TopologyNode, target: TopologyNode): DropPair {

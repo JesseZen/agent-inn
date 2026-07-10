@@ -1,6 +1,6 @@
 import { TextAttributes, type RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { useTheme, type Theme } from "../context/theme"
 import { DIALOG_XLARGE_WIDTH, EscHint, useDialog } from "../ui/dialog"
 import { useSync } from "../context/sync"
@@ -8,10 +8,14 @@ import { useSDK } from "../context/sdk"
 import { useToast } from "../ui/toast"
 import { DialogWorkerStatus } from "./dialog-worker-status"
 import { DialogUpstreamEditor } from "./dialog-upstream"
+import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 import { computeLayout, TOPOLOGY_COL_GAP, TOPOLOGY_GROUP_GAP, type TopologyGroup, type TopologyNode, type TopologyWorkerRow } from "./topology/layout"
 import { computeGroupEdges } from "./topology/edges"
 import { isValidDrop, toDropPair, dropLabel } from "./topology/drag"
-import type { WorkerSummary, RedactedUpstream } from "./backend"
+import type { HostedSessionSummary, WorkerSummary, RedactedUpstream } from "./backend"
+import { rebindHostedSession } from "./hosted-session-rebind"
+import { Global } from "@agent-inn/core/global"
+import { useWorkerFrecency } from "./worker-frecency-context"
 
 const TOPOLOGY_DIALOG_MARGIN = 2
 const TOPOLOGY_CONTENT_PADDING = 2
@@ -22,33 +26,55 @@ export function DialogTopology() {
   const sdk = useSDK()
   const toast = useToast()
   const { theme } = useTheme()
+  const workerFrecency = useWorkerFrecency()
   const dimensions = useTerminalDimensions()
   const [hovered, setHovered] = createSignal<string | null>(null)
   const [dragSource, setDragSource] = createSignal<TopologyNode | null>(null)
   const [dragEnded, setDragEnded] = createSignal(false)
+  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
 
   const graphWidth = createMemo(() => Math.max(0, Math.min(DIALOG_XLARGE_WIDTH, dimensions().width - TOPOLOGY_DIALOG_MARGIN) - TOPOLOGY_CONTENT_PADDING))
-  const layout = createMemo(() => computeLayout(sync.data.workers, sync.data.upstreams, graphWidth()))
-  const hasData = createMemo(() => layout().groupRows.length > 0 || layout().orphanRows.length > 0)
+  const layout = createMemo(() => computeLayout(sync.data.workers, sync.data.upstreams, graphWidth(), sessions()))
+  const hasData = createMemo(() => layout().groupRows.length > 0 || layout().orphanRows.length > 0 || layout().unboundSessionRows.length > 0)
   const related = createMemo(() => {
     const id = hovered()
     const ids = new Set<string>()
     if (!id) return ids
     for (const group of layout().groups) {
-      const worker = group.workers.find((worker) => worker.id === id)
       if (group.upstream.id === id) {
         ids.add(group.upstream.id)
-        for (const node of group.workers) ids.add(node.id)
+        for (const worker of group.workers) {
+          ids.add(worker.id)
+          for (const session of group.sessions[(worker.data as WorkerSummary).id]) ids.add(session.id)
+        }
         return ids
       }
-      if (worker) {
-        ids.add(group.upstream.id)
-        ids.add(worker.id)
-        return ids
+      for (const worker of group.workers) {
+        const workerID = (worker.data as WorkerSummary).id
+        if (worker.id === id) {
+          ids.add(group.upstream.id)
+          ids.add(worker.id)
+          for (const session of group.sessions[workerID]) ids.add(session.id)
+          return ids
+        }
+        if (group.sessions[workerID].some((session) => session.id === id)) {
+          ids.add(group.upstream.id)
+          ids.add(worker.id)
+          ids.add(id)
+          return ids
+        }
       }
     }
     ids.add(id)
     return ids
+  })
+
+  async function refreshSessions() {
+    setSessions(await sdk.client.listHostedSessions())
+  }
+
+  onMount(() => {
+    void refreshSessions()
   })
 
   createEffect(() => {
@@ -56,6 +82,10 @@ export function DialogTopology() {
   })
 
   function handleClick(node: TopologyNode) {
+    if (node.kind === "session") {
+      dialog.push(() => <DialogHostedTerminal initialSessions={[node.data as HostedSessionSummary]} />)
+      return
+    }
     if (node.kind === "worker") {
       dialog.push(() => <DialogWorkerStatus worker={node.data as WorkerSummary} management />)
       return
@@ -78,6 +108,25 @@ export function DialogTopology() {
 
   async function handleDrop(source: TopologyNode, target: TopologyNode) {
     if (!isValidDrop(source, target)) return
+    if (source.kind === "session") {
+      const session = source.data as HostedSessionSummary
+      const worker = target.data as WorkerSummary
+      try {
+        const { launched } = await rebindHostedSession({
+          client: sdk.client,
+          session,
+          worker,
+          configDir: Global.Path.config,
+          executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+        })
+        if (launched) workerFrecency.record(worker.id)
+        await refreshSessions()
+        toast.show({ message: `Rebound ${session.session_label} -> ${worker.name}`, variant: "success" })
+      } catch (err) {
+        toast.error(err)
+      }
+      return
+    }
     const { worker, upstream } = toDropPair(source, target)
     const workerData = worker.data as WorkerSummary
     const upstreamData = upstream.data as RedactedUpstream
@@ -112,6 +161,7 @@ export function DialogTopology() {
           <text fg={theme.success} selectable={false}>■ running</text>
           <text fg={theme.warning} selectable={false}>■ missing key</text>
           <text fg={theme.error} selectable={false}>■ failed</text>
+          <text fg={theme.textMuted} selectable={false}>■ session</text>
         </box>
         <box flexDirection="column" gap={1} marginTop={1}>
           <For each={layout().groupRows}>
@@ -141,6 +191,34 @@ export function DialogTopology() {
             <box flexDirection="column" gap={1}>
               <text fg={theme.textMuted} selectable={false}>orphan upstreams</text>
               <For each={layout().orphanRows}>
+                {(row) => (
+                  <box flexDirection="row" gap={TOPOLOGY_COL_GAP}>
+                    <For each={row}>
+                      {(node) => (
+                        <NodeBox
+                          node={node}
+                          related={related().has(node.id)}
+                          hovered={hovered()}
+                          dragSource={dragSource()}
+                          dragEnded={dragEnded()}
+                          setHovered={setHovered}
+                          setDragSource={setDragSource}
+                          setDragEnded={setDragEnded}
+                          onClick={handleClick}
+                          onDrop={handleDrop}
+                          theme={theme}
+                        />
+                      )}
+                    </For>
+                  </box>
+                )}
+              </For>
+            </box>
+          </Show>
+          <Show when={layout().unboundSessionRows.length > 0}>
+            <box flexDirection="column" gap={1}>
+              <text fg={theme.textMuted} selectable={false}>unbound sessions</text>
+              <For each={layout().unboundSessionRows}>
                 {(row) => (
                   <box flexDirection="row" gap={TOPOLOGY_COL_GAP}>
                     <For each={row}>
@@ -223,6 +301,36 @@ function TopologyGroupView(props: {
                 )}
               </For>
             </box>
+            <Show when={row.workers.some((worker) => props.group.sessions[(worker.data as WorkerSummary).id].length > 0)}>
+              <box flexDirection="row" width={row.width} gap={TOPOLOGY_COL_GAP}>
+                <For each={row.workers}>
+                  {(worker) => (
+                    <box flexDirection="column" width={worker.width} alignItems="center">
+                      <For each={props.group.sessions[(worker.data as WorkerSummary).id]}>
+                        {(session) => (
+                          <>
+                            <text fg={props.theme.textMuted} selectable={false}>│</text>
+                            <NodeBox
+                              node={session}
+                              related={props.related.has(session.id)}
+                              hovered={props.hovered}
+                              dragSource={props.dragSource}
+                              dragEnded={props.dragEnded}
+                              setHovered={props.setHovered}
+                              setDragSource={props.setDragSource}
+                              setDragEnded={props.setDragEnded}
+                              onClick={props.onClick}
+                              onDrop={props.onDrop}
+                              theme={props.theme}
+                            />
+                          </>
+                        )}
+                      </For>
+                    </box>
+                  )}
+                </For>
+              </box>
+            </Show>
           </>
         )}
       </For>
@@ -255,7 +363,10 @@ function NodeBox(props: {
       alignItems="center"
       onMouseOver={() => props.setHovered(props.node.id)}
       onMouseOut={() => props.setHovered(null)}
-      onMouseDown={() => props.setDragSource(props.node)}
+      onMouseDown={() => {
+        if (props.node.kind === "session" && (props.node.data as HostedSessionSummary).turn_state === "running") return
+        props.setDragSource(props.node)
+      }}
       onMouseDragEnd={() => {
         props.setDragEnded(true)
         queueMicrotask(() => props.setDragSource(null))
@@ -294,8 +405,9 @@ function DragHint(props: {
     const s = props.source
     if (!s) return null
     const all: TopologyNode[] = [
-      ...props.layout.groups.flatMap((g) => [g.upstream, ...g.workers]),
+      ...props.layout.groups.flatMap((g) => [g.upstream, ...g.workers, ...Object.values(g.sessions).flat()]),
       ...props.layout.orphans,
+      ...props.layout.unboundSessions,
     ]
     return all.find((n) => n.id === props.hovered && n.id !== s.id) ?? null
   })
@@ -336,6 +448,10 @@ function nodeMarkerColor(node: TopologyNode, theme: Theme): RGBA {
     const upstream = node.data as RedactedUpstream
     return upstream.has_api_key ? theme.borderActive : theme.warning
   }
+  if (node.kind === "session") {
+    const session = node.data as HostedSessionSummary
+    return session.status === "active" ? theme.success : theme.textMuted
+  }
   const status = (node.data as WorkerSummary).status
   if (status === "running") return theme.success
   if (status === "failed") return theme.error
@@ -345,8 +461,7 @@ function nodeMarkerColor(node: TopologyNode, theme: Theme): RGBA {
 function nodeColor(node: TopologyNode, hovered: boolean, related: boolean, dragSource: TopologyNode | null, theme: Theme): RGBA {
   const src = dragSource
   if (src && src.id === node.id) return theme.borderActive
-  if (src && src.kind !== node.kind && hovered) return theme.success
-  if (src && src.kind === node.kind && hovered) return theme.error
+  if (src && hovered) return isValidDrop(src, node) ? theme.success : theme.error
   if (hovered) return theme.borderActive
   if (related) return theme.borderSubtle
   if (node.kind === "worker") {
@@ -354,6 +469,10 @@ function nodeColor(node: TopologyNode, hovered: boolean, related: boolean, dragS
     if (status === "running") return theme.success
     if (status === "failed") return theme.error
     return theme.textMuted
+  }
+  if (node.kind === "session") {
+    const session = node.data as HostedSessionSummary
+    return session.status === "active" ? theme.success : theme.textMuted
   }
   const upstream = node.data as RedactedUpstream
   return upstream.has_api_key ? theme.success : theme.warning

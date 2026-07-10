@@ -56,6 +56,7 @@ type ProxyHarnessInput = {
   upstreams?: HarnessUpstream[]
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
+  hostedSessions?: HostedSessionSummary[]
   patchWorkerDelayMs?: number
   strictModuleWorkerIDs?: boolean
   settings?: ProxySettingsPatch
@@ -135,7 +136,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     ],
   ])
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
-  const hostedSessions: HostedSessionSummary[] = []
+  const hostedSessions = [...(input.hostedSessions ?? [])]
   const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
   const findWorker = (key: string) => workers.get(key) ?? [...workers.values()].find((worker) => String(worker.port) === key)
   const setWorker = (worker: WorkerSummary) => workers.set(worker.id, worker)
@@ -216,6 +217,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     createBatch: [] as CreateBatchRequest[],
     getBatch: [] as string[],
     deleteBatch: [] as string[],
+    patchHostedSession: [] as Array<{ session_id: string; worker_id: string }>,
     testUpstream: [] as string[],
     testAllUpstreams: 0,
   }
@@ -308,6 +310,24 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     const request = requestInput instanceof Request ? requestInput : undefined
     const url = new URL(request ? request.url : String(requestInput))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
+
+    const hostedSessionRoute = url.pathname.match(/^\/api\/hosted-sessions\/([^/]+)$/)
+    if (hostedSessionRoute && method === "PATCH") {
+      const sessionID = decodeURIComponent(hostedSessionRoute[1]!)
+      const body = JSON.parse(String(init?.body ?? "null")) as { worker_id: string }
+      const worker = findWorker(body.worker_id)!
+      const index = hostedSessions.findIndex((session) => session.session_id === sessionID)
+      const updated = {
+        ...hostedSessions[index],
+        worker_id: worker.id,
+        worker_name: worker.name,
+        worker_port: worker.port,
+        worker: { id: worker.id, name: worker.name },
+      }
+      hostedSessions[index] = updated
+      calls.patchHostedSession.push({ session_id: sessionID, worker_id: body.worker_id })
+      return json(updated)
+    }
 
     const workerRoute = url.pathname.match(/^\/api\/workers\/([^/]+)$/)
     if (workerRoute && method === "PATCH") {

@@ -1234,6 +1234,45 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
   }
 })
 
+test("topology dialog drag session to worker patches worker id", async () => {
+  const app = await mountProxyApp({
+    hostedSessions: [
+      {
+        session_id: "hs_1",
+        session_label: "move",
+        worker_id: "app",
+        worker_name: "app",
+        worker_port: 6767,
+        created_at: "2026-07-10T00:00:00Z",
+        last_opened_at: "2026-07-10T00:00:00Z",
+        status: "stale",
+      },
+    ],
+  })
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.topology")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("move")
+    })
+
+    const lines = app.frame().split("\n")
+    const sessionY = lines.findIndex((line) => line.includes("move"))
+    const workerY = lines.findIndex((line) => line.includes("cli-openrouter"))
+    const sessionX = lines[sessionY].indexOf("move") + 1
+    const workerX = lines[workerY].indexOf("cli-openrouter") + 1
+    await app.setup.mockMouse.drag(sessionX, sessionY, workerX, workerY)
+    await wait(() => app.calls.patchHostedSession.length === 1)
+
+    expect({ patchHostedSession: app.calls.patchHostedSession }).toEqual({
+      patchHostedSession: [{ session_id: "hs_1", worker_id: "cli-openrouter" }],
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("topology dialog does not start a text selection", async () => {
   const app = await mountProxyApp()
 
