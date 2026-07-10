@@ -62,8 +62,8 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 			cmd.Stdout = stdout
 			cmd.Stderr = stderr
 		} else {
-			cmd.Stdout = io.MultiWriter(stdout, &stdoutBuf)
-			cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
+			cmd.Stdout = &stdoutBuf
+			cmd.Stderr = &stderrBuf
 		}
 		cmd.Stdin = os.Stdin
 		err := cmd.Run()

@@ -206,6 +206,25 @@ func TestRunLaunchRequiresWorker(t *testing.T) {
 	}
 }
 
+func TestLaunchRunnerBuffersTmuxControlOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := launchRunnerFactory(&stdout, &stderr)
+	output, err := runner.Run([]string{"/bin/sh", "-c", "printf output; printf error >&2; exit 1"})
+	if err == nil {
+		t.Fatal("expected command failure")
+	}
+	if output != "output" {
+		t.Fatalf("got output %q", output)
+	}
+	if !strings.Contains(err.Error(), "error") {
+		t.Fatalf("missing captured stderr in %q", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("control output leaked to terminal: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunLaunchRunsBuiltCommand(t *testing.T) {
 	var got []string
 	restore := func() func() {
