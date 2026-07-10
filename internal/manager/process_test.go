@@ -14,8 +14,13 @@ import (
 
 const (
 	processTestTimeout        = 5 * time.Second
-	workerDrainTestDelay      = 10*time.Second + 100*time.Millisecond
-	managerStopProcessTimeout = 15 * time.Second
+	delayedChildExitTestDelay = time.Second
+	sharedStopGracePeriod     = 3 * time.Second
+	sharedStopTestTimeout     = 3500 * time.Millisecond
+	workerHTTPStopBudget      = 10 * time.Second
+	workerMetricsDrainBudget  = 2 * time.Second
+	workerDrainTestDelay      = workerHTTPStopBudget + workerMetricsDrainBudget + 100*time.Millisecond
+	managerStopProcessTimeout = 18 * time.Second
 )
 
 func TestExecStarterPassesRuntimeConfigOnFD3NotArgv(t *testing.T) {
@@ -267,6 +272,56 @@ func TestExecProcessStopWaitsForMetricsHandler(t *testing.T) {
 	}
 }
 
+func TestExecProcessStopUsesRemainingGraceForMetricsHandler(t *testing.T) {
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+
+	process, err := ExecStarter{Executable: os.Args[0], StopGracePeriod: sharedStopGracePeriod}.Start(WorkerSpawn{
+		Args:        helperProcessArgs("term-delayed-exit-metrics", "", readyPath),
+		RuntimeJSON: []byte(`{}`),
+		MetricsHandler: func(r io.Reader) {
+			_, _ = io.ReadAll(r)
+			close(handlerStarted)
+			<-releaseHandler
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForFile(t, readyPath)
+
+	done := make(chan error, 1)
+	startedAt := time.Now()
+	go func() {
+		done <- process.Stop()
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(processTestTimeout):
+		close(releaseHandler)
+		<-done
+		t.Fatal("metrics handler did not start")
+	}
+
+	select {
+	case err := <-done:
+		close(releaseHandler)
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Until(startedAt.Add(sharedStopTestTimeout))):
+		close(releaseHandler)
+		<-done
+		t.Fatalf("Stop exceeded its shared grace budget: %v", time.Since(startedAt))
+	}
+	if process.(*ExecProcess).ForcedStop() {
+		t.Fatal("metrics handler timeout marked a normally exited worker as forced")
+	}
+}
+
 func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 	dir := t.TempDir()
 	signalPath := filepath.Join(dir, "signal.txt")
@@ -335,6 +390,26 @@ func TestExecProcessHelper(t *testing.T) {
 		if file := os.NewFile(uintptr(4), "metrics-fd"); file != nil {
 			_, _ = file.Write([]byte(`{"drained":true}` + "\n"))
 			_ = file.Close()
+			os.Exit(0)
+		}
+		os.Exit(2)
+	}
+	if len(args) == 5 && args[0] == "term-delayed-exit-metrics" {
+		if args[3] != "--metrics-fd" || args[4] != "4" {
+			os.Exit(2)
+		}
+		if file := os.NewFile(uintptr(3), "config-fd"); file != nil {
+			_, _ = io.Copy(io.Discard, file)
+			_ = file.Close()
+		}
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		if err := os.WriteFile(args[2], []byte("ready"), 0600); err != nil {
+			os.Exit(2)
+		}
+		if sig := <-signals; sig == syscall.SIGTERM {
+			time.Sleep(delayedChildExitTestDelay)
 			os.Exit(0)
 		}
 		os.Exit(2)

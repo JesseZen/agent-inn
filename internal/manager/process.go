@@ -36,7 +36,7 @@ type ExecProcess struct {
 	forcedStop      bool
 }
 
-const defaultManagerStopGracePeriod = 12 * time.Second
+const defaultManagerStopGracePeriod = 15 * time.Second
 
 func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	executable := s.Executable
@@ -187,6 +187,7 @@ func (p *ExecProcess) Stop() error {
 			return err
 		}
 	}
+	stopDeadline := time.Now().Add(stopGracePeriod)
 	if stdin != nil {
 		_ = stdin.Close()
 	}
@@ -197,9 +198,10 @@ func (p *ExecProcess) Stop() error {
 	}()
 
 	var err error
+	remainingGrace := time.Until(stopDeadline)
 	select {
 	case err = <-done:
-	case <-time.After(stopGracePeriod):
+	case <-time.After(remainingGrace):
 		p.markForcedStop()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
@@ -207,7 +209,11 @@ func (p *ExecProcess) Stop() error {
 		err = <-done
 	}
 	if metricsDone != nil {
-		<-metricsDone
+		remainingGrace = time.Until(stopDeadline)
+		select {
+		case <-metricsDone:
+		case <-time.After(remainingGrace):
+		}
 	}
 	return ignoreManagedStopExit(err)
 }
