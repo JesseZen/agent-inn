@@ -121,6 +121,7 @@ func TestManagerFailoverSwitchesEveryWorkerInPool(t *testing.T) {
 	defer m.Close()
 	m.statuses["app"] = WorkerStateRunning
 	m.statuses["cli"] = WorkerStateRunning
+	authorityObserve(t, m, "backup", readinessTestSuccess(0))
 
 	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
 		t.Fatal(err)
@@ -264,17 +265,14 @@ func TestManagerFailoverRestoresPreferredUpstreamAfterRecovery(t *testing.T) {
 	defer m.Close()
 	m.clock = func() time.Time { return now }
 	m.statuses["app"] = WorkerStateRunning
+	authorityObserve(t, m, "backup", readinessTestSuccess(0))
 
 	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(30 * time.Second)
-	if err := m.recordUpstreamProbeResult("primary", upstream.ProbeResult{OK: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.recordUpstreamProbeResult("primary", upstream.ProbeResult{OK: true}); err != nil {
-		t.Fatal(err)
-	}
+	authorityObserve(t, m, "primary", readinessTestSuccess(0))
+	authorityObserve(t, m, "primary", readinessTestSuccess(0))
 
 	pool := m.config.UpstreamPools["coding-ha"]
 	got := struct {
@@ -333,9 +331,7 @@ func TestManagerFailoverRestoresRecoveredHigherPriorityFallback(t *testing.T) {
 	m.circuits.RecordFailure(poolCircuitKey("coding-ha", "secondary"), pool.CircuitBreaker)
 	now = now.Add(30 * time.Second)
 
-	if err := m.recordUpstreamProbeResult("secondary", upstream.ProbeResult{OK: true}); err != nil {
-		t.Fatal(err)
-	}
+	authorityObserve(t, m, "secondary", readinessTestSuccess(0))
 	got := struct {
 		Configured string
 		Applied    string
@@ -401,13 +397,18 @@ func TestManagerWorkerFailureEventTriggersOnlyCurrentUpstreamFailover(t *testing
 			})
 			defer m.Close()
 			m.statuses["app"] = WorkerStateRunning
+			m.generations["app"] = 1
+			if test.current == "primary" {
+				authorityObserve(t, m, "backup", readinessTestSuccess(0))
+			}
 
 			m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{
-				Timestamp: time.Now(),
-				Upstream:  "primary",
-				Method:    "POST",
-				Path:      "/v1/responses",
-				Status:    502,
+				Timestamp:          time.Now(),
+				SnapshotGeneration: 1,
+				Upstream:           "primary",
+				Method:             "POST",
+				Path:               "/v1/responses",
+				Status:             502,
 				Failure: &worker.UpstreamFailure{
 					Kind:            worker.UpstreamFailureTransport,
 					BeforeFirstByte: true,
@@ -514,11 +515,12 @@ func TestManagerSuccessfulWorkerRequestResetsConsecutiveFailures(t *testing.T) {
 	})
 	defer m.Close()
 	m.statuses["app"] = WorkerStateRunning
+	m.generations["app"] = 1
 	failure := &worker.UpstreamFailure{Kind: worker.UpstreamFailureTransport, BeforeFirstByte: true}
 
-	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 502, Failure: failure})
-	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 200})
-	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), Upstream: "primary", Status: 502, Failure: failure})
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), SnapshotGeneration: 1, Upstream: "primary", Status: 502, Failure: failure})
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), SnapshotGeneration: 1, Upstream: "primary", Status: 200})
+	m.handleWorkerMetricEvent("app", worker.RequestMetricEvent{Timestamp: time.Now(), SnapshotGeneration: 1, Upstream: "primary", Status: 502, Failure: failure})
 
 	pool := m.config.UpstreamPools["coding-ha"]
 	got := struct {

@@ -98,7 +98,38 @@ func (b *circuitBreaker) RecordSuccess(upstream string, policy config.CircuitBre
 	b.states[upstream] = CircuitStatus{State: CircuitStateClosed}
 }
 
+func (b *circuitBreaker) RecordRecoveryFailure(upstream string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state := b.statusLocked(upstream)
+	state.State = CircuitStateOpen
+	state.RecoverySuccesses = 0
+	state.OpenedAt = b.clock()
+	b.states[upstream] = state
+}
+
+func (b *circuitBreaker) Reset(upstream string) {
+	b.mu.Lock()
+	b.states[upstream] = CircuitStatus{State: CircuitStateClosed}
+	b.mu.Unlock()
+}
+
+type workerUpstreamOutcome int
+
+const (
+	workerUpstreamSuccess workerUpstreamOutcome = iota
+	workerUpstreamFailure
+)
+
 func (m *Manager) recordWorkerUpstreamFailure(workerName string, upstreamName string) error {
+	return m.recordWorkerUpstreamOutcome(workerName, upstreamName, workerUpstreamFailure)
+}
+
+func (m *Manager) recordWorkerUpstreamSuccess(workerName string, upstreamName string) error {
+	return m.recordWorkerUpstreamOutcome(workerName, upstreamName, workerUpstreamSuccess)
+}
+
+func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName string, outcome workerUpstreamOutcome) error {
 	m.failoverMu.Lock()
 	defer m.failoverMu.Unlock()
 	m.mu.RLock()
@@ -116,16 +147,28 @@ func (m *Manager) recordWorkerUpstreamFailure(workerName string, upstreamName st
 
 	key := poolCircuitKey(poolName, upstreamName)
 	previous := m.circuits.Status(key, pool.CircuitBreaker)
-	m.circuits.RecordFailure(key, pool.CircuitBreaker)
+	switch previous.State {
+	case CircuitStateClosed:
+		if outcome == workerUpstreamFailure {
+			m.circuits.RecordFailure(key, pool.CircuitBreaker)
+		} else {
+			m.circuits.RecordSuccess(key, pool.CircuitBreaker)
+		}
+	case CircuitStateHalfOpen:
+		if outcome == workerUpstreamFailure {
+			m.circuits.RecordRecoveryFailure(key)
+		}
+	case CircuitStateOpen:
+	}
 	current := m.circuits.Status(key, pool.CircuitBreaker)
 	m.publishCircuitTransition(poolName, upstreamName, previous, current)
-	if current.State != CircuitStateOpen {
+	if outcome != workerUpstreamFailure || current.State != CircuitStateOpen {
 		return nil
 	}
 
 	next := ""
 	for _, candidate := range pool.Upstreams {
-		if m.circuits.Allow(poolCircuitKey(poolName, candidate), pool.CircuitBreaker) {
+		if candidate != upstreamName && m.poolReadinessLocked(poolName, candidate).Eligible {
 			next = candidate
 			break
 		}
@@ -136,31 +179,10 @@ func (m *Manager) recordWorkerUpstreamFailure(workerName string, upstreamName st
 	return m.switchUpstreamPool(poolName, upstreamName, next)
 }
 
-func (m *Manager) recordWorkerUpstreamSuccess(workerName string, upstreamName string) error {
-	m.failoverMu.Lock()
-	defer m.failoverMu.Unlock()
-	m.mu.RLock()
-	workerConfig, ok := m.config.Workers[workerName]
-	if !ok || workerConfig.UpstreamPool == "" || workerUpstreamID(workerConfig) != upstreamName {
-		m.mu.RUnlock()
+func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.ProbeResult) error {
+	if probe.Mode != upstream.ProbeModeProtocol || !probe.Authoritative {
 		return nil
 	}
-	poolName := workerConfig.UpstreamPool
-	pool, ok := m.config.UpstreamPools[poolName]
-	m.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("upstream pool %q not found", poolName)
-	}
-
-	key := poolCircuitKey(poolName, upstreamName)
-	previous := m.circuits.Status(key, pool.CircuitBreaker)
-	m.circuits.RecordSuccess(key, pool.CircuitBreaker)
-	current := m.circuits.Status(key, pool.CircuitBreaker)
-	m.publishCircuitTransition(poolName, upstreamName, previous, current)
-	return nil
-}
-
-func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.ProbeResult) error {
 	m.failoverMu.Lock()
 	defer m.failoverMu.Unlock()
 	m.mu.RLock()
@@ -182,21 +204,24 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.
 	for _, poolName := range poolNames {
 		pool := pools[poolName]
 		key := poolCircuitKey(poolName, upstreamName)
-		beforeAllow := m.circuits.Status(key, pool.CircuitBreaker)
-		if !m.circuits.Allow(key, pool.CircuitBreaker) {
-			continue
+		previous := m.circuits.Status(key, pool.CircuitBreaker)
+		beforeProbe := previous
+		if previous.State == CircuitStateOpen {
+			if !m.circuits.Allow(key, pool.CircuitBreaker) {
+				continue
+			}
+			beforeProbe = m.circuits.Status(key, pool.CircuitBreaker)
+			m.publishCircuitTransition(poolName, upstreamName, previous, beforeProbe)
 		}
-		afterAllow := m.circuits.Status(key, pool.CircuitBreaker)
-		m.publishCircuitTransition(poolName, upstreamName, beforeAllow, afterAllow)
-		if probe.OK {
-			m.circuits.RecordSuccess(key, pool.CircuitBreaker)
-		} else if probe.Degraded {
-			continue
-		} else {
-			m.circuits.RecordFailure(key, pool.CircuitBreaker)
+		if beforeProbe.State == CircuitStateHalfOpen {
+			if probe.OK {
+				m.circuits.RecordSuccess(key, pool.CircuitBreaker)
+			} else {
+				m.circuits.RecordRecoveryFailure(key)
+			}
 		}
 		afterProbe := m.circuits.Status(key, pool.CircuitBreaker)
-		m.publishCircuitTransition(poolName, upstreamName, afterAllow, afterProbe)
+		m.publishCircuitTransition(poolName, upstreamName, beforeProbe, afterProbe)
 
 		active := m.poolActiveUpstream(poolName)
 		recoveredIndex := -1
@@ -209,7 +234,7 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.
 				activeIndex = index
 			}
 		}
-		if probe.OK && afterProbe.State == CircuitStateClosed && recoveredIndex >= 0 && activeIndex >= 0 && recoveredIndex < activeIndex {
+		if probe.OK && m.poolReadinessLocked(poolName, upstreamName).Eligible && recoveredIndex >= 0 && activeIndex >= 0 && recoveredIndex < activeIndex {
 			if err := m.switchUpstreamPool(poolName, active, upstreamName); err != nil {
 				recoveryErrors = append(recoveryErrors, err)
 			}

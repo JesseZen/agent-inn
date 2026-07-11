@@ -222,6 +222,17 @@ func (m *Manager) handleWorkerMetricEventFrom(source workerMetricSource, event w
 			)
 		}
 	}
+	m.mu.RLock()
+	workerConfig, exists := m.config.Workers[source.name]
+	status := m.workerStatusLocked(source.name)
+	generation := m.workerGenerationLocked(source.name)
+	if supervisor := m.supervisors[source.name]; supervisor != nil && supervisor.AppliedGeneration() > 0 {
+		generation = supervisor.AppliedGeneration()
+	}
+	m.mu.RUnlock()
+	if !exists || status != WorkerStateRunning || event.SnapshotGeneration < 1 || event.SnapshotGeneration != generation || event.Upstream != workerUpstreamID(workerConfig) {
+		return
+	}
 	if event.Failure != nil && qualifiedUpstreamFailure(event.Failure.Kind) {
 		if err := m.recordWorkerUpstreamFailure(source.name, event.Upstream); err != nil {
 			m.logger.Error(logging.EventUpstreamFailover,

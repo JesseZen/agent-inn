@@ -116,7 +116,7 @@ func TestManagerAPIUpstreamTestAllProbesAllUpstreams(t *testing.T) {
 	}
 }
 
-func TestManagerProtocolProbeRestoresPreferredPoolUpstream(t *testing.T) {
+func TestManagerProtocolProbeReportsSuccess(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,8 +186,8 @@ func TestManagerProtocolProbeRestoresPreferredPoolUpstream(t *testing.T) {
 		Method:     http.MethodPost,
 		Path:       "/responses",
 		ProbeOK:    true,
-		Configured: "primary",
-		Applied:    "primary",
+		Configured: "backup",
+		Applied:    "",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected protocol recovery:\n got %#v\nwant %#v", got, want)
