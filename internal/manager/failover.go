@@ -1,9 +1,7 @@
 package manager
 
 import (
-	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -182,34 +180,6 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 		return nil
 	}
 	return m.switchUpstreamPool(poolName, upstreamName, next)
-}
-
-func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.ProbeResult) error {
-	if probe.Mode != upstream.ProbeModeProtocol || !probe.Authoritative {
-		return nil
-	}
-	m.failoverMu.Lock()
-	defer m.failoverMu.Unlock()
-	m.mu.RLock()
-	poolNames := make([]string, 0, len(m.config.UpstreamPools))
-	for poolName, pool := range m.config.UpstreamPools {
-		for _, candidate := range pool.Upstreams {
-			if candidate == upstreamName {
-				poolNames = append(poolNames, poolName)
-				break
-			}
-		}
-	}
-	m.mu.RUnlock()
-	sort.Strings(poolNames)
-
-	var recoveryErrors []error
-	for _, poolName := range poolNames {
-		if err := m.recordPoolProbeResultLocked(poolName, upstreamName, probe); err != nil {
-			recoveryErrors = append(recoveryErrors, err)
-		}
-	}
-	return errors.Join(recoveryErrors...)
 }
 
 func (m *Manager) recordPoolProbeResultLocked(poolName string, upstreamName string, probe upstream.ProbeResult) error {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
-	"github.com/jesse/agent-inn/internal/upstream"
 	"github.com/jesse/agent-inn/internal/worker"
 )
 
@@ -540,41 +539,6 @@ func TestManagerSuccessfulWorkerRequestResetsConsecutiveFailures(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected consecutive failure reset:\n got %#v\nwant %#v", got, want)
-	}
-}
-
-func TestManagerDegradedProbeLeavesCircuitStateUnchanged(t *testing.T) {
-	pool := config.UpstreamPool{
-		Upstreams: []string{"primary", "backup"},
-		CircuitBreaker: config.CircuitBreakerConfig{
-			FailureThreshold:         2,
-			RecoverySuccessThreshold: 1,
-			RecoveryWaitSeconds:      60,
-		},
-	}
-	m := New(Config{Config: config.Config{
-		Workers: map[string]config.WorkerConfig{
-			"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
-		},
-		Upstreams: map[string]config.UpstreamProfile{
-			"primary": {BaseURL: "https://primary.example/v1"},
-			"backup":  {BaseURL: "https://backup.example/v1"},
-		},
-		UpstreamPools: map[string]config.UpstreamPool{"coding-ha": pool},
-	}})
-	defer m.Close()
-	m.circuits.RecordFailure(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
-
-	before := m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
-	if err := m.recordUpstreamProbeResult("primary", upstream.ProbeResult{
-		Degraded:   true,
-		StatusCode: http.StatusTooManyRequests,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	after := m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
-	if !reflect.DeepEqual(after, before) {
-		t.Fatalf("degraded probe changed circuit state:\n got %#v\nwant %#v", after, before)
 	}
 }
 

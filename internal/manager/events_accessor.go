@@ -114,6 +114,31 @@ func (e Event) AsUpstreamUpdated() (upstream string, ok bool) {
 	return upstream, true
 }
 
+func (e Event) AsUpstreamProbed() (PoolReadiness, bool) {
+	if e.Type != EventUpstreamProbed {
+		return PoolReadiness{}, false
+	}
+	data, err := json.Marshal(e.Payload)
+	if err != nil {
+		return PoolReadiness{}, false
+	}
+	var readiness PoolReadiness
+	if err := json.Unmarshal(data, &readiness); err != nil {
+		return PoolReadiness{}, false
+	}
+	return readiness, true
+}
+
+func (e Event) AsUpstreamPoolExhausted() (pool string, upstream string, reason string, ok bool) {
+	if e.Type != EventUpstreamPoolExhausted {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	upstream, _ = e.Payload["upstream"].(string)
+	reason, _ = e.Payload["reason"].(string)
+	return pool, upstream, reason, true
+}
+
 func (e Event) AsUpstreamCircuitChanged() (pool string, upstream string, state CircuitState, ok bool) {
 	if e.Type != EventUpstreamCircuitChanged {
 		return "", "", "", false

@@ -18,14 +18,32 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{}
+	m.mu.RLock()
+	bindings := make(map[string][]string, len(m.config.Upstreams))
+	for poolName, pool := range m.config.UpstreamPools {
+		for _, upstreamName := range pool.Upstreams {
+			bindings[upstreamName] = append(bindings[upstreamName], poolName)
+		}
+	}
+	m.mu.RUnlock()
+	for upstreamName := range bindings {
+		sort.Strings(bindings[upstreamName])
+	}
 	for name, profile := range m.upstreamProfileSnapshot() {
 		runtime, _ := upstream.Resolve(name, profile)
-		out[name] = map[string]any{
+		entry := map[string]any{
 			"name": name, "base_url": profile.BaseURL, "has_api_key": runtime.APIKey != "", "api_format": profile.APIFormat,
 		}
 		if profile.ProtocolProbe.Model != "" {
-			out[name].(map[string]any)["protocol_probe"] = profile.ProtocolProbe
+			entry["protocol_probe"] = profile.ProtocolProbe
 		}
+		poolNames := bindings[name]
+		readiness := make([]PoolReadiness, 0, len(poolNames))
+		for _, poolName := range poolNames {
+			readiness = append(readiness, m.poolReadiness(poolName, name))
+		}
+		entry["pool_readiness"] = readiness
+		out[name] = entry
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"upstreams": out})
 }

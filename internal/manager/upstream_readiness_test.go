@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
@@ -86,6 +87,14 @@ func TestManagerProbeObservationIdentity(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected pool-scoped observations:\n got %#v\nwant %#v", got, want)
 	}
+	gotEvents := poolRoutingEvents(m, EventUpstreamProbed)
+	wantEvents := []map[string]any{
+		{"upstream": "primary", "pool": "pool-a", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(0)},
+		{"upstream": "primary", "pool": "pool-b", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateNotReady, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": false, "status_code": http.StatusUnauthorized, "latency_ms": int64(0), "error": "auth_error"},
+	}
+	if !reflect.DeepEqual(gotEvents, wantEvents) {
+		t.Fatalf("unexpected pool-scoped events:\n got %#v\nwant %#v", gotEvents, wantEvents)
+	}
 }
 
 func TestManagerProbeObservationLifecycleJSON(t *testing.T) {
@@ -111,6 +120,42 @@ func TestManagerProbeObservationLifecycleJSON(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected readiness JSON lifecycle:\n got %#v\nwant %#v", got, want)
+	}
+
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return checkedAt }
+	spec := readinessTestProbeSpec("coding-ha", "primary", "", 1, "model-a")
+	installReadinessTestSpec(m, spec)
+	apiValues := make([]string, 0, 3)
+	for index := 0; index < 3; index++ {
+		if index == 1 {
+			m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
+		}
+		if index == 2 {
+			m.clock = func() time.Time { return checkedAt.Add(readinessFreshness) }
+		}
+		response := httptest.NewRecorder()
+		m.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://manager.local/api/upstreams", nil))
+		var body struct {
+			Upstreams map[string]struct {
+				PoolReadiness []PoolReadiness `json:"pool_readiness"`
+			} `json:"upstreams"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(body.Upstreams["primary"].PoolReadiness)
+		if err != nil {
+			t.Fatal(err)
+		}
+		apiValues = append(apiValues, string(data))
+	}
+	wantAPI := []string{"[" + want[0] + "]", "[" + want[1] + "]", "[" + want[2] + "]"}
+	if !reflect.DeepEqual(apiValues, wantAPI) {
+		t.Fatalf("unexpected readiness API lifecycle:\n got %#v\nwant %#v", apiValues, wantAPI)
 	}
 }
 
