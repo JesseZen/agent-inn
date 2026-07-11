@@ -183,7 +183,9 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 	if worker.Hooks == nil {
 		worker.Hooks = map[string]config.ModuleConfig{}
 	}
-	if worker.UpstreamPool != "" {
+	pooled := worker.UpstreamPool != ""
+	oldProxyURL := ""
+	if pooled {
 		m.failoverMu.Lock()
 		if err := m.validatePoolAttachmentLocked(payload.Name, worker); err != nil {
 			m.failoverMu.Unlock()
@@ -195,8 +197,25 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
-		oldProxyURL := m.poolProxyURL(worker.UpstreamPool)
-		m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
+		oldProxyURL = m.poolProxyURL(worker.UpstreamPool)
+	} else {
+		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+	}
+	m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
+	if err := m.StartWorker(payload.Name); err != nil {
+		m.updateConfig(func(cfgRoot *config.Config) {
+			delete(cfgRoot.Workers, payload.Name)
+		})
+		if pooled {
+			m.failoverMu.Unlock()
+		}
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		return
+	}
+	if pooled {
 		m.mu.RLock()
 		pool := m.config.UpstreamPools[worker.UpstreamPool]
 		m.mu.RUnlock()
@@ -209,19 +228,6 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		}
 		m.failoverMu.Unlock()
 		m.probeAllUpstreams(m.probeContext)
-	} else {
-		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
-			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-			return
-		}
-		m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
-	}
-	if err := m.StartWorker(payload.Name); err != nil {
-		m.updateConfig(func(cfgRoot *config.Config) {
-			delete(cfgRoot.Workers, payload.Name)
-		})
-		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
-		return
 	}
 	for _, summary := range m.workerSummaries() {
 		if summary.Name == payload.Name {

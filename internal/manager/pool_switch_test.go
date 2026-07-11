@@ -271,6 +271,32 @@ func TestManagerPooledWorkerCreateEstablishesEmptyPool(t *testing.T) {
 	}
 }
 
+func TestManagerPooledWorkerCreateFailurePreservesPoolIdentity(t *testing.T) {
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+	})
+	defer m.Close()
+	authorityObserve(t, m, "primary", readinessTestSuccess(1))
+	wantReadiness := m.poolReadiness("coding-ha", "primary")
+	m.starter = &recordingStarter{err: fmt.Errorf("spawn failed")}
+	response := httptest.NewRecorder()
+	m.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers", strings.NewReader(`{"name":"cli","port":6768,"upstream":"primary","upstream_pool":"coding-ha","proxy_url":"http://proxy.example"}`)))
+	_, created := m.config.Workers["cli"]
+	got := struct {
+		Code      int
+		Created   bool
+		Readiness PoolReadiness
+	}{response.Code, created, m.poolReadiness("coding-ha", "primary")}
+	want := struct {
+		Code      int
+		Created   bool
+		Readiness PoolReadiness
+	}{http.StatusInternalServerError, false, wantReadiness}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed create changed pool identity:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerPooledWorkerDetachPreservesUpstreamAndProxy(t *testing.T) {
 	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
 		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},

@@ -4561,12 +4561,16 @@ type recordingStarter struct {
 	processes  []*recordingProcess
 	forcedStop bool
 	onStart    func(WorkerSpawn)
+	err        error
 }
 
 func (s *recordingStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	s.spawns = append(s.spawns, spawn)
 	if s.onStart != nil {
 		s.onStart(spawn)
+	}
+	if s.err != nil {
+		return nil, s.err
 	}
 	process := &recordingProcess{forcedStop: s.forcedStop}
 	s.processes = append(s.processes, process)
