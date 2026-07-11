@@ -21,6 +21,7 @@ import type {
   WorkerDetail,
   WorkerSummary,
 } from "../proxy/backend"
+import { decodeManagerUpstreams, type ManagerUpstream } from "../proxy/backend"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
@@ -155,8 +156,8 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           return new URL(`/api/workers/${port}/stream`, props.url).toString()
         },
         async getUpstreams() {
-          return request<{ upstreams: Record<string, RedactedUpstream> }>("/api/upstreams").then((result) =>
-            Object.values(result.upstreams ?? {}),
+          return request<{ upstreams: Record<string, ManagerUpstream> }>("/api/upstreams").then((result) =>
+            decodeManagerUpstreams(result.upstreams ?? {}),
           )
         },
         async patchUpstream(id: string, profile: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }) {

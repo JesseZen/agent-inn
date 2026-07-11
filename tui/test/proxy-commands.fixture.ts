@@ -291,7 +291,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
     if (url.pathname === "/api/upstreams")
       return json({
-        upstreams: Object.fromEntries(providers.entries()),
+        upstreams: Object.fromEntries(
+          [...providers.entries()].map(([id, provider]) => {
+            const { id: _id, ...profile } = provider
+            return [id, profile]
+          }),
+        ),
       })
     if (url.pathname === "/api/config" && url.search === "") {
       if (url.href.includes("&__method=PUT")) return undefined

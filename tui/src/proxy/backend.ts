@@ -12,6 +12,12 @@ export type RedactedUpstream = {
   pool_readiness?: PoolReadiness[]
 }
 
+export type ManagerUpstream = Omit<RedactedUpstream, "id">
+
+export function decodeManagerUpstreams(upstreams: Record<string, ManagerUpstream>): RedactedUpstream[] {
+  return Object.entries(upstreams).map(([id, upstream]) => ({ ...upstream, id }))
+}
+
 export type ProbeMode = "reachability" | "protocol"
 export type ReadinessState = "unknown" | "ready" | "not_ready"
 
@@ -412,8 +418,8 @@ export function createProxyFetch(input: { baseUrl: string; directory: string }) 
     const url = new URL(request ? request.url : String(requestInfo))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
     const upstreams = toAinnUpstreams(
-      await fetchManager<{ upstreams: Record<string, RedactedUpstream> }>(input.baseUrl, "/api/upstreams").then((result) =>
-        Object.values(result.upstreams ?? {}),
+      await fetchManager<{ upstreams: Record<string, ManagerUpstream> }>(input.baseUrl, "/api/upstreams").then((result) =>
+        decodeManagerUpstreams(result.upstreams ?? {}),
       ),
     )
     const providerDefault = defaultModels(upstreams)

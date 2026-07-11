@@ -93,6 +93,37 @@ test("upstream manager renders protocol, reachability, unknown, and mixed pool r
   }
 })
 
+test("upstream manager preserves map-key IDs for mouse selection", async () => {
+  const app = await mountProxyApp({
+    upstreams: [
+      { id: "pool-error", name: "pool-error", base_url: "http://127.0.0.1:19093/v1", has_api_key: true, pool_readiness: [readiness("demo-ha", "not_ready", false)] },
+      { id: "pool-ok", name: "pool-ok", base_url: "http://127.0.0.1:19092/v1", has_api_key: true, pool_readiness: [readiness("demo-ha", "ready", true, { ok: true })] },
+    ],
+  })
+  try {
+    await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("pool-ok")
+    })
+    const lines = app.frame().split("\n")
+    const y = lines.findIndex((line) => line.includes("pool-ok"))
+    const x = y >= 0 ? lines[y]!.indexOf("pool-ok") : -1
+    if (x < 0 || y < 0) throw new Error(`expected visible pool-ok row:\n${app.frame()}`)
+    await app.setup.mockMouse.click(x, y)
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Upstream: pool-ok")
+    })
+    expect(app.frame()).toContain("Edit Upstream: pool-ok")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("scheduled readiness updates only its pool binding", () => {
   const upstreams = [
     {
