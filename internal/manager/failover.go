@@ -240,6 +240,25 @@ func (m *Manager) recordPoolProbeResultLocked(poolName string, upstreamName stri
 	m.publishCircuitTransition(poolName, upstreamName, beforeProbe, afterProbe)
 
 	active := m.poolActiveUpstream(poolName)
+	activeReadiness := m.poolReadinessLocked(poolName, active)
+	if active != "" && !activeReadiness.Eligible {
+		next := ""
+		for _, candidate := range pool.Upstreams {
+			if candidate != active && m.poolReadinessLocked(poolName, candidate).Eligible {
+				next = candidate
+				break
+			}
+		}
+		if next != "" {
+			return m.switchUpstreamPool(poolName, active, next)
+		}
+		if m.exhaustedPools[poolName] != active {
+			m.exhaustedPools[poolName] = active
+			m.publishEvent(EventUpstreamPoolExhausted, map[string]any{"pool": poolName, "upstream": active, "reason": "no_eligible_fallback"})
+		}
+		return nil
+	}
+	delete(m.exhaustedPools, poolName)
 	recoveredIndex := -1
 	activeIndex := -1
 	for index, candidate := range pool.Upstreams {
@@ -256,86 +275,21 @@ func (m *Manager) recordPoolProbeResultLocked(poolName string, upstreamName stri
 	return nil
 }
 
-func (m *Manager) poolActiveUpstream(poolName string) string {
-	m.mu.RLock()
-	names := make([]string, 0, len(m.config.Workers))
-	for name, workerConfig := range m.config.Workers {
-		if workerConfig.UpstreamPool == poolName {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	active := ""
-	if len(names) > 0 {
-		active = workerUpstreamID(m.config.Workers[names[0]])
-	}
-	m.mu.RUnlock()
-	return active
-}
-
-func (m *Manager) publishCircuitTransition(poolName string, upstreamName string, previous CircuitStatus, current CircuitStatus) {
+func (m *Manager) publishCircuitTransition(poolName string, upstreamName string, previous CircuitStatus, current CircuitStatus, reasons ...string) {
 	if previous.State == current.State {
 		return
 	}
-	m.publishEvent(EventUpstreamCircuitChanged, map[string]any{
+	payload := map[string]any{
 		"pool":     poolName,
 		"upstream": upstreamName,
 		"state":    current.State,
-	})
+	}
+	if len(reasons) > 0 {
+		payload["reason"] = reasons[0]
+	}
+	m.publishEvent(EventUpstreamCircuitChanged, payload)
 }
 
 func poolCircuitKey(poolName string, upstreamName string) string {
 	return poolName + circuitKeySeparator + upstreamName
-}
-
-func (m *Manager) switchUpstreamPool(poolName string, previous string, next string) error {
-	m.mu.RLock()
-	names := make([]string, 0, len(m.config.Workers))
-	workers := make(map[string]config.WorkerConfig, len(m.config.Workers))
-	for name, workerConfig := range m.config.Workers {
-		if workerConfig.UpstreamPool != poolName {
-			continue
-		}
-		names = append(names, name)
-		workers[name] = cloneWorkerConfig(workerConfig)
-	}
-	m.mu.RUnlock()
-	sort.Strings(names)
-	statuses := make(map[string]WorkerState, len(names))
-	for _, name := range names {
-		statuses[name] = m.workerStatus(name)
-	}
-
-	for index, name := range names {
-		current := workers[name]
-		if workerUpstreamID(current) == next {
-			continue
-		}
-		updated := current
-		updated.Upstream = next
-		updated.UpstreamID = next
-		if err := m.UpdateWorker(name, current, updated); err != nil {
-			switchErrors := []error{fmt.Errorf("worker %s: %w", name, err)}
-			for rollbackIndex := index; rollbackIndex >= 0; rollbackIndex-- {
-				rollbackName := names[rollbackIndex]
-				original := workers[rollbackName]
-				configured := original
-				configured.Upstream = next
-				configured.UpstreamID = next
-				m.mu.Lock()
-				m.statuses[rollbackName] = statuses[rollbackName]
-				m.mu.Unlock()
-				if rollbackErr := m.UpdateWorker(rollbackName, configured, original); rollbackErr != nil {
-					switchErrors = append(switchErrors, fmt.Errorf("rollback worker %s: %w", rollbackName, rollbackErr))
-				}
-			}
-			return errors.Join(switchErrors...)
-		}
-	}
-	m.publishEvent(EventUpstreamPoolSwitched, map[string]any{
-		"pool":              poolName,
-		"previous_upstream": previous,
-		"upstream":          next,
-	})
-	return nil
 }

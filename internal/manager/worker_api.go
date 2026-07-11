@@ -73,6 +73,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			LogLevel       string                         `json:"log_level"`
 			RequestModules map[string]config.ModuleConfig `json:"request_modules"`
 			Hooks          map[string]config.ModuleConfig `json:"hooks"`
+			Force          *bool                          `json:"force"`
 		}
 		if err := json.Unmarshal(body, &patch); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
@@ -143,17 +144,19 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker log_level must be simple or detail"})
 			return
 		}
+		if _, proxyPatched := fields["proxy_url"]; proxyPatched && next.UpstreamPool != "" {
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": "pooled worker proxy_url cannot be changed"})
+			return
+		}
 		profiles := m.upstreamProfileSnapshot()
 		_, upstreamExists := profiles[next.UpstreamID]
 		upstreamChanged := workerUpstreamID(current) != next.UpstreamID
+		if patch.Force != nil && !(current.UpstreamPool == next.UpstreamPool && next.UpstreamPool != "" && upstreamChanged) {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "force requires a pooled upstream change"})
+			return
+		}
 		if upstreamChanged || upstreamExists {
 			if _, err := m.resolveUpstream(next.UpstreamID); err != nil {
-				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-				return
-			}
-		}
-		if upstreamExists {
-			if err := m.validateWorkerRuntime(workerName, next); err != nil {
 				writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
 				return
 			}
@@ -180,9 +183,112 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := m.UpdateWorker(workerName, current, next); err != nil {
-			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
-			return
+		poolMutation := current.UpstreamPool != "" || next.UpstreamPool != ""
+		if poolMutation {
+			m.failoverMu.Lock()
+			if current.UpstreamPool != next.UpstreamPool && next.UpstreamPool != "" {
+				m.mu.RLock()
+				pool, exists := m.config.UpstreamPools[next.UpstreamPool]
+				m.mu.RUnlock()
+				if !exists {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("upstream pool %q not found", next.UpstreamPool)})
+					return
+				}
+				member := false
+				for _, upstreamName := range pool.Upstreams {
+					if upstreamName == next.UpstreamID {
+						member = true
+						break
+					}
+				}
+				if !member {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker upstream is not a member of target pool"})
+					return
+				}
+				active := m.poolActiveUpstream(next.UpstreamPool)
+				if active != "" && active != next.UpstreamID {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker upstream does not match target pool active upstream"})
+					return
+				}
+				if active != "" && m.poolProxyURL(next.UpstreamPool) != next.ProxyURL {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker proxy_url does not match target pool proxy_url"})
+					return
+				}
+			}
+			if upstreamExists {
+				if err := m.validateWorkerRuntime(workerName, next); err != nil {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+			}
+			if current.UpstreamPool == next.UpstreamPool && next.UpstreamPool != "" && upstreamChanged {
+				forced := patch.Force != nil && *patch.Force
+				if !forced && !m.poolReadinessLocked(next.UpstreamPool, next.UpstreamID).Eligible {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": "target upstream is not eligible"})
+					return
+				}
+				mode := poolSwitchNormal
+				if forced {
+					mode = poolSwitchForced
+				}
+				if err := m.switchUpstreamPoolMode(next.UpstreamPool, workerUpstreamID(current), next.UpstreamID, mode); err != nil {
+					m.failoverMu.Unlock()
+					writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+				m.failoverMu.Unlock()
+				for _, summary := range m.workerSummaries() {
+					if summary.ID == workerName {
+						writeJSON(rw, http.StatusOK, summary)
+						return
+					}
+				}
+				return
+			}
+			oldSourceProxy := m.poolProxyURL(current.UpstreamPool)
+			oldTargetProxy := m.poolProxyURL(next.UpstreamPool)
+			if err := m.UpdateWorker(workerName, current, next); err != nil {
+				m.failoverMu.Unlock()
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
+			for _, poolName := range []string{current.UpstreamPool, next.UpstreamPool} {
+				if poolName == "" {
+					continue
+				}
+				m.mu.RLock()
+				pool := m.config.UpstreamPools[poolName]
+				m.mu.RUnlock()
+				for _, upstreamName := range pool.Upstreams {
+					m.invalidatePoolReadinessLocked(poolName, upstreamName)
+				}
+				m.invalidatePoolProbeIdentityLocked(poolName)
+			}
+			if current.UpstreamPool != "" && oldSourceProxy != m.poolProxyURL(current.UpstreamPool) {
+				m.resetPoolIdentityLocked(current.UpstreamPool)
+			}
+			if next.UpstreamPool != "" && oldTargetProxy != m.poolProxyURL(next.UpstreamPool) {
+				m.resetPoolIdentityLocked(next.UpstreamPool)
+			}
+			m.failoverMu.Unlock()
+			m.probeAllUpstreams(m.probeContext)
+		} else {
+			if upstreamExists {
+				if err := m.validateWorkerRuntime(workerName, next); err != nil {
+					writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+					return
+				}
+			}
+			if err := m.UpdateWorker(workerName, current, next); err != nil {
+				writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+				return
+			}
 		}
 		for _, summary := range m.workerSummaries() {
 			if summary.ID == workerName {

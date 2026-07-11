@@ -28,6 +28,7 @@ const (
 	EventUpstreamProbed                EventType = "upstream.probed"
 	EventUpstreamCircuitChanged        EventType = "upstream.circuit.changed"
 	EventUpstreamPoolSwitched          EventType = "upstream.pool.switched"
+	EventUpstreamPoolExhausted         EventType = "upstream.pool.exhausted"
 	EventConfigStatusChanged           EventType = "config.status.changed"
 	EventStreamRawRedacted             EventType = "stream.raw_redacted"
 	EventMetricsUpdated                EventType = "metrics.updated"

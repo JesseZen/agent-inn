@@ -82,6 +82,7 @@ type Manager struct {
 	probeWait          sync.WaitGroup
 	readiness          map[string]readinessObservation
 	readinessTimers    map[string]*time.Timer
+	exhaustedPools     map[string]string
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -224,6 +225,7 @@ func New(cfg Config) *Manager {
 		cancelProbes:       cancelProbes,
 		readiness:          map[string]readinessObservation{},
 		readinessTimers:    map[string]*time.Timer{},
+		exhaustedPools:     map[string]string{},
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,

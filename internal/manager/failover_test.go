@@ -590,8 +590,8 @@ func TestManagerAPIUpdatesWorkerUpstreamPool(t *testing.T) {
 			"app": {Port: 6767, Upstream: "primary"},
 		},
 		Upstreams: map[string]config.UpstreamProfile{
-			"primary": {BaseURL: "https://primary.example/v1"},
-			"backup":  {BaseURL: "https://backup.example/v1"},
+			"primary": {BaseURL: "https://primary.example/v1", ProtocolProbe: config.ProtocolProbeConfig{Model: "model-a"}},
+			"backup":  {BaseURL: "https://backup.example/v1", ProtocolProbe: config.ProtocolProbeConfig{Model: "model-b"}},
 		},
 		UpstreamPools: map[string]config.UpstreamPool{
 			"coding-ha": {Upstreams: []string{"primary", "backup"}},
