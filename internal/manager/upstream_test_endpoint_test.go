@@ -124,7 +124,7 @@ func TestManagerProtocolProbeRestoresPreferredPoolUpstream(t *testing.T) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data: {}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"))
 	}))
 	defer server.Close()
 
