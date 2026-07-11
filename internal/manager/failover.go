@@ -118,12 +118,7 @@ func (m *Manager) recordWorkerUpstreamFailure(workerName string, upstreamName st
 	previous := m.circuits.Status(key, pool.CircuitBreaker)
 	m.circuits.RecordFailure(key, pool.CircuitBreaker)
 	current := m.circuits.Status(key, pool.CircuitBreaker)
-	if previous.State != current.State {
-		m.publishEvent(EventUpstreamCircuitChanged, map[string]any{
-			"upstream": upstreamName,
-			"state":    current.State,
-		})
-	}
+	m.publishCircuitTransition(poolName, upstreamName, previous, current)
 	if current.State != CircuitStateOpen {
 		return nil
 	}
@@ -204,7 +199,17 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.
 		m.publishCircuitTransition(poolName, upstreamName, afterAllow, afterProbe)
 
 		active := m.poolActiveUpstream(poolName)
-		if probe.OK && afterProbe.State == CircuitStateClosed && len(pool.Upstreams) > 0 && upstreamName == pool.Upstreams[0] && active != upstreamName {
+		recoveredIndex := -1
+		activeIndex := -1
+		for index, candidate := range pool.Upstreams {
+			if candidate == upstreamName {
+				recoveredIndex = index
+			}
+			if candidate == active {
+				activeIndex = index
+			}
+		}
+		if probe.OK && afterProbe.State == CircuitStateClosed && recoveredIndex >= 0 && activeIndex >= 0 && recoveredIndex < activeIndex {
 			if err := m.switchUpstreamPool(poolName, active, upstreamName); err != nil {
 				recoveryErrors = append(recoveryErrors, err)
 			}
