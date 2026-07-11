@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 )
 
 const (
@@ -215,7 +217,13 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
-	for name, pool := range c.UpstreamPools {
+	poolNames := make([]string, 0, len(c.UpstreamPools))
+	for name := range c.UpstreamPools {
+		poolNames = append(poolNames, name)
+	}
+	sort.Strings(poolNames)
+	for _, name := range poolNames {
+		pool := c.UpstreamPools[name]
 		if len(pool.Upstreams) == 0 {
 			return fmt.Errorf("upstream pool %q requires at least one upstream", name)
 		}
@@ -227,6 +235,47 @@ func (c Config) Validate() error {
 		}
 		if pool.CircuitBreaker.RecoveryWaitSeconds < 1 {
 			return fmt.Errorf("upstream pool %q recovery_wait_seconds must be positive", name)
+		}
+		members := make(map[string]struct{}, len(pool.Upstreams))
+		for _, member := range pool.Upstreams {
+			profile, exists := c.Upstreams[member]
+			if !exists {
+				return fmt.Errorf("upstream pool %q member %q does not exist", name, member)
+			}
+			if strings.TrimSpace(profile.ProtocolProbe.Model) == "" {
+				return fmt.Errorf("upstream pool %q member %q requires protocol_probe.model", name, member)
+			}
+			members[member] = struct{}{}
+		}
+		workerNames := make([]string, 0)
+		for workerName, worker := range c.Workers {
+			if worker.UpstreamPool == name {
+				workerNames = append(workerNames, workerName)
+			}
+		}
+		sort.Strings(workerNames)
+		var activeUpstream string
+		var proxyURL string
+		for index, workerName := range workerNames {
+			worker := c.Workers[workerName]
+			upstream := strings.TrimSpace(worker.UpstreamID)
+			if upstream == "" {
+				upstream = strings.TrimSpace(worker.Upstream)
+			}
+			if _, exists := members[upstream]; !exists {
+				return fmt.Errorf("upstream pool %q workers must use one active upstream", name)
+			}
+			if index == 0 {
+				activeUpstream = upstream
+				proxyURL = strings.TrimSpace(worker.ProxyURL)
+				continue
+			}
+			if upstream != activeUpstream {
+				return fmt.Errorf("upstream pool %q workers must use one active upstream", name)
+			}
+			if strings.TrimSpace(worker.ProxyURL) != proxyURL {
+				return fmt.Errorf("upstream pool %q workers must use one proxy_url", name)
+			}
 		}
 	}
 	return nil
