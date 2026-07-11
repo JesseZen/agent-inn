@@ -1912,6 +1912,42 @@ func TestWorkerMetricsClassifyQualifiedUpstreamFailures(t *testing.T) {
 	}
 }
 
+func TestWorkerMetricsIgnoreCallerCancellation(t *testing.T) {
+	metrics := &concurrencyDetectingWriter{}
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "primary", BaseURL: "https://primary.example"},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	request := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)).WithContext(ctx)
+	response := httptest.NewRecorder()
+	workerInstance.ServeHTTP(response, request)
+	var event RequestMetricEvent
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Status  int
+		Failure *UpstreamFailure
+	}{response.Code, event.Failure}
+	want := struct {
+		Status  int
+		Failure *UpstreamFailure
+	}{http.StatusBadGateway, nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected canceled request metric:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestWorkerMetricsClassifyStreamingTimeouts(t *testing.T) {
 	tests := []struct {
 		name           string

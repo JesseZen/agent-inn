@@ -309,6 +309,9 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			"url", upstreamURL,
 			"err", err.Error(),
 		)
+		if ctx.Err() != nil {
+			return responseCopyResult{}, err
+		}
 		return responseCopyResult{Failure: &UpstreamFailure{
 			Kind:            UpstreamFailureTransport,
 			BeforeFirstByte: true,
