@@ -101,7 +101,7 @@ func (m *Manager) probeUpstreamByName(ctx context.Context, name string) upstream
 		"latency_ms":  probe.LatencyMS,
 		"error":       probe.Error,
 	})
-	if err := m.recordUpstreamProbeResult(name, probe.OK); err != nil {
+	if err := m.recordUpstreamProbeResult(name, probe); err != nil {
 		m.logger.Error(logging.EventUpstreamFailover,
 			"upstream", name,
 			"err", redactedErrorMessage(err),

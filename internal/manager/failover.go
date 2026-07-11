@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 type CircuitState string
@@ -164,7 +165,7 @@ func (m *Manager) recordWorkerUpstreamSuccess(workerName string, upstreamName st
 	return nil
 }
 
-func (m *Manager) recordUpstreamProbeResult(upstreamName string, probeOK bool) error {
+func (m *Manager) recordUpstreamProbeResult(upstreamName string, probe upstream.ProbeResult) error {
 	m.failoverMu.Lock()
 	defer m.failoverMu.Unlock()
 	m.mu.RLock()
@@ -192,8 +193,10 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probeOK bool) e
 		}
 		afterAllow := m.circuits.Status(key, pool.CircuitBreaker)
 		m.publishCircuitTransition(poolName, upstreamName, beforeAllow, afterAllow)
-		if probeOK {
+		if probe.OK {
 			m.circuits.RecordSuccess(key, pool.CircuitBreaker)
+		} else if probe.Degraded {
+			continue
 		} else {
 			m.circuits.RecordFailure(key, pool.CircuitBreaker)
 		}
@@ -201,7 +204,7 @@ func (m *Manager) recordUpstreamProbeResult(upstreamName string, probeOK bool) e
 		m.publishCircuitTransition(poolName, upstreamName, afterAllow, afterProbe)
 
 		active := m.poolActiveUpstream(poolName)
-		if probeOK && afterProbe.State == CircuitStateClosed && len(pool.Upstreams) > 0 && upstreamName == pool.Upstreams[0] && active != upstreamName {
+		if probe.OK && afterProbe.State == CircuitStateClosed && len(pool.Upstreams) > 0 && upstreamName == pool.Upstreams[0] && active != upstreamName {
 			if err := m.switchUpstreamPool(poolName, active, upstreamName); err != nil {
 				recoveryErrors = append(recoveryErrors, err)
 			}
