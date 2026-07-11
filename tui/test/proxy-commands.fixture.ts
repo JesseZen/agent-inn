@@ -19,6 +19,7 @@ import {
   type ProxySettings,
   type PluginDefinition,
   type RedactedUpstream,
+  type UpstreamProbeResult,
   type WorkerSummary,
 } from "../src/proxy/backend"
 
@@ -64,6 +65,7 @@ type ProxyHarnessInput = {
   strictModuleWorkerIDs?: boolean
   metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
+  probeResults?: UpstreamProbeResult[]
 }
 
 function createProxyHarness(input: ProxyHarnessInput = {}) {
@@ -212,7 +214,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     getWorkerRoute: [] as string[],
     patchModuleRoute: [] as string[],
-    patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string } }>,
+    patchWorkerBodies: [] as Array<Record<string, unknown>>,
+    patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } } }>,
     patchSettings: [] as ProxySettingsPatch[],
     deleteWorker: [] as number[],
     deleteUpstream: [] as string[],
@@ -373,17 +376,19 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         launcher?: string
         proxy_url?: string
       }
+      calls.patchWorkerBodies.push(body)
+      let call: (typeof calls.patchWorker)[number]
       if (body.name !== undefined && body.name !== current.name) {
-        calls.patchWorker.push({ id: current.id, name: body.name })
+        call = { id: current.id, name: body.name }
       } else {
-        calls.patchWorker.push({
+        call = {
           port: current.port,
-          upstream: body.upstream_id ?? body.upstream,
-          log_level: body.log_level,
+          upstream: body.upstream_id ?? body.upstream ?? current.upstream_id,
+          log_level: body.log_level ?? current.log_level,
           ...(body.port !== undefined && body.port !== current.port ? { next_port: body.port } : {}),
           ...(body.launcher ? { launcher: body.launcher } : {}),
           ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
-        })
+        }
       }
       const nextUpstreamID = body.upstream_id ?? body.upstream
       const nextUpstream = nextUpstreamID ? providers.get(nextUpstreamID) : undefined
@@ -409,8 +414,10 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       if (body.port !== undefined && body.port !== current.port) {
         const worker = { ...findWorker(current.id)!, port: body.port }
         setWorker(worker)
+        calls.patchWorker.push(call)
         return json(worker)
       }
+      calls.patchWorker.push(call)
       return json(findWorker(current.id)!)
     }
 
@@ -521,13 +528,15 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
 
     if (url.pathname.startsWith("/api/upstreams/") && method === "PATCH") {
       const id = url.pathname.slice("/api/upstreams/".length)
-      const body = JSON.parse(String(init?.body ?? "null")) as { name?: string; base_url?: string; api_key?: string; api_format?: string }
+      const body = JSON.parse(String(init?.body ?? "null")) as { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }
       calls.patchUpstream.push({ id, body })
       providers.set(id, {
+        ...providers.get(id),
         id,
         name: body.name ?? providers.get(id)?.name ?? id,
         base_url: body.base_url ?? providers.get(id)?.base_url ?? "",
         api_format: body.api_format ?? providers.get(id)?.api_format,
+        protocol_probe: body.protocol_probe ?? providers.get(id)?.protocol_probe,
         has_api_key: body.api_key !== undefined ? Boolean(body.api_key) : providers.get(id)?.has_api_key ?? false,
       })
       for (const worker of workers.values()) {
@@ -550,11 +559,14 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     if (url.pathname === "/api/upstreams/test" && method === "POST") {
       calls.testAllUpstreams += 1
       return json({
-        results: [...providers.values()].map((p) => ({
+        results: input.probeResults ?? [...providers.values()].map((p) => ({
           upstream: p.id,
           ok: true,
           status_code: 200,
           latency_ms: 120,
+          mode: p.protocol_probe ? "protocol" : "reachability",
+          authoritative: false,
+          readiness: "unknown",
         })),
       })
     }
@@ -562,7 +574,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     if (url.pathname.startsWith("/api/upstreams/") && url.pathname.endsWith("/test") && method === "POST") {
       const id = url.pathname.slice("/api/upstreams/".length, -"/test".length)
       calls.testUpstream.push(id)
-      return json({ upstream: id, ok: true, status_code: 200, latency_ms: 120 })
+      return json({ upstream: id, ok: true, status_code: 200, latency_ms: 120, mode: providers.get(id)?.protocol_probe ? "protocol" : "reachability", authoritative: false, readiness: "unknown" })
     }
 
     if (url.pathname === "/api/config" && method === "PUT") {

@@ -64,7 +64,6 @@ test("proxy workers current upstream selection returns to worker detail", async 
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Switch Upstream: app")
 
-    await runCommand(app, "dialog.select.next")
     app.api.keymap.dispatchCommand("dialog.select.submit")
     await wait(async () => {
       await app.render()
@@ -480,6 +479,7 @@ test("proxy upstream editor tests upstream reachability and shows toast", async 
   try {
     await openUpstreamEditor(app, "openai")
 
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")

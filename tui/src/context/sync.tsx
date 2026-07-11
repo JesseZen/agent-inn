@@ -20,7 +20,7 @@ import type {
   SnapshotFileDiff,
   ConsoleState,
 } from "@agent-inn/sdk/v2"
-import type { ProxyConfigStatus, RedactedUpstream, WorkerSummary } from "./sdk"
+import type { PoolReadiness, ProxyConfigStatus, RedactedUpstream, UpstreamProbeResult, WorkerSummary } from "./sdk"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "./project"
 import { useEvent } from "./event"
@@ -37,6 +37,17 @@ import { createSyncEventHandler, search, type SyncStore } from "./sync-events"
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
   switchableOrgCount: 0,
+}
+
+export function mergePoolReadiness(upstreams: RedactedUpstream[], probe: PoolReadiness): RedactedUpstream[] {
+  return upstreams.map((upstream) => {
+    if (upstream.id !== probe.upstream) return upstream
+    const readiness = [...(upstream.pool_readiness ?? [])]
+    const index = readiness.findIndex((item) => item.pool === probe.pool)
+    if (index < 0) readiness.push(probe)
+    else readiness[index] = probe
+    return { ...upstream, pool_readiness: readiness }
+  })
 }
 
 export const {
@@ -295,8 +306,16 @@ export const {
             return
           }
           if (event.type === "upstream.probed") {
-            const probe = event.payload as { upstream: string; ok: boolean; degraded?: boolean; status_code: number; latency_ms: number; error?: string }
-            setStore("upstreamProbes", probe.upstream, reconcile(probe))
+            const probe = event.payload as UpstreamProbeResult & { pool?: string; eligible?: boolean }
+            if (!probe.pool) {
+              setStore("upstreamProbes", probe.upstream, reconcile(probe))
+              return
+            }
+            setStore("upstreams", reconcile(mergePoolReadiness(store.upstreams, probe as PoolReadiness)))
+            return
+          }
+          if (event.type === "upstream.circuit.changed") {
+            void sdk.client.getUpstreams().then((upstreams) => setStore("upstreams", reconcile(upstreams)))
             return
           }
           if (event.type === "metrics.updated") {

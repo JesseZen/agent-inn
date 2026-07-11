@@ -8,7 +8,12 @@ export type RedactedUpstream = {
   has_api_key: boolean
   api_format?: string
   missing?: boolean
+  protocol_probe?: ProtocolProbe
+  pool_readiness?: PoolReadiness[]
 }
+
+export type ProbeMode = "reachability" | "protocol"
+export type ReadinessState = "unknown" | "ready" | "not_ready"
 
 export type UpstreamProbeResult = {
   upstream: string
@@ -17,7 +22,19 @@ export type UpstreamProbeResult = {
   status_code: number
   latency_ms: number
   error?: string
+  mode: ProbeMode
+  authoritative: boolean
+  readiness: ReadinessState
 }
+
+export type PoolReadiness = UpstreamProbeResult & {
+  pool: string
+  eligible: boolean
+  checked_at?: string
+  stale?: boolean
+}
+
+export type ProtocolProbe = { model: string }
 
 export type ModuleConfig = {
   enabled: boolean
@@ -52,6 +69,7 @@ export type WorkerConfig = {
   log_level?: string
   request_modules?: Record<string, ModuleConfig>
   hooks?: Record<string, ModuleConfig>
+  upstream_pool?: string
 }
 
 export type UpstreamProfile = {
@@ -59,6 +77,7 @@ export type UpstreamProfile = {
   base_url: string
   api_key?: string
   api_format?: string
+  protocol_probe?: ProtocolProbe
 }
 
 export type ProxyConfig = {
@@ -113,6 +132,7 @@ export type WorkerSummary = {
   id: string
   name: string
   upstream_id: string
+  upstream_pool?: string
   port: number
   role?: string
   launcher?: string

@@ -16,6 +16,7 @@ import type {
   ProxySettings,
   ProxySettingsResponse,
   RedactedUpstream,
+  PoolReadiness,
   UpstreamProbeResult,
   WorkerDetail,
   WorkerSummary,
@@ -35,6 +36,7 @@ export type {
   ProxySettings,
   ProxySettingsResponse,
   RedactedUpstream,
+  PoolReadiness,
   UpstreamProbeResult,
   WorkerDetail,
   WorkerSummary,
@@ -96,25 +98,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             proxy_url: string
           }>,
         ) {
-          const current = await this.getWorker(id)
+          const { upstream, ...body } = patch
           return request<WorkerSummary>(`/api/workers/${encodeURIComponent(String(id))}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              name: patch.name ?? current.name,
-              port: patch.port ?? current.port,
-              upstream_id: patch.upstream_id ?? patch.upstream ?? current.upstream_id,
-              request_modules: {
-                ...(current.modules ?? {}),
-                ...(patch.request_modules ?? {}),
-              },
-              hooks: {
-                ...(current.hooks ?? {}),
-                ...(patch.hooks ?? {}),
-              },
-              log_level: patch.log_level ?? current.log_level,
-              launcher: patch.launcher ?? current.launcher,
-              ...(patch.proxy_url !== undefined ? { proxy_url: patch.proxy_url } : {}),
+              ...body,
+              ...(upstream !== undefined && body.upstream_id === undefined ? { upstream_id: upstream } : {}),
             }),
           })
         },
@@ -169,7 +159,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             Object.values(result.upstreams ?? {}),
           )
         },
-        async patchUpstream(id: string, profile: { name?: string; base_url?: string; api_key?: string; api_format?: string }) {
+        async patchUpstream(id: string, profile: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }) {
           return request(`/api/upstreams/${encodeURIComponent(id)}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
