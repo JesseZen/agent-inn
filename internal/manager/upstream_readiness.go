@@ -95,6 +95,7 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 	}
 	checkedAt := m.clock().UTC()
 	readinessValues := make([]PoolReadiness, 0, len(spec.Pools))
+	probeErrors := make([]error, 0, len(spec.Pools))
 	for _, poolName := range spec.Pools {
 		key := poolCircuitKey(poolName, spec.Upstream)
 		m.readiness[key] = readinessObservation{
@@ -112,16 +113,19 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 		m.readinessTimers[key] = time.AfterFunc(readinessFreshness, func() {
 			m.expirePoolReadiness(pool, upstreamName, generation, checkedAt)
 		})
+		if result.Authoritative {
+			if err := m.recordPoolProbeResultLocked(poolName, spec.Upstream, result); err != nil {
+				probeErrors = append(probeErrors, err)
+			}
+		}
 		readinessValues = append(readinessValues, m.poolReadinessLocked(poolName, spec.Upstream))
 	}
 	m.failoverMu.Unlock()
 	for _, readiness := range readinessValues {
 		m.publishEvent(EventUpstreamProbed, poolReadinessPayload(readiness))
 	}
-	if result.Authoritative {
-		if err := m.recordUpstreamProbeResult(spec.Upstream, result); err != nil {
-			m.logger.Error(logging.EventUpstreamFailover, "upstream", spec.Upstream, "err", redactedErrorMessage(err))
-		}
+	for _, err := range probeErrors {
+		m.logger.Error(logging.EventUpstreamFailover, "upstream", spec.Upstream, "err", redactedErrorMessage(err))
 	}
 }
 

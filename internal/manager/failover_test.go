@@ -458,6 +458,7 @@ func TestManagerWorkerFailureCircuitEventIncludesPool(t *testing.T) {
 		},
 	}})
 	defer m.Close()
+	m.statuses["app"] = WorkerStateRunning
 
 	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
 		t.Fatal(err)

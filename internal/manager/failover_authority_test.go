@@ -235,6 +235,148 @@ func TestManagerProtocolReadinessControlsFailover(t *testing.T) {
 	}
 }
 
+func TestManagerScheduledProbeDoesNotCrossPoolEgress(t *testing.T) {
+	now := time.Date(2026, time.July, 11, 3, 0, 0, 0, time.UTC)
+	pool := config.UpstreamPool{
+		Upstreams: []string{"primary"},
+		CircuitBreaker: config.CircuitBreakerConfig{
+			FailureThreshold: 1, RecoverySuccessThreshold: 1, RecoveryWaitSeconds: 30,
+		},
+	}
+	m := New(Config{Config: config.Config{
+		Settings: config.Settings{StateDir: t.TempDir()},
+		Workers: map[string]config.WorkerConfig{
+			"a": {Port: 6767, Upstream: "primary", UpstreamPool: "pool-a", ProxyURL: "http://proxy-a.example"},
+			"b": {Port: 6768, Upstream: "primary", UpstreamPool: "pool-b", ProxyURL: "http://proxy-b.example"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"primary": {BaseURL: "https://primary.example/v1", ProtocolProbe: config.ProtocolProbeConfig{Model: "model-a"}},
+		},
+		UpstreamPools: map[string]config.UpstreamPool{"pool-a": pool, "pool-b": pool},
+	}})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	keyA, keyB := poolCircuitKey("pool-a", "primary"), poolCircuitKey("pool-b", "primary")
+	m.circuits.RecordFailure(keyA, pool.CircuitBreaker)
+	m.circuits.RecordFailure(keyB, pool.CircuitBreaker)
+	wantB := m.circuits.Status(keyB, pool.CircuitBreaker)
+	now = now.Add(30 * time.Second)
+	spec := readinessTestProbeSpec("pool-a", "primary", "http://proxy-a.example", 1, "model-a")
+	installReadinessTestSpec(m, spec)
+	m.recordScheduledProbeResult(spec, readinessTestSuccess(2))
+	got := []CircuitStatus{
+		m.circuits.Status(keyA, pool.CircuitBreaker),
+		m.circuits.Status(keyB, pool.CircuitBreaker),
+	}
+	want := []CircuitStatus{{State: CircuitStateClosed}, wantB}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("one egress probe changed another pool circuit:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerRecoveredProbeEventUsesFinalEligibility(t *testing.T) {
+	now := time.Date(2026, time.July, 11, 3, 0, 0, 0, time.UTC)
+	m, pool := newAuthorityTestManager(t, "primary", 1)
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	pool.CircuitBreaker.RecoverySuccessThreshold = 1
+	m.mu.Lock()
+	m.config.UpstreamPools["coding-ha"] = pool
+	m.mu.Unlock()
+	key := poolCircuitKey("coding-ha", "primary")
+	m.circuits.RecordFailure(key, pool.CircuitBreaker)
+	now = now.Add(30 * time.Second)
+	authorityObserve(t, m, "primary", readinessTestSuccess(2))
+	events := m.events.Replay(0)
+	got := struct {
+		Circuit     CircuitStatus
+		Event       any
+		Eligibility bool
+	}{
+		Circuit:     m.circuits.Status(key, pool.CircuitBreaker),
+		Event:       events[len(events)-1].Payload["eligible"],
+		Eligibility: m.poolReadiness("coding-ha", "primary").Eligible,
+	}
+	want := struct {
+		Circuit     CircuitStatus
+		Event       any
+		Eligibility bool
+	}{Circuit: CircuitStatus{State: CircuitStateClosed}, Event: true, Eligibility: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scheduled event used pre-transition eligibility:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerWorkerMetricRechecksAuthorityUnderFailoverLock(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Manager)
+	}{
+		{
+			name: "generation changed",
+			mutate: func(m *Manager) {
+				m.generations["app"] = 2
+			},
+		},
+		{
+			name: "worker became out of sync",
+			mutate: func(m *Manager) {
+				m.statuses["app"] = WorkerStateOutOfSync
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m, pool := newAuthorityTestManager(t, "primary", 1)
+			defer m.Close()
+			key := poolCircuitKey("coding-ha", "primary")
+			wantCircuit := m.circuits.Status(key, pool.CircuitBreaker)
+			m.failoverMu.Lock()
+			done := make(chan struct{})
+			go func() {
+				m.handleWorkerMetricEvent("app", authorityMetric(1, http.StatusBadGateway, &worker.UpstreamFailure{
+					Kind: worker.UpstreamFailureTransport, BeforeFirstByte: true,
+				}))
+				close(done)
+			}()
+			eventually(t, time.Second, func() bool {
+				m.mu.RLock()
+				tracker := m.metricsTrackers["app"]
+				m.mu.RUnlock()
+				return tracker != nil && tracker.Snapshot().Requests == 1
+			})
+			m.metricsStore.writeMu.Lock()
+			m.metricsStore.writeMu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			m.mu.Lock()
+			test.mutate(m)
+			m.mu.Unlock()
+			m.failoverMu.Unlock()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("metric outcome did not finish")
+			}
+			got := struct {
+				Circuit CircuitStatus
+				Stored  int64
+			}{Circuit: m.circuits.Status(key, pool.CircuitBreaker)}
+			response, err := m.metricsStore.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got.Stored = response.Workers[0].Totals.Requests
+			want := struct {
+				Circuit CircuitStatus
+				Stored  int64
+			}{Circuit: wantCircuit, Stored: 1}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("metric authority changed after initial check:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
 func newAuthorityTestManager(t *testing.T, active string, failureThreshold int) (*Manager, config.UpstreamPool) {
 	t.Helper()
 	pool := config.UpstreamPool{
