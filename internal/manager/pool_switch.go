@@ -54,6 +54,48 @@ func (m *Manager) poolProxyURL(poolName string) string {
 	return proxyURL
 }
 
+func (m *Manager) validatePoolAttachmentLocked(workerName string, worker config.WorkerConfig) error {
+	m.mu.RLock()
+	pool, exists := m.config.UpstreamPools[worker.UpstreamPool]
+	workers := make(map[string]config.WorkerConfig, len(m.config.Workers))
+	for name, configured := range m.config.Workers {
+		workers[name] = configured
+	}
+	m.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("upstream pool %q not found", worker.UpstreamPool)
+	}
+	upstreamName := workerUpstreamID(worker)
+	member := false
+	for _, candidate := range pool.Upstreams {
+		if candidate == upstreamName {
+			member = true
+			break
+		}
+	}
+	if !member {
+		return errors.New("worker upstream is not a member of target pool")
+	}
+	names := make([]string, 0, len(workers))
+	for name, configured := range workers {
+		if name != workerName && configured.UpstreamPool == worker.UpstreamPool {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return nil
+	}
+	active := workers[names[0]]
+	if workerUpstreamID(active) != upstreamName {
+		return errors.New("worker upstream does not match target pool active upstream")
+	}
+	if active.ProxyURL != worker.ProxyURL {
+		return errors.New("worker proxy_url does not match target pool proxy_url")
+	}
+	return nil
+}
+
 func (m *Manager) switchUpstreamPool(poolName string, previous string, next string) error {
 	return m.switchUpstreamPoolMode(poolName, previous, next, poolSwitchNormal)
 }

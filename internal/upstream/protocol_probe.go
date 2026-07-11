@@ -100,11 +100,11 @@ func probeProtocolWithClient(ctx context.Context, compiled Compiled, format appr
 	response, err := client.Do(request)
 	if err != nil {
 		firstByteTimer.Stop()
-		return failedProbeResult(err, time.Since(start)).withMode(ProbeModeProtocol)
+		return failedProbeResult(err, time.Since(start)).withMode(ProbeModeProtocol).withAuthority()
 	}
 	defer response.Body.Close()
 	latency := time.Since(start)
-	result := classifyProbeStatus(response.StatusCode, latency).withMode(ProbeModeProtocol)
+	result := classifyProbeStatus(response.StatusCode, latency).withMode(ProbeModeProtocol).withAuthority()
 	if !result.OK {
 		firstByteTimer.Stop()
 		return result
@@ -115,14 +115,14 @@ func probeProtocolWithClient(ctx context.Context, compiled Compiled, format appr
 	latency = time.Since(start)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(context.Cause(requestCtx), context.DeadlineExceeded) {
-			return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "timeout"}.withMode(ProbeModeProtocol)
+			return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "timeout"}.withMode(ProbeModeProtocol).withAuthority()
 		}
-		return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "protocol_error"}.withMode(ProbeModeProtocol)
+		return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "protocol_error"}.withMode(ProbeModeProtocol).withAuthority()
 	}
 	if len(data) > protocolProbeMaximumBytes || !validProtocolProbeStream(format, data) {
-		return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "protocol_error"}.withMode(ProbeModeProtocol)
+		return ProbeResult{StatusCode: response.StatusCode, LatencyMS: latency.Milliseconds(), Error: "protocol_error"}.withMode(ProbeModeProtocol).withAuthority()
 	}
-	return classifyProbeStatus(response.StatusCode, latency).withMode(ProbeModeProtocol)
+	return classifyProbeStatus(response.StatusCode, latency).withMode(ProbeModeProtocol).withAuthority()
 }
 
 type protocolProbeFirstByteReadCloser struct {
@@ -186,18 +186,33 @@ func validProtocolProbeStream(format appruntime.APIFormat, data []byte) bool {
 			if !ok || len(choices) == 0 {
 				continue
 			}
-			validEvent = true
+			validChoice := false
 			for _, choiceValue := range choices {
-				choice, _ := choiceValue.(map[string]any)
+				choice, ok := choiceValue.(map[string]any)
+				if !ok {
+					continue
+				}
+				if _, ok := choice["delta"].(map[string]any); ok {
+					validChoice = true
+				}
 				if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
+					validChoice = true
 					terminalEvent = true
 				}
 			}
+			validEvent = validEvent || validChoice
 		case appruntime.APIFormatAnthropic:
 			if eventName == "message_stop" || eventType == "message_stop" {
 				terminalEvent = validEvent
-			} else if eventName != "" || eventType != "" {
-				validEvent = true
+			} else {
+				effectiveType := eventType
+				if effectiveType == "" {
+					effectiveType = eventName
+				}
+				switch effectiveType {
+				case "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta":
+					validEvent = true
+				}
 			}
 		}
 	}

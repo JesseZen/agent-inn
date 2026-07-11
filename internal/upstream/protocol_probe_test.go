@@ -239,6 +239,48 @@ func TestProbeProtocolRejectsInvalidStreams(t *testing.T) {
 	}
 }
 
+func TestProbeProtocolPreRequestFailureIsNonAuthoritative(t *testing.T) {
+	compiled, err := Compile(appruntime.UpstreamRuntime{BaseURL: "https://example.com/v1", APIFormat: appruntime.APIFormat("invalid")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ProbeProtocolWithClient(t.Context(), compiled, protocolProbeTestModel, http.DefaultClient)
+	want := ProbeResult{Error: "unsupported_protocol", Mode: ProbeModeProtocol}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pre-request failure acquired authority:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestProbeProtocolRejectsStructurallyInvalidStreams(t *testing.T) {
+	tests := []struct {
+		name   string
+		format appruntime.APIFormat
+		stream string
+	}{
+		{name: "null chat choice", format: appruntime.APIFormatChatCompletions, stream: "data: {\"choices\":[null]}\n\ndata: [DONE]\n\n"},
+		{name: "anthropic ping", format: appruntime.APIFormatAnthropic, stream: "event: ping\ndata: {\"type\":\"ping\"}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, test.stream)
+			}))
+			defer server.Close()
+			compiled, err := Compile(appruntime.UpstreamRuntime{BaseURL: server.URL, APIFormat: test.format})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := ProbeProtocolWithClient(t.Context(), compiled, protocolProbeTestModel, server.Client())
+			got.LatencyMS = 0
+			want := ProbeResult{StatusCode: http.StatusOK, Error: "protocol_error", Mode: ProbeModeProtocol, Authoritative: true}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("invalid stream was accepted:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestProbeProtocolPreservesEndpointBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

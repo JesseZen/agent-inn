@@ -159,6 +159,19 @@ func TestManagerProbeObservationLifecycleJSON(t *testing.T) {
 	}
 }
 
+func TestManagerPreRequestProbeFailurePreservesReadiness(t *testing.T) {
+	m := newReadinessTestManager(t)
+	defer m.Close()
+	spec := readinessTestProbeSpec("coding-ha", "primary", "", 1, "model-a")
+	installReadinessTestSpec(m, spec)
+	m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
+	want := m.poolReadiness("coding-ha", "primary")
+	m.recordScheduledProbeResult(spec, upstream.ProbeResult{Mode: upstream.ProbeModeProtocol, Error: "connection_error"})
+	if got := m.poolReadiness("coding-ha", "primary"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pre-request failure replaced readiness:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func newReadinessTestManager(t *testing.T) *Manager {
 	t.Helper()
 	return New(Config{Config: config.Config{

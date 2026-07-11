@@ -93,6 +93,10 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 		m.failoverMu.Unlock()
 		return
 	}
+	if !result.Authoritative {
+		m.failoverMu.Unlock()
+		return
+	}
 	checkedAt := m.clock().UTC()
 	readinessValues := make([]PoolReadiness, 0, len(spec.Pools))
 	probeErrors := make([]error, 0, len(spec.Pools))

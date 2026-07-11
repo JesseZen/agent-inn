@@ -11,6 +11,14 @@ import (
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
+func TestRunProtocolProbeInvalidProxyIsNonAuthoritative(t *testing.T) {
+	got := runProtocolProbe(t.Context(), probeSpec{ProxyURL: "://invalid"})
+	want := upstream.ProbeResult{Error: "connection_error", Mode: upstream.ProbeModeProtocol}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("invalid proxy acquired authority:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerRejectsStaleProbeGeneration(t *testing.T) {
 	m := newSchedulerTestManager(t)
 	releaseA := make(chan struct{})

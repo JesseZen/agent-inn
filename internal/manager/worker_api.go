@@ -124,6 +124,11 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			next.UpstreamID = workerUpstreamID(current)
 		}
 		next.Upstream = next.UpstreamID
+		if current.UpstreamPool != "" && next.UpstreamPool == "" {
+			next.Upstream = current.Upstream
+			next.UpstreamID = current.UpstreamID
+			next.ProxyURL = current.ProxyURL
+		}
 		if next.UpstreamID == "" {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "worker provider is required"})
 			return
@@ -187,35 +192,9 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		if poolMutation {
 			m.failoverMu.Lock()
 			if current.UpstreamPool != next.UpstreamPool && next.UpstreamPool != "" {
-				m.mu.RLock()
-				pool, exists := m.config.UpstreamPools[next.UpstreamPool]
-				m.mu.RUnlock()
-				if !exists {
+				if err := m.validatePoolAttachmentLocked(workerName, next); err != nil {
 					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": fmt.Sprintf("upstream pool %q not found", next.UpstreamPool)})
-					return
-				}
-				member := false
-				for _, upstreamName := range pool.Upstreams {
-					if upstreamName == next.UpstreamID {
-						member = true
-						break
-					}
-				}
-				if !member {
-					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker upstream is not a member of target pool"})
-					return
-				}
-				active := m.poolActiveUpstream(next.UpstreamPool)
-				if active != "" && active != next.UpstreamID {
-					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker upstream does not match target pool active upstream"})
-					return
-				}
-				if active != "" && m.poolProxyURL(next.UpstreamPool) != next.ProxyURL {
-					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": "worker proxy_url does not match target pool proxy_url"})
+					writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
 					return
 				}
 			}

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -205,6 +206,91 @@ func TestManagerRejectsPooledWorkerProxyPatch(t *testing.T) {
 		Body string
 	}{http.StatusConflict, "{\"error\":\"pooled worker proxy_url cannot be changed\"}\n"}; got != want {
 		t.Fatalf("unexpected proxy response: got %#v want %#v", got, want)
+	}
+}
+
+func TestManagerPooledWorkerCreateRequiresPoolInvariant(t *testing.T) {
+	tests := []struct {
+		name      string
+		upstream  string
+		proxyURL  string
+		wantError string
+	}{
+		{name: "non-member", upstream: "other", proxyURL: "http://proxy.example", wantError: "worker upstream is not a member of target pool"},
+		{name: "active mismatch", upstream: "backup", proxyURL: "http://proxy.example", wantError: "worker upstream does not match target pool active upstream"},
+		{name: "proxy mismatch", upstream: "primary", proxyURL: "http://other-proxy.example", wantError: "worker proxy_url does not match target pool proxy_url"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+			})
+			defer m.Close()
+			if test.upstream == "other" {
+				m.updateConfig(func(cfg *config.Config) {
+					cfg.Upstreams["other"] = config.UpstreamProfile{BaseURL: "https://other.example/v1"}
+				})
+			}
+			body := fmt.Sprintf(`{"name":"cli","port":6768,"upstream":"%s","upstream_pool":"coding-ha","proxy_url":"%s"}`, test.upstream, test.proxyURL)
+			response := httptest.NewRecorder()
+			m.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers", strings.NewReader(body)))
+			got := struct {
+				Code    int
+				Body    string
+				Created bool
+			}{response.Code, response.Body.String(), m.config.Workers["cli"].Port != 0}
+			want := struct {
+				Code    int
+				Body    string
+				Created bool
+			}{http.StatusConflict, "{\"error\":\"" + test.wantError + "\"}\n", false}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected create result:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestManagerPooledWorkerCreateEstablishesEmptyPool(t *testing.T) {
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{})
+	defer m.Close()
+	response := httptest.NewRecorder()
+	m.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://manager.local/api/workers", strings.NewReader(`{"name":"app","port":6767,"upstream":"backup","upstream_pool":"coding-ha","proxy_url":"http://proxy.example"}`)))
+	got := struct {
+		Code     int
+		Active   string
+		ProxyURL string
+	}{response.Code, m.poolActiveUpstream("coding-ha"), m.poolProxyURL("coding-ha")}
+	want := struct {
+		Code     int
+		Active   string
+		ProxyURL string
+	}{http.StatusCreated, "backup", "http://proxy.example"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pooled create:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPooledWorkerDetachPreservesUpstreamAndProxy(t *testing.T) {
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+	})
+	defer m.Close()
+	response := patchPoolRouting(t, m, "/api/workers/app", `{"upstream_pool":"","upstream_id":"backup","proxy_url":"http://other-proxy.example"}`)
+	got := struct {
+		Code     int
+		Pool     string
+		Upstream string
+		ProxyURL string
+	}{response.Code, m.config.Workers["app"].UpstreamPool, workerUpstreamID(m.config.Workers["app"]), m.config.Workers["app"].ProxyURL}
+	want := struct {
+		Code     int
+		Pool     string
+		Upstream string
+		ProxyURL string
+	}{http.StatusOK, "", "primary", "http://proxy.example"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detach changed preserved fields:\n got %#v\nwant %#v", got, want)
 	}
 }
 

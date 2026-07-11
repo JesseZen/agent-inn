@@ -183,13 +183,39 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 	if worker.Hooks == nil {
 		worker.Hooks = map[string]config.ModuleConfig{}
 	}
-	if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
-		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-		return
+	if worker.UpstreamPool != "" {
+		m.failoverMu.Lock()
+		if err := m.validatePoolAttachmentLocked(payload.Name, worker); err != nil {
+			m.failoverMu.Unlock()
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
+			m.failoverMu.Unlock()
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		oldProxyURL := m.poolProxyURL(worker.UpstreamPool)
+		m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
+		m.mu.RLock()
+		pool := m.config.UpstreamPools[worker.UpstreamPool]
+		m.mu.RUnlock()
+		for _, upstreamName := range pool.Upstreams {
+			m.invalidatePoolReadinessLocked(worker.UpstreamPool, upstreamName)
+		}
+		m.invalidatePoolProbeIdentityLocked(worker.UpstreamPool)
+		if oldProxyURL != m.poolProxyURL(worker.UpstreamPool) {
+			m.resetPoolIdentityLocked(worker.UpstreamPool)
+		}
+		m.failoverMu.Unlock()
+		m.probeAllUpstreams(m.probeContext)
+	} else {
+		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
 	}
-	m.updateConfig(func(cfgRoot *config.Config) {
-		cfgRoot.Workers[payload.Name] = worker
-	})
 	if err := m.StartWorker(payload.Name); err != nil {
 		m.updateConfig(func(cfgRoot *config.Config) {
 			delete(cfgRoot.Workers, payload.Name)

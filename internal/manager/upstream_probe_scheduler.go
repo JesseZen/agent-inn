@@ -243,7 +243,7 @@ func runProtocolProbe(ctx context.Context, spec probeSpec) upstream.ProbeResult 
 	if spec.ProxyURL != "" {
 		proxyURL, err := appruntime.ParseProxyURL(spec.ProxyURL)
 		if err != nil {
-			return upstream.ProbeResult{Error: "connection_error", Mode: upstream.ProbeModeProtocol, Authoritative: true}
+			return upstream.ProbeResult{Error: "connection_error", Mode: upstream.ProbeModeProtocol}
 		}
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}

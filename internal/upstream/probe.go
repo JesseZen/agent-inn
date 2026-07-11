@@ -91,6 +91,10 @@ func classifyProbeStatus(statusCode int, latency time.Duration) ProbeResult {
 
 func (result ProbeResult) withMode(mode ProbeMode) ProbeResult {
 	result.Mode = mode
-	result.Authoritative = mode == ProbeModeProtocol
+	return result
+}
+
+func (result ProbeResult) withAuthority() ProbeResult {
+	result.Authoritative = true
 	return result
 }
