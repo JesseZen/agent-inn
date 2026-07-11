@@ -29,16 +29,17 @@ type UpstreamFailure struct {
 }
 
 type RequestMetricEvent struct {
-	Timestamp     time.Time        `json:"timestamp"`
-	Upstream      string           `json:"upstream"`
-	Model         string           `json:"model,omitempty"`
-	Method        string           `json:"method"`
-	Path          string           `json:"path"`
-	Status        int              `json:"status"`
-	DurationMS    int64            `json:"duration_ms"`
-	ResponseBytes int64            `json:"response_bytes"`
-	Usage         UsageTokens      `json:"usage"`
-	Failure       *UpstreamFailure `json:"failure,omitempty"`
+	Timestamp          time.Time        `json:"timestamp"`
+	SnapshotGeneration int              `json:"snapshot_generation"`
+	Upstream           string           `json:"upstream"`
+	Model              string           `json:"model,omitempty"`
+	Method             string           `json:"method"`
+	Path               string           `json:"path"`
+	Status             int              `json:"status"`
+	DurationMS         int64            `json:"duration_ms"`
+	ResponseBytes      int64            `json:"response_bytes"`
+	Usage              UsageTokens      `json:"usage"`
+	Failure            *UpstreamFailure `json:"failure,omitempty"`
 }
 
 type MetricsSnapshot struct {

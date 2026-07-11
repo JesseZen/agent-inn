@@ -145,16 +145,17 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	event := RequestMetricEvent{
-		Timestamp:     time.Now(),
-		Upstream:      snapshot.Upstream.Name,
-		Method:        r.Method,
-		Path:          r.URL.Path,
-		Status:        rec.status,
-		DurationMS:    dur.Milliseconds(),
-		ResponseBytes: rec.written,
-		Model:         result.Model,
-		Usage:         result.Usage,
-		Failure:       result.Failure,
+		Timestamp:          time.Now(),
+		SnapshotGeneration: snapshot.Generation,
+		Upstream:           snapshot.Upstream.Name,
+		Method:             r.Method,
+		Path:               r.URL.Path,
+		Status:             rec.status,
+		DurationMS:         dur.Milliseconds(),
+		ResponseBytes:      rec.written,
+		Model:              result.Model,
+		Usage:              result.Usage,
+		Failure:            result.Failure,
 	}
 	if result.pending == nil {
 		w.metrics.Finish(event)
@@ -296,12 +297,23 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	if bodyRequired && len(proxyReq.Body) > 0 {
 		upstreamReq.ContentLength = int64(len(proxyReq.Body))
 	}
-
 	client := snapshot.HTTPClient
 	if client == nil {
 		client = w.client
 	}
+	firstByteDuration := time.Duration(snapshot.StreamTimeouts.FirstByteMilliseconds) * time.Millisecond
+	requestStarted := time.Now()
+	upstreamCtx, cancelUpstream := context.WithCancelCause(ctx)
+	defer cancelUpstream(nil)
+	upstreamReq = upstreamReq.WithContext(upstreamCtx)
+	var firstByteTimer *time.Timer
+	if firstByteDuration > 0 {
+		firstByteTimer = time.AfterFunc(firstByteDuration, func() { cancelUpstream(ErrStreamFirstByteTimeout) })
+	}
 	upstreamHTTPResp, err := client.Do(upstreamReq)
+	if firstByteTimer != nil {
+		firstByteTimer.Stop()
+	}
 	if err != nil {
 		w.logger.ErrorContext(ctx, logging.EventUpstreamFail,
 			"method", proxyReq.Method,
@@ -312,13 +324,40 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		if ctx.Err() != nil {
 			return responseCopyResult{}, err
 		}
+		if errors.Is(context.Cause(upstreamCtx), ErrStreamFirstByteTimeout) {
+			return responseCopyResult{Failure: &UpstreamFailure{
+				Kind:            UpstreamFailureFirstByteTimeout,
+				BeforeFirstByte: true,
+			}}, ErrStreamFirstByteTimeout
+		}
 		return responseCopyResult{Failure: &UpstreamFailure{
 			Kind:            UpstreamFailureTransport,
 			BeforeFirstByte: true,
 		}}, err
 	}
+	originalContentType := strings.ToLower(strings.TrimSpace(upstreamHTTPResp.Header.Get("Content-Type")))
+	originalEventStream := strings.HasPrefix(originalContentType, "text/event-stream")
+	if firstByteDuration > 0 && time.Since(requestStarted) >= firstByteDuration {
+		_ = upstreamHTTPResp.Body.Close()
+		return responseCopyResult{Failure: &UpstreamFailure{
+			Kind:            UpstreamFailureFirstByteTimeout,
+			BeforeFirstByte: true,
+		}}, ErrStreamFirstByteTimeout
+	}
+	var responseBody io.ReadCloser = &upstreamBodyReadCloser{source: upstreamHTTPResp.Body}
+	if originalEventStream {
+		firstByteRemaining := time.Duration(0)
+		if firstByteDuration > 0 {
+			firstByteRemaining = firstByteDuration - time.Since(requestStarted)
+		}
+		responseBody = newStreamDeadlineReadCloser(
+			responseBody,
+			firstByteRemaining,
+			time.Duration(snapshot.StreamTimeouts.IdleMilliseconds)*time.Millisecond,
+		)
+	}
 	observedBody := newUsageObservingReadCloser(
-		upstreamHTTPResp.Body,
+		responseBody,
 		upstreamHTTPResp.Header.Get("Content-Encoding"),
 		NewUsageObserver(upstreamHTTPResp.Header.Get("Content-Type")),
 	)
@@ -329,11 +368,9 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 		Body:        upstreamHTTPResp.Body,
 		ContentType: upstreamHTTPResp.Header.Get("Content-Type"),
 	}
-
 	for i := len(snapshot.Modules) - 1; i >= 0; i-- {
 		proxyResp, err = snapshot.Modules[i].WrapResponse(ctx, proxyReq, proxyResp)
 		if err != nil {
-			_ = upstreamHTTPResp.Body.Close()
 			w.logger.ErrorContext(ctx, logging.EventModuleFail,
 				"module", snapshot.Modules[i].Name(),
 				"method", proxyReq.Method,
@@ -341,18 +378,15 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 				"phase", "wrap_response",
 				"err", err.Error(),
 			)
-			return responseCopyResult{}, err
+			break
 		}
 	}
-	if isEventStreamResponse(proxyResp) {
-		proxyResp.Body = newStreamDeadlineReadCloser(
-			proxyResp.Body,
-			time.Duration(snapshot.StreamTimeouts.FirstByteMilliseconds)*time.Millisecond,
-			time.Duration(snapshot.StreamTimeouts.IdleMilliseconds)*time.Millisecond,
-		)
+	if err == nil {
+		err = copyProxyResponse(ctx, rw, proxyResp)
+	} else {
+		_ = observedBody.Close()
 	}
 
-	err = copyProxyResponse(ctx, rw, proxyResp)
 	result := observedBody.usageResult()
 	if upstreamHTTPResp.StatusCode >= http.StatusInternalServerError {
 		result.Failure = &UpstreamFailure{
@@ -360,6 +394,8 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			BeforeFirstByte: true,
 			StatusCode:      upstreamHTTPResp.StatusCode,
 		}
+	} else if ctx.Err() != nil {
+		result.Failure = nil
 	} else if errors.Is(err, ErrStreamFirstByteTimeout) {
 		result.Failure = &UpstreamFailure{
 			Kind:            UpstreamFailureFirstByteTimeout,
@@ -370,17 +406,16 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 			Kind:            UpstreamFailureIdleTimeout,
 			BeforeFirstByte: false,
 		}
-	}
-	return result, err
-}
-
-func isEventStreamResponse(response *module.ProxyResponse) bool {
-	for _, contentType := range []string{response.ContentType, response.Headers.Get("Content-Type")} {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream") {
-			return true
+	} else {
+		var bodyReadErr *upstreamBodyReadError
+		if errors.As(err, &bodyReadErr) {
+			result.Failure = &UpstreamFailure{
+				Kind:            UpstreamFailureTransport,
+				BeforeFirstByte: bodyReadErr.BeforeFirstByte,
+			}
 		}
 	}
-	return false
+	return result, err
 }
 
 func readRequestBody(r *http.Request) ([]byte, string, error) {
