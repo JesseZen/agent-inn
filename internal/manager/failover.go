@@ -258,9 +258,12 @@ func (m *Manager) switchUpstreamPool(poolName string, previous string, next stri
 	}
 	m.mu.RUnlock()
 	sort.Strings(names)
-
-	var switchErrors []error
+	statuses := make(map[string]WorkerState, len(names))
 	for _, name := range names {
+		statuses[name] = m.workerStatus(name)
+	}
+
+	for index, name := range names {
 		current := workers[name]
 		if workerUpstreamID(current) == next {
 			continue
@@ -269,11 +272,22 @@ func (m *Manager) switchUpstreamPool(poolName string, previous string, next stri
 		updated.Upstream = next
 		updated.UpstreamID = next
 		if err := m.UpdateWorker(name, current, updated); err != nil {
-			switchErrors = append(switchErrors, fmt.Errorf("worker %s: %w", name, err))
+			switchErrors := []error{fmt.Errorf("worker %s: %w", name, err)}
+			for rollbackIndex := index; rollbackIndex >= 0; rollbackIndex-- {
+				rollbackName := names[rollbackIndex]
+				original := workers[rollbackName]
+				configured := original
+				configured.Upstream = next
+				configured.UpstreamID = next
+				m.mu.Lock()
+				m.statuses[rollbackName] = statuses[rollbackName]
+				m.mu.Unlock()
+				if rollbackErr := m.UpdateWorker(rollbackName, configured, original); rollbackErr != nil {
+					switchErrors = append(switchErrors, fmt.Errorf("rollback worker %s: %w", rollbackName, rollbackErr))
+				}
+			}
+			return errors.Join(switchErrors...)
 		}
-	}
-	if len(switchErrors) > 0 {
-		return errors.Join(switchErrors...)
 	}
 	m.publishEvent(EventUpstreamPoolSwitched, map[string]any{
 		"pool":              poolName,

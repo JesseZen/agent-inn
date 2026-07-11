@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 	"github.com/jesse/agent-inn/internal/upstream"
 	"github.com/jesse/agent-inn/internal/worker"
 )
@@ -146,6 +148,90 @@ func TestManagerFailoverSwitchesEveryWorkerInPool(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected pool failover:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerFailoverRollsBackPartialPoolSwitchAndCanRetry(t *testing.T) {
+	client := &recordingWorkerClient{
+		runtimeStates: map[int]appruntime.WorkerRuntime{
+			6767: {Upstream: appruntime.UpstreamRuntime{ID: "primary"}},
+			6768: {Upstream: appruntime.UpstreamRuntime{ID: "primary"}},
+		},
+		applyErrors: map[int][]error{6768: {errors.New("worker rejected runtime")}},
+	}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+				"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"primary": {BaseURL: "https://primary.example/v1"},
+				"backup":  {BaseURL: "https://backup.example/v1"},
+			},
+			UpstreamPools: map[string]config.UpstreamPool{
+				"coding-ha": {Upstreams: []string{"primary", "backup"}},
+			},
+		},
+		WorkerClient: client,
+	})
+	defer m.Close()
+	m.statuses["app"] = WorkerStateRunning
+	m.statuses["cli"] = WorkerStateRunning
+
+	if err := m.switchUpstreamPool("coding-ha", "primary", "backup"); err == nil {
+		t.Fatal("partial switch unexpectedly succeeded")
+	}
+	gotRollback := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{
+			"app": workerUpstreamID(m.config.Workers["app"]),
+			"cli": workerUpstreamID(m.config.Workers["cli"]),
+		},
+		Applied: map[int]string{
+			6767: string(client.runtimeStates[6767].Upstream.ID),
+			6768: string(client.runtimeStates[6768].Upstream.ID),
+		},
+	}
+	wantRollback := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{"app": "primary", "cli": "primary"},
+		Applied:    map[int]string{6767: "primary", 6768: "primary"},
+	}
+	if !reflect.DeepEqual(gotRollback, wantRollback) {
+		t.Fatalf("unexpected rollback state:\n got %#v\nwant %#v", gotRollback, wantRollback)
+	}
+
+	if err := m.switchUpstreamPool("coding-ha", "primary", "backup"); err != nil {
+		t.Fatal(err)
+	}
+	gotRetry := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{
+			"app": workerUpstreamID(m.config.Workers["app"]),
+			"cli": workerUpstreamID(m.config.Workers["cli"]),
+		},
+		Applied: map[int]string{
+			6767: string(client.runtimeStates[6767].Upstream.ID),
+			6768: string(client.runtimeStates[6768].Upstream.ID),
+		},
+	}
+	wantRetry := struct {
+		Configured map[string]string
+		Applied    map[int]string
+	}{
+		Configured: map[string]string{"app": "backup", "cli": "backup"},
+		Applied:    map[int]string{6767: "backup", 6768: "backup"},
+	}
+	if !reflect.DeepEqual(gotRetry, wantRetry) {
+		t.Fatalf("unexpected retry state:\n got %#v\nwant %#v", gotRetry, wantRetry)
 	}
 }
 
