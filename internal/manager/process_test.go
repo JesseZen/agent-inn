@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -347,6 +348,30 @@ func TestExecProcessStopKillsAfterGracePeriod(t *testing.T) {
 	if _, err := os.ReadFile(signalPath); err != nil {
 		t.Fatal("expected SIGTERM before forced kill")
 	}
+	wantExit := ProcessExit{ExitCode: -1, Signal: "killed", Error: "signal: killed", Forced: true}
+	if got := execProcess.Exit(); !reflect.DeepEqual(got, wantExit) {
+		t.Fatalf("process exit = %#v, want %#v", got, wantExit)
+	}
+}
+
+func TestExecProcessExitReportsNonzeroCode(t *testing.T) {
+	t.Setenv("AINN_PROCESS_TEST_HELPER", "1")
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	process, err := ExecStarter{Executable: os.Args[0]}.Start(WorkerSpawn{
+		Args:        helperProcessArgs("exit-code", "", readyPath),
+		RuntimeJSON: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForFile(t, readyPath)
+	if err := process.Stop(); err == nil {
+		t.Fatal("expected non-zero worker exit error")
+	}
+	wantExit := ProcessExit{ExitCode: 17, Error: "exit status 17"}
+	if got := process.(*ExecProcess).Exit(); !reflect.DeepEqual(got, wantExit) {
+		t.Fatalf("process exit = %#v, want %#v", got, wantExit)
+	}
 }
 
 func TestExecProcessHelper(t *testing.T) {
@@ -368,6 +393,14 @@ func TestExecProcessHelper(t *testing.T) {
 			os.Exit(0)
 		}
 		os.Exit(2)
+	}
+	if len(args) == 3 && args[0] == "exit-code" {
+		if file := os.NewFile(uintptr(3), "config-fd"); file != nil {
+			_, _ = io.Copy(io.Discard, file)
+			_ = file.Close()
+		}
+		_ = os.WriteFile(args[2], []byte("ready"), 0600)
+		os.Exit(17)
 	}
 	if len(args) == 5 && args[0] == "term-drains-metrics" {
 		if args[3] != "--metrics-fd" || args[4] != "4" {

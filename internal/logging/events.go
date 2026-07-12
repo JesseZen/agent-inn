@@ -24,6 +24,8 @@ const (
 	EventModuleFail           = "module.fail"
 	EventWorkerStart          = "worker.start"
 	EventWorkerReady          = "worker.ready"
+	EventWorkerSignal         = "worker.signal"
+	EventWorkerStop           = "worker.stop"
 	EventSnapshotReload       = "snapshot.reload"
 	EventWorkerSpawn          = "worker.spawn"
 	EventWorkerExit           = "worker.exit"

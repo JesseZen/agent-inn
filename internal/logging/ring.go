@@ -205,12 +205,23 @@ func shouldKeepLine(line string, level string) bool {
 	if normalizeLevel(level) == "detail" {
 		return true
 	}
+	if isWorkerLifecycleLine(line) {
+		return true
+	}
 	switch logSeverity(line) {
 	case "ERROR", "WARN", "UNKNOWN":
 		return true
 	default:
 		return false
 	}
+}
+
+func isWorkerLifecycleLine(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) > 1 && fields[1] == ComponentWorkerLife {
+		return true
+	}
+	return len(fields) > 2 && looksLikeTimestamp(fields[0]) && fields[2] == ComponentWorkerLife
 }
 
 // logSeverity extracts the level from a log line. Structured lines from this

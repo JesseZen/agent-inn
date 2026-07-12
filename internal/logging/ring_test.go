@@ -3,6 +3,7 @@ package logging
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,23 @@ func TestWorkerLogSinkSimpleModeKeepsWarnAndErrorOnly(t *testing.T) {
 	}
 	if strings.Contains(fileText, "INFO request started") || strings.Contains(fileText, "DEBUG sse chunk bytes=24") {
 		t.Fatalf("simple mode file kept info/debug lines: %s", fileText)
+	}
+}
+
+func TestWorkerLogSinkSimpleModeKeepsWorkerLifecycleInfo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "worker-11199.log")
+	sink, err := NewWorkerLogSink(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sink.Close()
+
+	_, _ = sink.Write([]byte("2026-07-12T00:00:00.000Z INFO  worker.life worker.start run=run-1\n"))
+	lines := sink.Lines()
+	want := []string{"2026-07-12T00:00:00.000Z INFO  worker.life worker.start run=run-1"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("lifecycle lines = %#v, want %#v", lines, want)
 	}
 }
 

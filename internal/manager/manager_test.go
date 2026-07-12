@@ -4306,6 +4306,36 @@ func TestManagerWorkerLifecycleStateTransitions(t *testing.T) {
 	assertWorkerStatus(t, m, "stopped")
 }
 
+func TestManagerWorkerExitLogsProcessStatus(t *testing.T) {
+	var logBuffer bytes.Buffer
+	process := &reportingManagedProcess{exit: ProcessExit{ExitCode: -1, Signal: "killed", Error: "signal: killed", Forced: true}}
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				"codex-app": {Port: 6767, Upstream: "openai"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: fixedStarter{process: process},
+		Logger:  logging.New(&logBuffer, "detail", logging.ComponentManagerSuper),
+	})
+	if err := m.StartWorker("codex-app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StopWorker("codex-app"); err != nil {
+		t.Fatal(err)
+	}
+	log := logBuffer.String()
+	for _, want := range []string{"worker.exit", "exit_code=-1", "signal=killed", "forced=true", `process_error="signal: killed"`} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("worker exit log missing %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestManagerAPIDeleteWorkerConfigStopsAndRemovesWorker(t *testing.T) {
 	process := &recordingManagedProcess{}
 	m := New(Config{
@@ -5547,6 +5577,13 @@ func (s fixedStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 type recordingManagedProcess struct {
 	stopCount int
 }
+
+type reportingManagedProcess struct {
+	exit ProcessExit
+}
+
+func (p *reportingManagedProcess) Stop() error       { return nil }
+func (p *reportingManagedProcess) Exit() ProcessExit { return p.exit }
 
 func (p *recordingManagedProcess) Stop() error {
 	p.stopCount++

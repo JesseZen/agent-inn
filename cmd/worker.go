@@ -72,7 +72,31 @@ var newWorkerServer = func(addr string, w *worker.Worker) workerServer {
 	return worker.NewServer(addr, w)
 }
 
-func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
+func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) (runErr error) {
+	port := cfg.ListenPort
+	if port == 0 {
+		port = cfg.Port
+	}
+	generation := int(cfg.Generation)
+	if generation == 0 {
+		generation = 1
+	}
+	lifeLogger := logging.New(os.Stdout, "detail", logging.ComponentWorkerLife)
+	proxyLogger := logging.New(os.Stdout, string(cfg.LogLevel), logging.ComponentWorkerProxy)
+	if runID := os.Getenv(rootRunIDEnvVar); runID != "" {
+		lifeLogger = lifeLogger.With("run", runID)
+		proxyLogger = proxyLogger.With("run", runID)
+	}
+	lifeLogger = lifeLogger.With("worker", string(cfg.ID), "pid", os.Getpid(), "port", port, "generation", generation)
+	proxyLogger = proxyLogger.With("worker", string(cfg.ID), "pid", os.Getpid())
+	lifeLogger.Info(logging.EventWorkerStart)
+	defer func() {
+		if runErr != nil {
+			lifeLogger.Error(logging.EventWorkerStop, "reason", "error", "err", runErr.Error())
+			return
+		}
+		lifeLogger.Info(logging.EventWorkerStop, "reason", "clean")
+	}()
 	externalRequest := map[string]module.ExternalRequestRuntime{}
 	for name, plugin := range cfg.Plugins {
 		if plugin.Source == "external" && plugin.Kind == "request_middleware" {
@@ -92,14 +116,6 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	})
 	if err != nil {
 		return err
-	}
-	generation := int(cfg.Generation)
-	if generation == 0 {
-		generation = 1
-	}
-	port := cfg.ListenPort
-	if port == 0 {
-		port = cfg.Port
 	}
 	snapshot := worker.RuntimeConfigSnapshot{
 		Generation: generation,
@@ -169,7 +185,7 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	}
 	w, err := worker.New(worker.Options{
 		Snapshot:      snapshot,
-		Logger:        logging.New(os.Stdout, string(cfg.LogLevel), logging.ComponentWorkerProxy),
+		Logger:        proxyLogger,
 		MetricsWriter: cfg.MetricsWriter,
 	})
 	if err != nil {
@@ -182,14 +198,16 @@ func runWorkerServer(cfg WorkerRuntimeConfig, stdin *os.File) error {
 	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(stopSignals)
 	go func() {
-		<-stopSignals
+		sig := <-stopSignals
+		lifeLogger.Warn(logging.EventWorkerSignal, "signal", sig.String())
 		shutdown()
 	}()
-	err = server.ListenAndServe()
-	if err == nil || err == http.ErrServerClosed {
+	lifeLogger.Info(logging.EventWorkerReady)
+	runErr = server.ListenAndServe()
+	if runErr == nil || runErr == http.ErrServerClosed {
 		return nil
 	}
-	return err
+	return runErr
 }
 
 func newWorkerShutdown(server workerServer, closer workerCloser, hooks []modulehook.Hook, httpTimeout, metricsTimeout time.Duration) func() {

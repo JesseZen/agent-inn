@@ -902,7 +902,17 @@ func (m *Manager) StopWorker(name string) error {
 	m.mu.Unlock()
 
 	status, err := stopManagedProcess(process)
+	exit := managedProcessExit(process)
 	if err != nil {
+		m.logger.Error(logging.EventWorkerExit,
+			"worker", name,
+			"status", string(WorkerStateFailed),
+			"exit_code", exit.ExitCode,
+			"signal", exit.Signal,
+			"forced", exit.Forced,
+			"process_error", exit.Error,
+			"err", err.Error(),
+		)
 		m.mu.Lock()
 		m.supervisorFor(name).setStatus(WorkerStateFailed)
 		m.statuses[name] = WorkerStateFailed
@@ -914,7 +924,14 @@ func (m *Manager) StopWorker(name string) error {
 	m.statuses[name] = status
 	m.supervisorFor(name).setStatus(status)
 	m.mu.Unlock()
-	m.logger.Info(logging.EventWorkerExit, "worker", name, "status", string(status))
+	m.logger.Info(logging.EventWorkerExit,
+		"worker", name,
+		"status", string(status),
+		"exit_code", exit.ExitCode,
+		"signal", exit.Signal,
+		"forced", exit.Forced,
+		"process_error", exit.Error,
+	)
 	m.publishEvent(EventWorkerStopped, map[string]any{"worker": name, "status": string(status)})
 	return nil
 }
@@ -1076,6 +1093,17 @@ func stopManagedProcess(process ManagedProcess) (WorkerState, error) {
 		return WorkerStateStoppedForced, nil
 	}
 	return WorkerStateStopped, nil
+}
+
+type processExitReporter interface {
+	Exit() ProcessExit
+}
+
+func managedProcessExit(process ManagedProcess) ProcessExit {
+	if reporter, ok := process.(processExitReporter); ok {
+		return reporter.Exit()
+	}
+	return ProcessExit{}
 }
 
 func (m *Manager) restartWorker(name string, resetRetries bool) error {

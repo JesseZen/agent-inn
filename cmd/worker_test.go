@@ -341,6 +341,59 @@ esac
 	}
 }
 
+func TestRunWorkerServerLogsCorrelatedLifecycle(t *testing.T) {
+	t.Setenv(rootRunIDEnvVar, "worker-run-1")
+	readOutput, writeOutput, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStdout := os.Stdout
+	os.Stdout = writeOutput
+	defer func() {
+		os.Stdout = previousStdout
+		_ = readOutput.Close()
+	}()
+
+	server := &statusThenShutdownWorkerServer{}
+	previousNewWorkerServer := newWorkerServer
+	newWorkerServer = func(addr string, w *worker.Worker) workerServer {
+		server.worker = w
+		return server
+	}
+	defer func() { newWorkerServer = previousNewWorkerServer }()
+
+	err = runWorkerServer(WorkerRuntimeConfig{
+		ID:   "app",
+		Port: 6767,
+		Upstream: appruntime.UpstreamRuntime{
+			ID:      "openai",
+			BaseURL: "http://127.0.0.1:1",
+		},
+	}, os.Stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOutput.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(readOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	for _, want := range []string{
+		"worker.life worker.start",
+		"worker.life worker.ready",
+		"worker.life worker.stop",
+		"run=worker-run-1",
+		"worker=app",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("worker lifecycle log missing %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestRunWorkerServerRunsMixedHooksFromManagerRuntime(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")

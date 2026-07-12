@@ -21,6 +21,13 @@ type WorkerSpawn struct {
 	MetricsHandler func(io.Reader)
 }
 
+type ProcessExit struct {
+	ExitCode int
+	Signal   string
+	Error    string
+	Forced   bool
+}
+
 type ExecStarter struct {
 	Executable      string
 	StopGracePeriod time.Duration
@@ -32,8 +39,15 @@ type ExecProcess struct {
 	stdin           *os.File
 	configRead      *os.File
 	metricsDone     <-chan struct{}
+	waitDone        <-chan processWaitResult
 	stopGracePeriod time.Duration
 	forcedStop      bool
+	lastExit        ProcessExit
+}
+
+type processWaitResult struct {
+	exit ProcessExit
+	err  error
 }
 
 const defaultManagerStopGracePeriod = 15 * time.Second
@@ -100,6 +114,8 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	}
 	_ = configRead.Close()
 	_ = stdinRead.Close()
+	waitDone := make(chan processWaitResult, 1)
+	go func() { waitDone <- waitForProcess(cmd) }()
 	var metricsDone chan struct{}
 	if spawn.MetricsHandler != nil {
 		_ = metricsWrite.Close()
@@ -116,18 +132,20 @@ func (s ExecStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 		_ = configWrite.Close()
 		_ = stdinWrite.Close()
 		_ = cmd.Process.Kill()
+		<-waitDone
 		return nil, err
 	}
 	if err := configWrite.Close(); err != nil {
 		_ = stdinWrite.Close()
 		_ = cmd.Process.Kill()
+		<-waitDone
 		return nil, err
 	}
 	stopGracePeriod := s.StopGracePeriod
 	if stopGracePeriod <= 0 {
 		stopGracePeriod = defaultManagerStopGracePeriod
 	}
-	return &ExecProcess{cmd: cmd, stdin: stdinWrite, metricsDone: metricsDone, stopGracePeriod: stopGracePeriod}, nil
+	return &ExecProcess{cmd: cmd, stdin: stdinWrite, metricsDone: metricsDone, waitDone: waitDone, stopGracePeriod: stopGracePeriod}, nil
 }
 
 func sanitizedWorkerEnv(env []string) []string {
@@ -173,10 +191,12 @@ func (p *ExecProcess) Stop() error {
 	cmd := p.cmd
 	stdin := p.stdin
 	metricsDone := p.metricsDone
+	waitDone := p.waitDone
 	stopGracePeriod := p.stopGracePeriod
 	p.cmd = nil
 	p.stdin = nil
 	p.metricsDone = nil
+	p.waitDone = nil
 	p.mu.Unlock()
 
 	if cmd == nil {
@@ -192,22 +212,23 @@ func (p *ExecProcess) Stop() error {
 		_ = stdin.Close()
 	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	var err error
+	var result processWaitResult
+	forced := false
 	remainingGrace := time.Until(stopDeadline)
 	select {
-	case err = <-done:
+	case result = <-waitDone:
 	case <-time.After(remainingGrace):
+		forced = true
 		p.markForcedStop()
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		err = <-done
+		result = <-waitDone
 	}
+	result.exit.Forced = forced
+	p.mu.Lock()
+	p.lastExit = result.exit
+	p.mu.Unlock()
 	if metricsDone != nil {
 		remainingGrace = time.Until(stopDeadline)
 		select {
@@ -215,13 +236,19 @@ func (p *ExecProcess) Stop() error {
 		case <-time.After(remainingGrace):
 		}
 	}
-	return ignoreManagedStopExit(err)
+	return ignoreManagedStopExit(result.err)
 }
 
 func (p *ExecProcess) ForcedStop() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.forcedStop
+}
+
+func (p *ExecProcess) Exit() ProcessExit {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastExit
 }
 
 func (p *ExecProcess) markForcedStop() {
@@ -232,6 +259,24 @@ func (p *ExecProcess) markForcedStop() {
 
 func errorsIsProcessDone(err error) bool {
 	return errors.Is(err, os.ErrProcessDone)
+}
+
+func waitForProcess(cmd *exec.Cmd) processWaitResult {
+	err := cmd.Wait()
+	exit := ProcessExit{ExitCode: 0}
+	if err == nil {
+		return processWaitResult{exit: exit}
+	}
+	exit.ExitCode = -1
+	exit.Error = err.Error()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ProcessState != nil {
+		exit.ExitCode = exitErr.ProcessState.ExitCode()
+		if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			exit.Signal = status.Signal().String()
+		}
+	}
+	return processWaitResult{exit: exit, err: err}
 }
 
 func ignoreManagedStopExit(err error) error {
