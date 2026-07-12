@@ -70,6 +70,10 @@ type RootOptions struct {
 	Config              config.Config
 	ManagerLogger       *slog.Logger
 	ManagerHealthLogger *slog.Logger
+	ProcessArgs         []string
+	Stdin               io.Reader
+	Stdout              io.Writer
+	Stderr              io.Writer
 }
 
 var rootManagerFactory = func(opts RootOptions) rootManager {
@@ -211,8 +215,13 @@ var rootRunner = func(opts RootOptions) error {
 
 func SetRootRunnerForTest(runner func(RootOptions) error) func() {
 	previous := rootRunner
+	previousSupervisor := rootSupervisor
 	rootRunner = runner
-	return func() { rootRunner = previous }
+	rootSupervisor = runner
+	return func() {
+		rootRunner = previous
+		rootSupervisor = previousSupervisor
+	}
 }
 
 func setRootManagerFactoryForTest(factory func(RootOptions) rootManager) func() {
@@ -337,14 +346,29 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1
 	}
-	release, err := rootLockerFactory(lockPath).Acquire()
-	if err != nil {
-		writeRootStartupFailureLog(cfg.Settings, err)
-		fmt.Fprintf(stderr, "failed to start: %v\n", err)
-		return 1
+	if os.Getenv(rootProcessEnvVar) == "" {
+		release, err := rootLockerFactory(lockPath).Acquire()
+		if err != nil {
+			writeRootStartupFailureLog(cfg.Settings, err)
+			fmt.Fprintf(stderr, "failed to start: %v\n", err)
+			return 1
+		}
+		defer release()
 	}
-	defer release()
-	if err := rootRunner(RootOptions{ConfigDir: resolvedConfigDir, ConfigPath: configPath, ManagerPort: *managerPort, Config: cfg}); err != nil {
+	runner := rootRunner
+	if os.Getenv(rootProcessEnvVar) == "" {
+		runner = rootSupervisor
+	}
+	if err := runner(RootOptions{
+		ConfigDir:   resolvedConfigDir,
+		ConfigPath:  configPath,
+		ManagerPort: *managerPort,
+		Config:      cfg,
+		ProcessArgs: append([]string(nil), args...),
+		Stdin:       os.Stdin,
+		Stdout:      stdout,
+		Stderr:      stderr,
+	}); err != nil {
 		writeRootStartupFailureLog(cfg.Settings, err)
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1

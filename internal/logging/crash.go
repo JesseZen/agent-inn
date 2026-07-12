@@ -39,13 +39,25 @@ type RootRunMetadata struct {
 }
 
 type RootRunExit struct {
-	ChildPID             int       `json:"child_pid"`
-	ExitCode             int       `json:"exit_code"`
-	Signal               string    `json:"signal"`
-	ForwardedSignal      string    `json:"forwarded_signal"`
-	DurationMilliseconds int64     `json:"duration_ms"`
-	CompletedAt          time.Time `json:"completed_at"`
+	ChildPID             int               `json:"child_pid"`
+	ExitCode             int               `json:"exit_code"`
+	Reason               RootRunExitReason `json:"reason"`
+	Error                string            `json:"error"`
+	Signal               string            `json:"signal"`
+	ForwardedSignal      string            `json:"forwarded_signal"`
+	DurationMilliseconds int64             `json:"duration_ms"`
+	CompletedAt          time.Time         `json:"completed_at"`
 }
+
+type RootRunExitReason string
+
+const (
+	RootRunExitReasonClean      RootRunExitReason = "clean"
+	RootRunExitReasonExitCode   RootRunExitReason = "exit_code"
+	RootRunExitReasonSignal     RootRunExitReason = "signal"
+	RootRunExitReasonStartError RootRunExitReason = "start_error"
+	RootRunExitReasonWaitError  RootRunExitReason = "wait_error"
+)
 
 type CrashArtifact struct {
 	metadata   RootRunMetadata
@@ -148,6 +160,8 @@ func (a *CrashArtifact) Complete(exit RootRunExit) error {
 	args := []any{
 		"child_pid", exit.ChildPID,
 		"exit_code", exit.ExitCode,
+		"reason", string(exit.Reason),
+		"error", exit.Error,
 		"signal", exit.Signal,
 		"forwarded_signal", exit.ForwardedSignal,
 		"duration_ms", exit.DurationMilliseconds,

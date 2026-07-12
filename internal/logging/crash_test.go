@@ -56,6 +56,8 @@ func TestCrashArtifactPersistsRedactedRunAndCompletion(t *testing.T) {
 	exit := RootRunExit{
 		ChildPID:             43,
 		ExitCode:             23,
+		Reason:               RootRunExitReasonExitCode,
+		Error:                "exit status 23",
 		Signal:               "",
 		ForwardedSignal:      "terminated",
 		DurationMilliseconds: 9876,
@@ -96,6 +98,8 @@ func TestCrashArtifactPersistsRedactedRunAndCompletion(t *testing.T) {
 		"root.supervisor.exit",
 		"child_pid=43",
 		"exit_code=23",
+		"reason=exit_code",
+		`error="exit status 23"`,
 		"forwarded_signal=terminated",
 		"duration_ms=9876",
 	} {

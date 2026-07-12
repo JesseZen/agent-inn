@@ -1,0 +1,184 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jesse/agent-inn/internal/logging"
+)
+
+const (
+	rootProcessEnvVar      = "AINN_ROOT_PROCESS"
+	rootRunIDEnvVar        = "AINN_RUN_ID"
+	rootCrashPathEnvVar    = "AINN_CRASH_PATH"
+	rootSupervisorFDEnvVar = "AINN_SUPERVISOR_FD"
+	rootSupervisorFD       = 3
+)
+
+var (
+	rootSupervisorNow        = time.Now
+	rootSupervisorExecutable = os.Executable
+	rootSupervisor           = superviseRoot
+)
+
+func superviseRoot(opts RootOptions) error {
+	_, err := runSupervisedRoot(opts)
+	return err
+}
+
+func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
+	startedAt := rootSupervisorNow()
+	runID, err := logging.NewRunID()
+	if err != nil {
+		return logging.RootRunExit{}, err
+	}
+	executable, err := rootSupervisorExecutable()
+	if err != nil {
+		return logging.RootRunExit{}, fmt.Errorf("locate root executable: %w", err)
+	}
+	supervisorRead, supervisorWrite, err := os.Pipe()
+	if err != nil {
+		return logging.RootRunExit{}, fmt.Errorf("create root supervisor pipe: %w", err)
+	}
+	defer supervisorWrite.Close()
+
+	logDir := expandHome(opts.Config.Settings.LogDir)
+	artifact, _, err := logging.OpenCrashArtifact(logDir, logging.RootRunMetadata{
+		RunID:         runID,
+		SupervisorPID: os.Getpid(),
+		StartedAt:     startedAt,
+		Version:       version,
+		GoVersion:     runtime.Version(),
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		ConfigDir:     opts.ConfigDir,
+		ManagerPort:   opts.ManagerPort,
+	})
+	if err != nil {
+		_ = supervisorRead.Close()
+		return logging.RootRunExit{}, err
+	}
+
+	terminalStderr := opts.Stderr
+	if terminalStderr == nil {
+		terminalStderr = io.Discard
+	}
+	cmd := exec.Command(executable, opts.ProcessArgs...)
+	cmd.Stdin = opts.Stdin
+	cmd.Stdout = opts.Stdout
+	cmd.Stderr = io.MultiWriter(artifact.Writer(), terminalStderr)
+	cmd.ExtraFiles = []*os.File{supervisorRead}
+	cmd.Env = rootProcessEnvironment(os.Environ(), map[string]string{
+		rootProcessEnvVar:      "1",
+		rootRunIDEnvVar:        runID,
+		rootCrashPathEnvVar:    artifact.Path(),
+		rootSupervisorFDEnvVar: strconv.Itoa(rootSupervisorFD),
+	})
+	if err := cmd.Start(); err != nil {
+		_ = supervisorRead.Close()
+		completedAt := rootSupervisorNow()
+		exit := logging.RootRunExit{
+			ExitCode:             -1,
+			Reason:               logging.RootRunExitReasonStartError,
+			Error:                err.Error(),
+			DurationMilliseconds: completedAt.Sub(startedAt).Milliseconds(),
+			CompletedAt:          completedAt,
+		}
+		if completeErr := artifact.Complete(exit); completeErr != nil {
+			_ = artifact.Close()
+			return exit, completeErr
+		}
+		if closeErr := artifact.Close(); closeErr != nil {
+			return exit, closeErr
+		}
+		return exit, err
+	}
+	_ = supervisorRead.Close()
+	artifact.Logger().Info(logging.EventRootSupervisorChild, "child_pid", cmd.Process.Pid)
+
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- cmd.Wait()
+	}()
+	stopSignals := make(chan os.Signal, 4)
+	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(stopSignals)
+	forwardedSignal := ""
+	var waitErr error
+
+waitForChild:
+	for {
+		select {
+		case sig := <-stopSignals:
+			signalName := sig.String()
+			if forwardedSignal == "" {
+				forwardedSignal = signalName
+			}
+			artifact.Logger().Warn(logging.EventRootSupervisorSignal, "signal", signalName, "child_pid", cmd.Process.Pid)
+			if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				artifact.Logger().Error(logging.EventRootSupervisorSignal, "signal", signalName, "child_pid", cmd.Process.Pid, "err", err.Error())
+			}
+		case waitErr = <-waitResult:
+			break waitForChild
+		}
+	}
+
+	completedAt := rootSupervisorNow()
+	exit := logging.RootRunExit{
+		ChildPID:             cmd.Process.Pid,
+		ExitCode:             0,
+		Reason:               logging.RootRunExitReasonClean,
+		ForwardedSignal:      forwardedSignal,
+		DurationMilliseconds: completedAt.Sub(startedAt).Milliseconds(),
+		CompletedAt:          completedAt,
+	}
+	if waitErr != nil {
+		exit.ExitCode = -1
+		exit.Reason = logging.RootRunExitReasonWaitError
+		exit.Error = waitErr.Error()
+		var exitError *exec.ExitError
+		if errors.As(waitErr, &exitError) && exitError.ProcessState != nil {
+			exit.ExitCode = exitError.ProcessState.ExitCode()
+			if status, ok := exitError.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				exit.Reason = logging.RootRunExitReasonSignal
+				exit.Signal = status.Signal().String()
+			} else {
+				exit.Reason = logging.RootRunExitReasonExitCode
+			}
+		}
+	}
+	if err := artifact.Complete(exit); err != nil {
+		_ = artifact.Close()
+		return exit, err
+	}
+	if err := artifact.Close(); err != nil {
+		return exit, err
+	}
+	return exit, waitErr
+}
+
+func rootProcessEnvironment(current []string, values map[string]string) []string {
+	out := make([]string, 0, len(current)+len(values))
+	for _, entry := range current {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, replaced := values[name]; replaced {
+				continue
+			}
+		}
+		out = append(out, entry)
+	}
+	for name, value := range values {
+		out = append(out, name+"="+value)
+	}
+	return out
+}
