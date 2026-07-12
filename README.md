@@ -223,6 +223,14 @@ OpenCode user configuration remains available and is not modified. Basic
 launch and hosted terminal operations are supported; OpenCode-specific turn
 status and resume tracking are not.
 
+`launcher: pi` starts Pi with an isolated agent directory under the configured
+state directory. AINN writes Pi providers for the configured Responses, Chat
+Completions, or Anthropic worker protocol, points them at the worker URL, and
+passes the placeholder API key `ainn`. `protocol_probe.model` supplies the
+model ID. Pi user configuration remains untouched. Basic launch and hosted
+terminal operations are supported; Pi-specific turn status and resume tracking
+are not.
+
 `upstream_pool` is optional. A pool keeps its members in priority order: the Manager opens a member's circuit after qualified upstream failures, hot-switches the pool's workers to the next healthy member, and automatically returns to the preferred member after recovery. `stream_timeouts` can set the first SSE byte and SSE idle limits for an upstream. `protocol_probe.model` enables a low-output streaming request that verifies the upstream's configured API protocol; without it, AINN uses the lightweight base URL probe.
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.

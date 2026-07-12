@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,22 @@ type grokModel struct {
 	BaseURL string `toml:"base_url"`
 	Name    string `toml:"name"`
 	EnvKey  string `toml:"env_key"`
+}
+
+type piModelsConfig struct {
+	Providers map[string]piProvider `json:"providers"`
+}
+
+type piProvider struct {
+	BaseURL string    `json:"baseUrl"`
+	API     string    `json:"api"`
+	APIKey  string    `json:"apiKey"`
+	Models  []piModel `json:"models"`
+}
+
+type piModel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 func CodexProfileName(workerID string) (string, error) {
@@ -132,6 +149,41 @@ func syncGrokConfig(cfg config.Config) error {
 		return err
 	}
 	return writeTextFile(filepath.Join(expandHomePath(stateDir), "grok-home", ".grok", "config.toml"), string(data), 0600)
+}
+
+func syncPiConfig(cfg config.Config) error {
+	providers := make(map[string]piProvider)
+	for name, worker := range cfg.Workers {
+		if worker.Launcher != piLauncherName {
+			continue
+		}
+		profile := cfg.Upstreams[worker.Upstream]
+		api := "openai-responses"
+		switch profile.APIFormat {
+		case "chat_completions":
+			api = "openai-completions"
+		case "anthropic":
+			api = "anthropic-messages"
+		}
+		providers[name] = piProvider{
+			BaseURL: fmt.Sprintf("http://%s:%d/v1", constants.LocalhostAddr, worker.Port),
+			API:     api,
+			APIKey:  "ainn",
+			Models:  []piModel{{ID: profile.ProtocolProbe.Model, Name: profile.ProtocolProbe.Model}},
+		}
+	}
+	if len(providers) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(piModelsConfig{Providers: providers}, "", "  ")
+	if err != nil {
+		return err
+	}
+	stateDir := cfg.Settings.StateDir
+	if stateDir == "" {
+		stateDir = "~/.ainn"
+	}
+	return writeTextFile(filepath.Join(expandHomePath(stateDir), "pi-agent", "models.json"), string(data)+"\n", 0600)
 }
 
 func writeTextFile(path string, text string, mode os.FileMode) error {

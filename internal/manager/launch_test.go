@@ -199,6 +199,33 @@ func TestBuildOpenCodeLaunchCommandUsesAnthropicProvider(t *testing.T) {
 		t.Fatalf("unexpected opencode launch command:\ngot  %#v\nwant %#v", cmd, want)
 	}
 }
+
+func TestBuildPiLaunchCommandUsesIsolatedWorkerProvider(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:   "pi",
+		Profile:    "worker-main",
+		Workspace:  "/tmp/work",
+		PiAgentDir: "/tmp/ainn-pi-agent",
+		Model:      "gpt-5.5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		"PI_CODING_AGENT_DIR=/tmp/ainn-pi-agent",
+		"pi",
+		"--provider",
+		"worker-main",
+		"--model",
+		"gpt-5.5",
+		"--api-key",
+		"ainn",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected pi launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
 func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "codex",

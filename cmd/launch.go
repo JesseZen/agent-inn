@@ -131,6 +131,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	apiFormat := ""
 	grokHome := ""
 	grokExecutable := ""
+	piAgentDir := ""
 	var cfg config.Config
 	configLoaded := false
 	var configLoadErr error
@@ -157,6 +158,13 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 					grokExecutable = resolved
 				}
 			}
+			if launcher == "pi" {
+				stateDir := cfg.Settings.StateDir
+				if stateDir == "" {
+					stateDir = config.DefaultConfigDir
+				}
+				piAgentDir = filepath.Join(expandHome(stateDir), "pi-agent")
+			}
 		}
 	} else {
 		configLoadErr = err
@@ -176,6 +184,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		GrokExecutable: grokExecutable,
 		Model:          *model,
 		APIFormat:      apiFormat,
+		PiAgentDir:     piAgentDir,
 	}
 	if *mode == modeHostedTerminal {
 		if !configLoaded {

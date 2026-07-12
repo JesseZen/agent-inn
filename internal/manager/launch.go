@@ -12,6 +12,7 @@ const (
 	claudeCodeLauncherName = "claudecode"
 	grokLauncherName       = "grok"
 	openCodeLauncherName   = "opencode"
+	piLauncherName         = "pi"
 )
 
 type CodexLaunchOptions struct {
@@ -41,6 +42,7 @@ type LaunchOptions struct {
 	GrokExecutable      string
 	Model               string
 	APIFormat           string
+	PiAgentDir          string
 	LauncherSessionID   string
 	LauncherSessionMode LauncherSessionMode
 }
@@ -99,6 +101,10 @@ func BuildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
 }
 
 func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
+	if opts.Launcher == piLauncherName {
+		cmd := []string{"env", "PI_CODING_AGENT_DIR=" + opts.PiAgentDir, "pi", "--provider", opts.Profile, "--model", opts.Model, "--api-key", "ainn"}
+		return cmd, nil
+	}
 	if opts.Launcher == openCodeLauncherName {
 		npm := "@ai-sdk/openai-compatible"
 		if opts.APIFormat == "" || opts.APIFormat == "responses" {

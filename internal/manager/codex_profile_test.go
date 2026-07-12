@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -135,6 +136,86 @@ func TestSyncGrokConfigWritesWorkerProxyModels(t *testing.T) {
 			"worker-main": {Model: "grok-4.5", BaseURL: "http://127.0.0.1:11199", Name: "worker-main", EnvKey: "XAI_API_KEY"},
 		},
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestSyncPiConfigWritesWorkerProxyModels(t *testing.T) {
+	stateDir := t.TempDir()
+	cfg := config.Config{
+		Settings: config.Settings{StateDir: stateDir},
+		Workers: map[string]config.WorkerConfig{
+			"worker-main": {Port: 11199, Upstream: "openai", Launcher: "pi"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"openai": {APIFormat: "responses", ProtocolProbe: config.ProtocolProbeConfig{Model: "gpt-5.5"}},
+		},
+	}
+
+	if err := syncPiConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "pi-agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got piModelsConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := piModelsConfig{Providers: map[string]piProvider{
+		"worker-main": {
+			BaseURL: "http://127.0.0.1:11199/v1",
+			API:     "openai-responses",
+			APIKey:  "ainn",
+			Models:  []piModel{{ID: "gpt-5.5", Name: "gpt-5.5"}},
+		},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestSyncPiConfigMapsWorkerProtocols(t *testing.T) {
+	stateDir := t.TempDir()
+	cfg := config.Config{
+		Settings: config.Settings{StateDir: stateDir},
+		Workers: map[string]config.WorkerConfig{
+			"chat":      {Port: 11199, Upstream: "chat", Launcher: "pi"},
+			"anthropic": {Port: 11200, Upstream: "anthropic", Launcher: "pi"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{
+			"chat":      {APIFormat: "chat_completions", ProtocolProbe: config.ProtocolProbeConfig{Model: "deepseek-chat"}},
+			"anthropic": {APIFormat: "anthropic", ProtocolProbe: config.ProtocolProbeConfig{Model: "claude-sonnet"}},
+		},
+	}
+
+	if err := syncPiConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "pi-agent", "models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got piModelsConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := piModelsConfig{Providers: map[string]piProvider{
+		"chat": {
+			BaseURL: "http://127.0.0.1:11199/v1",
+			API:     "openai-completions",
+			APIKey:  "ainn",
+			Models:  []piModel{{ID: "deepseek-chat", Name: "deepseek-chat"}},
+		},
+		"anthropic": {
+			BaseURL: "http://127.0.0.1:11200/v1",
+			API:     "anthropic-messages",
+			APIKey:  "ainn",
+			Models:  []piModel{{ID: "claude-sonnet", Name: "claude-sonnet"}},
+		},
+	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}

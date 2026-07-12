@@ -246,6 +246,9 @@ func New(cfg Config) *Manager {
 	if err := syncGrokConfig(cfg.Config); err != nil {
 		m.configStatus.LastSaveError = err.Error()
 	}
+	if err := syncPiConfig(cfg.Config); err != nil {
+		m.configStatus.LastSaveError = err.Error()
+	}
 	if cfg.ReconcileTurnHooks {
 		if err := hostedhooks.Reconcile(cfg.Config.Settings); err != nil {
 			m.configStatus.LastSaveError = err.Error()
@@ -619,6 +622,11 @@ func (m *Manager) updateConfig(fn func(*config.Config)) {
 		m.mu.Unlock()
 	}
 	if err := syncGrokConfig(m.config); err != nil {
+		m.mu.Lock()
+		m.configStatus.LastSaveError = err.Error()
+		m.mu.Unlock()
+	}
+	if err := syncPiConfig(m.config); err != nil {
 		m.mu.Lock()
 		m.configStatus.LastSaveError = err.Error()
 		m.mu.Unlock()
