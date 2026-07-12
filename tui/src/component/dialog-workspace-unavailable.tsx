@@ -27,9 +27,9 @@ export function DialogWorkspaceUnavailable(props: { onRestore?: () => boolean | 
 
   useBindings(() => ({
     bindings: [
-      { key: "return", desc: language.t("dialog.workspaceUnavailable.confirm"), group: "Dialog", cmd: () => void confirm() },
-      { key: "left", desc: language.t("dialog.workspaceUnavailable.cancel"), group: "Dialog", cmd: () => setStore("active", "cancel") },
-      { key: "right", desc: language.t("dialog.workspaceUnavailable.restore"), group: "Dialog", cmd: () => setStore("active", "restore") },
+      { key: "return", desc: language.t("dialog.workspaceUnavailable.confirm"), group: language.t("category.dialog"), cmd: () => void confirm() },
+      { key: "left", desc: language.t("dialog.workspaceUnavailable.cancel"), group: language.t("category.dialog"), cmd: () => setStore("active", "cancel") },
+      { key: "right", desc: language.t("dialog.workspaceUnavailable.restore"), group: language.t("category.dialog"), cmd: () => setStore("active", "restore") },
     ],
   }))
 

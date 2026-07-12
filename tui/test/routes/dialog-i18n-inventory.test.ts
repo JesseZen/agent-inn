@@ -152,6 +152,7 @@ export const dialogInventory = {
   "dialog.retry.previous": "Previous retry option",
   "dialog.retry.next": "Next retry option",
   "dialog.retry.confirm": "Confirm retry option",
+  "dialog.retry.dontShowAgain": "don't show again",
 } as const
 
 function placeholders(value: string) {
@@ -159,11 +160,23 @@ function placeholders(value: string) {
 }
 
 test("dialog source inventory has exact dictionary coverage", () => {
-  expect(Object.keys(dialogInventory)).toHaveLength(142)
+  expect(Object.keys(dialogInventory)).toHaveLength(143)
 
   for (const [key, value] of Object.entries(dialogInventory)) {
     expect((en as Record<string, string>)[key]).toBe(value)
     expect((zhCN as Record<string, string>)[key]).toBeString()
     expect(placeholders((zhCN as Record<string, string>)[key]!)).toEqual(placeholders(value))
+  }
+})
+
+test("dialog binding metadata uses the reactive translated category", async () => {
+  for (const file of [
+    "dialog-provider.tsx",
+    "dialog-retry-action.tsx",
+    "dialog-session-delete-failed.tsx",
+    "dialog-workspace-unavailable.tsx",
+  ]) {
+    const source = await Bun.file(new URL(`../../src/component/${file}`, import.meta.url)).text()
+    expect(source).toContain('language.t("category.dialog")')
   }
 })

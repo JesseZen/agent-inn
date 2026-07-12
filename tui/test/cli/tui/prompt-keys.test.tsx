@@ -270,7 +270,7 @@ test("Chinese attachment markers use display-width extmarks for selection and re
 test("Chinese editor remaps file and agent markers with display-width ranges", async () => {
   await using tmp = await tmpdir()
   const editor = path.join(tmp.path, "editor.sh")
-  await Bun.write(editor, '#!/bin/sh\nprintf \'前缀 [图片 1] @代理 后缀\' > "$1"\n')
+  await Bun.write(editor, '#!/bin/sh\nprintf \'前缀\n第二行 [图片 1] @代理 后缀\' > "$1"\n')
   await Bun.$`chmod +x ${editor}`
   const previousEditor = process.env.EDITOR
   process.env.EDITOR = editor
@@ -307,17 +307,17 @@ test("Chinese editor remaps file and agent markers with display-width ranges", a
       ],
     })
     expect(prompt.keymap().dispatchCommand("prompt.editor")).toMatchObject({ ok: true })
-    await wait(() => prompt.textarea().plainText === "前缀 [图片 1] @代理 后缀", 5000)
+    await wait(() => prompt.textarea().plainText === "前缀\n第二行 [图片 1] @代理 后缀", 10000)
 
     expect(prompt.promptRef().current.parts.map((part) => part.type === "file" ? part.source?.text : part.source)).toEqual([
       {
-        start: promptOffsetWidth("前缀 "),
-        end: promptOffsetWidth("前缀 [图片 1]"),
+        start: promptOffsetWidth("前缀\n第二行 "),
+        end: promptOffsetWidth("前缀\n第二行 [图片 1]"),
         value: "[图片 1]",
       },
       {
-        start: promptOffsetWidth("前缀 [图片 1] "),
-        end: promptOffsetWidth("前缀 [图片 1] @代理"),
+        start: promptOffsetWidth("前缀\n第二行 [图片 1] "),
+        end: promptOffsetWidth("前缀\n第二行 [图片 1] @代理"),
         value: "@代理",
       },
     ])

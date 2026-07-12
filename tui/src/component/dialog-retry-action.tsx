@@ -51,25 +51,25 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
       {
         key: "left",
         desc: language.t("dialog.retry.previous"),
-        group: "Dialog",
+        group: language.t("category.dialog"),
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "right",
         desc: language.t("dialog.retry.next"),
-        group: "Dialog",
+        group: language.t("category.dialog"),
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "tab",
         desc: language.t("dialog.retry.next"),
-        group: "Dialog",
+        group: language.t("category.dialog"),
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "return",
         desc: language.t("dialog.retry.confirm"),
-        group: "Dialog",
+        group: language.t("category.dialog"),
         cmd: () => {
           if (selected() === "action") runAction(props, dialog)
           else dismiss(props, dialog)
@@ -125,7 +125,7 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
               bg={selected() === "dismiss" ? undefined : textBg()}
               attributes={selected() === "dismiss" ? TextAttributes.BOLD : undefined}
             >
-              don't show again
+              {language.t("dialog.retry.dontShowAgain")}
             </text>
           </box>
           <box

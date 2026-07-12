@@ -19,12 +19,24 @@ describe("sortModelOptions", () => {
     const sorted = sortModelOptions(
       [
         { title: "Beta", releaseDate: "2026-01-01" },
-        { title: "Alpha", releaseDate: "2025-01-01", footer: "Free" },
-        { title: "Gamma", releaseDate: "2024-01-01", footer: "Free" },
+        { title: "Alpha", releaseDate: "2025-01-01", free: true },
+        { title: "Gamma", releaseDate: "2024-01-01", free: true },
       ],
       false,
     )
 
     expect(sorted.map((model) => model.title)).toEqual(["Alpha", "Gamma", "Beta"])
+  })
+
+  test("keeps free models first when the display footer is translated", () => {
+    const sorted = sortModelOptions(
+      [
+        { title: "Beta", releaseDate: "2026-01-01", footer: "免费", free: false },
+        { title: "Alpha", releaseDate: "2025-01-01", footer: "免费", free: true },
+      ],
+      false,
+    )
+
+    expect(sorted.map((model) => model.title)).toEqual(["Alpha", "Beta"])
   })
 })

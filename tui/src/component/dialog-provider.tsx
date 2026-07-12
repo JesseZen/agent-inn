@@ -257,7 +257,7 @@ function AutoMethod(props: AutoMethodProps) {
       {
         key: "c",
         desc: language.t("dialog.provider.copyCode"),
-        group: "Dialog",
+        group: language.t("category.dialog"),
         cmd: () => {
           const code =
             props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.authorization.url

@@ -70,8 +70,8 @@ const routeKeys = {
   "component/dialog-model.tsx": ["dialog.model.connectProvider", "dialog.model.favorite", "dialog.model.favoriteDescription", "dialog.model.free", "dialog.model.popularProviders", "dialog.model.recent", "dialog.model.select", "dialog.model.viewProviders"],
   "component/dialog-move-session.tsx": ["dialog.move.confirmDelete", "dialog.move.current", "dialog.move.delete", "dialog.move.deleteCopyFailed", "dialog.move.deleteCopyMessage", "dialog.move.deleteCopyTitle", "dialog.move.deleting", "dialog.move.loadError", "dialog.move.loadingDirectories", "dialog.move.new", "dialog.move.noDirectories", "dialog.move.other", "dialog.move.refresh", "dialog.move.title"],
   "component/dialog-provider.tsx": ["dialog.provider.apiKey", "dialog.provider.authCode", "dialog.provider.connect", "dialog.provider.copied", "dialog.provider.copy", "dialog.provider.copyCode", "dialog.provider.customHelp", "dialog.provider.goHelp", "dialog.provider.goLongDescription", "dialog.provider.idPlaceholder", "dialog.provider.invalidCode", "dialog.provider.invalidId", "dialog.provider.oauthFailed", "dialog.provider.other", "dialog.provider.savedCredential", "dialog.provider.selectAuth", "dialog.provider.waiting", "dialog.provider.zenDescription", "dialog.provider.zenHelp"],
-  "component/dialog-retry-action.tsx": ["dialog.retry.confirm", "dialog.retry.next", "dialog.retry.previous"],
-  "component/dialog-session-delete-failed.tsx": ["dialog.sessionDelete.chooseRecovery", "dialog.sessionDelete.confirm", "dialog.sessionDelete.deleteBroken", "dialog.sessionDelete.deleteDescription", "dialog.sessionDelete.deleteWorkspace", "dialog.sessionDelete.restoreBroken", "dialog.sessionDelete.restoreDescription", "dialog.sessionDelete.restoreWorkspace", "dialog.sessionDelete.title", "dialog.sessionDelete.unavailable"],
+  "component/dialog-retry-action.tsx": ["category.dialog", "dialog.retry.confirm", "dialog.retry.dontShowAgain", "dialog.retry.next", "dialog.retry.previous"],
+  "component/dialog-session-delete-failed.tsx": ["category.dialog", "dialog.sessionDelete.chooseRecovery", "dialog.sessionDelete.confirm", "dialog.sessionDelete.deleteBroken", "dialog.sessionDelete.deleteDescription", "dialog.sessionDelete.deleteWorkspace", "dialog.sessionDelete.restoreBroken", "dialog.sessionDelete.restoreDescription", "dialog.sessionDelete.restoreWorkspace", "dialog.sessionDelete.title", "dialog.sessionDelete.unavailable"],
   "component/dialog-session-list.tsx": ["dialog.sessionList.confirmDelete", "dialog.sessionList.createFailed", "dialog.sessionList.delete", "dialog.sessionList.deleteFailed", "dialog.sessionList.deleteWorkspaceFailed", "dialog.sessionList.pin", "dialog.sessionList.pinned", "dialog.sessionList.rename", "dialog.sessionList.switch", "dialog.sessionList.title", "dialog.sessionList.today"],
   "component/dialog-session-rename.tsx": ["dialog.sessionRename.title"],
   "component/dialog-skill.tsx": ["dialog.skill.category", "dialog.skill.placeholder"],
@@ -83,7 +83,7 @@ const routeKeys = {
   "component/dialog-workspace-create.tsx": ["dialog.workspaceCreate.all", "dialog.workspaceCreate.allDescription", "dialog.workspaceCreate.choose", "dialog.workspaceCreate.existing", "dialog.workspaceCreate.loadFailed", "dialog.workspaceCreate.local", "dialog.workspaceCreate.new", "dialog.workspaceCreate.none", "dialog.workspaceCreate.warp", "dialog.workspaceCreate.warpConflictMessage", "dialog.workspaceCreate.warpConflictTitle", "dialog.workspaceCreate.warpFailed"],
   "component/dialog-workspace-file-changes.tsx": ["dialog.workspaceChanges.defaultMessage", "dialog.workspaceChanges.defaultTitle", "dialog.workspaceChanges.no", "dialog.workspaceChanges.yes"],
   "component/dialog-workspace-list.tsx": ["dialog.workspaceList.confirmDelete", "dialog.workspaceList.delete", "dialog.workspaceList.deleteFailed", "dialog.workspaceList.deleting", "dialog.workspaceList.title"],
-  "component/dialog-workspace-unavailable.tsx": ["dialog.workspaceUnavailable.cancel", "dialog.workspaceUnavailable.cancelLabel", "dialog.workspaceUnavailable.confirm", "dialog.workspaceUnavailable.restore", "dialog.workspaceUnavailable.restoreLabel", "dialog.workspaceUnavailable.restoreQuestion", "dialog.workspaceUnavailable.sessionAttached", "dialog.workspaceUnavailable.title"],
+  "component/dialog-workspace-unavailable.tsx": ["category.dialog", "dialog.workspaceUnavailable.cancel", "dialog.workspaceUnavailable.cancelLabel", "dialog.workspaceUnavailable.confirm", "dialog.workspaceUnavailable.restore", "dialog.workspaceUnavailable.restoreLabel", "dialog.workspaceUnavailable.restoreQuestion", "dialog.workspaceUnavailable.sessionAttached", "dialog.workspaceUnavailable.title"],
 } as const
 
 test("core session surfaces consume their typed translation keys", async () => {
@@ -99,6 +99,10 @@ test("core session surfaces consume their typed translation keys", async () => {
 
 test("core session source has no remaining owned display literals", async () => {
   const forbidden: Record<string, string[]> = {
+    "component/dialog-provider.tsx": ['group: "Dialog"'],
+    "component/dialog-retry-action.tsx": ['group: "Dialog"', "don't show again"],
+    "component/dialog-session-delete-failed.tsx": ['group: "Dialog"'],
+    "component/dialog-workspace-unavailable.tsx": ['group: "Dialog"'],
     "routes/session/index.tsx": [
       'Grep "',
       "WebFetch {stringValue",

@@ -44,11 +44,11 @@ export function DialogSessionDeleteFailed(props: {
 
   useBindings(() => ({
     bindings: [
-      { key: "return", desc: language.t("dialog.sessionDelete.confirm"), group: "Dialog", cmd: () => void confirm() },
-      { key: "left", desc: language.t("dialog.sessionDelete.deleteBroken"), group: "Dialog", cmd: () => setStore("active", "delete") },
-      { key: "up", desc: language.t("dialog.sessionDelete.deleteBroken"), group: "Dialog", cmd: () => setStore("active", "delete") },
-      { key: "right", desc: language.t("dialog.sessionDelete.restoreBroken"), group: "Dialog", cmd: () => setStore("active", "restore") },
-      { key: "down", desc: language.t("dialog.sessionDelete.restoreBroken"), group: "Dialog", cmd: () => setStore("active", "restore") },
+      { key: "return", desc: language.t("dialog.sessionDelete.confirm"), group: language.t("category.dialog"), cmd: () => void confirm() },
+      { key: "left", desc: language.t("dialog.sessionDelete.deleteBroken"), group: language.t("category.dialog"), cmd: () => setStore("active", "delete") },
+      { key: "up", desc: language.t("dialog.sessionDelete.deleteBroken"), group: language.t("category.dialog"), cmd: () => setStore("active", "delete") },
+      { key: "right", desc: language.t("dialog.sessionDelete.restoreBroken"), group: language.t("category.dialog"), cmd: () => setStore("active", "restore") },
+      { key: "down", desc: language.t("dialog.sessionDelete.restoreBroken"), group: language.t("category.dialog"), cmd: () => setStore("active", "restore") },
     ],
   }))
 

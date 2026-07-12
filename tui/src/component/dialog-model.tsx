@@ -43,6 +43,7 @@ export function DialogModel(props: { providerID?: string }) {
             description: provider.name,
             category,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
+            free: model.cost?.input === 0 && provider.id === "opencode",
             footer: model.cost?.input === 0 && provider.id === "opencode" ? language.t("dialog.model.free") : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
@@ -81,6 +82,7 @@ export function DialogModel(props: { providerID?: string }) {
               : undefined,
             category: connected() ? provider.name : undefined,
             disabled: provider.id === "opencode" && model.includes("-nano"),
+            free: info.cost?.input === 0 && provider.id === "opencode",
             footer: info.cost?.input === 0 && provider.id === "opencode" ? language.t("dialog.model.free") : undefined,
             onSelect() {
               onSelect(provider.id, model)
@@ -182,14 +184,14 @@ export function DialogModel(props: { providerID?: string }) {
   )
 }
 
-export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(
+export function sortModelOptions<T extends { free?: boolean; releaseDate: string | number; title: string }>(
   options: T[],
   newestFirst: boolean,
 ) {
   if (newestFirst) return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
   return sortBy(
     options,
-    (option) => option.footer !== "Free",
+    (option) => option.free !== true,
     (option) => option.title,
   )
 }
