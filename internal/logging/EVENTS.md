@@ -92,6 +92,13 @@
 - **grep**：`grep metrics.persist ~/.ainn/logs/ainn.log`
 - **用途**：排查实时指标仍更新但累计指标未持久化的问题；常见原因是 `state_dir` 不可写或路径被文件占用
 
+#### `upstream.failover`
+- **触发**：Manager 已收到结构化上游故障或恢复探测，但切换 pool 中的 worker runtime 失败
+- **字段**：`upstream`，`worker`（由请求触发时），`err`
+- **LEVEL**：ERROR
+- **grep**：`grep upstream.failover ~/.ainn/logs/ainn.log`
+- **用途**：排查熔断状态已变化但 worker 仍停留在旧 upstream，通常表示 runtime 热更新失败
+
 #### `hosted_turn.poll`
 - **触发**：Hosted terminal turn watcher 轮询 Codex transcript 时发生错误
 - **字段**：`error`

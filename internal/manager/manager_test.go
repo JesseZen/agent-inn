@@ -4561,12 +4561,16 @@ type recordingStarter struct {
 	processes  []*recordingProcess
 	forcedStop bool
 	onStart    func(WorkerSpawn)
+	err        error
 }
 
 func (s *recordingStarter) Start(spawn WorkerSpawn) (ManagedProcess, error) {
 	s.spawns = append(s.spawns, spawn)
 	if s.onStart != nil {
 		s.onStart(spawn)
+	}
+	if s.err != nil {
+		return nil, s.err
 	}
 	process := &recordingProcess{forcedStop: s.forcedStop}
 	s.processes = append(s.processes, process)
@@ -5413,6 +5417,8 @@ type recordingWorkerClient struct {
 	appliedPort      int
 	appliedRuntime   appruntime.WorkerRuntime
 	appliedRuntimes  map[int]appruntime.WorkerRuntime
+	runtimeStates    map[int]appruntime.WorkerRuntime
+	applyErrors      map[int][]error
 	applyErr         error
 	applyErrByPort   map[int]error
 	statusBody       string
@@ -5445,6 +5451,13 @@ func (c *recordingWorkerClient) ApplyRuntime(port int, runtime appruntime.Worker
 		c.appliedRuntimes = map[int]appruntime.WorkerRuntime{}
 	}
 	c.appliedRuntimes[port] = runtime
+	if len(c.applyErrors[port]) > 0 {
+		err := c.applyErrors[port][0]
+		c.applyErrors[port] = c.applyErrors[port][1:]
+		if err != nil {
+			return ApplyRuntimeStatus{}, err
+		}
+	}
 	if c.applyErrByPort != nil {
 		if err := c.applyErrByPort[port]; err != nil {
 			return ApplyRuntimeStatus{}, err
@@ -5453,6 +5466,10 @@ func (c *recordingWorkerClient) ApplyRuntime(port int, runtime appruntime.Worker
 	if c.applyErr != nil {
 		return ApplyRuntimeStatus{}, c.applyErr
 	}
+	if c.runtimeStates == nil {
+		c.runtimeStates = map[int]appruntime.WorkerRuntime{}
+	}
+	c.runtimeStates[port] = runtime
 	return ApplyRuntimeStatus{AppliedGeneration: runtime.Generation}, nil
 }
 

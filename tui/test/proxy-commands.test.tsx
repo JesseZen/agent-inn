@@ -502,7 +502,7 @@ test("proxy workers detail renames worker display name", async () => {
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
       await app.render()
-      return app.calls.patchWorker.some((call) => "name" in call && call.name === "Codex Main")
+      return app.calls.patchWorker.some((call) => "name" in call && call.name === "Codex Main") && app.frame().includes("Codex Main")
     })
 
     expect(app.calls.patchWorker).toContainEqual({ id: "app", name: "Codex Main" })
@@ -681,7 +681,7 @@ test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
       await app.render()
-      return app.calls.patchWorker.some((call) => "proxy_url" in call && call.proxy_url === "http://127.0.0.1:7890")
+      return app.calls.patchWorker.some((call) => "proxy_url" in call && call.proxy_url === "http://127.0.0.1:7890") && app.frame().includes("proxy: http://127.0.0.1:7890")
     })
 
     expect(app.calls.patchWorker).toContainEqual({
@@ -1257,7 +1257,7 @@ test("topology dialog drag worker to upstream calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    expect(app.calls.getWorkerRoute).toContain("app")
+    await wait(() => app.calls.patchWorker.length === 1)
     expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic-id", log_level: "simple" })
   } finally {
     await app.cleanup()
@@ -1340,7 +1340,7 @@ test("topology dialog drag upstream to worker calls patchWorker", async () => {
     await app.render()
     await app.render()
 
-    expect(app.calls.getWorkerRoute).toContain("app")
+    await wait(() => app.calls.patchWorker.length === 1)
     expect(app.calls.patchWorker).toContainEqual({ port: 6767, upstream: "anthropic-id", log_level: "simple" })
   } finally {
     await app.cleanup()

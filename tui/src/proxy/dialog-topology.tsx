@@ -100,6 +100,7 @@ export function DialogTopology() {
           api_key: "",
           api_format: upstream.api_format ?? "",
           has_api_key: upstream.has_api_key,
+          protocol_probe_model: upstream.protocol_probe?.model ?? "",
         }}
         mode="saved"
       />

@@ -7,9 +7,10 @@ import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
+import type { RedactedUpstream, UpstreamProbeResult } from "./backend"
 
 type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" }
-type FieldKey = "name" | "base_url" | "api_key" | "api_format"
+type FieldKey = "name" | "base_url" | "api_key" | "api_format" | "protocol_probe_model"
 
 export type Draft = {
   name: string
@@ -17,6 +18,7 @@ export type Draft = {
   api_key: string
   api_format: string
   has_api_key: boolean
+  protocol_probe_model: string
 }
 
 type Field = {
@@ -38,6 +40,7 @@ const FIELDS: Field[] = [
   { key: "base_url", title: "Base URL", placeholder: "https://example.com/v1" },
   { key: "api_key", title: "API Key", placeholder: "sk-...", hidden: true },
   { key: "api_format", title: "API Format", placeholder: "responses, chat_completions, or anthropic" },
+  { key: "protocol_probe_model", title: "Probe model", placeholder: "Model used for protocol readiness" },
 ]
 
 export function DialogUpstream() {
@@ -45,7 +48,6 @@ export function DialogUpstream() {
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
-  const { theme } = useTheme()
 
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
     { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
@@ -57,10 +59,7 @@ export function DialogUpstream() {
         value: { type: "edit" as const, id: upstream.id },
         description: `${upstream.base_url ?? ""}${upstream.has_api_key ? "" : " (no key)"}`,
         category: "Configured upstreams",
-        footer: !probe ? <span style={{ fg: theme.textMuted }}>—</span>
-          : probe.ok ? <span style={{ fg: theme.success }}>●{probe.latency_ms}ms</span>
-          : probe.degraded ? <span style={{ fg: theme.warning }}>▲{probe.error || `${probe.latency_ms}ms`}</span>
-          : <span style={{ fg: theme.error }}>✕{probe.error || probe.status_code}</span>,
+        footer: <UpstreamStatusFooter upstream={upstream} probe={probe} />,
       }
     }),
   ])
@@ -80,7 +79,7 @@ export function DialogUpstream() {
             toast.show({ message: "Invalid upstream name", variant: "error" })
             return
           }
-          dialog.push(() => <DialogUpstreamEditor id={upstreamName} draft={{ name: upstreamName, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false }} mode="created" />)
+          dialog.push(() => <DialogUpstreamEditor id={upstreamName} draft={{ name: upstreamName, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false, protocol_probe_model: "" }} mode="created" />)
           return
         }
 
@@ -108,6 +107,7 @@ export function DialogUpstream() {
               api_key: "",
               api_format: upstream.api_format ?? "",
               has_api_key: upstream.has_api_key,
+              protocol_probe_model: upstream.protocol_probe?.model ?? "",
             }}
             mode="saved"
           />
@@ -131,6 +131,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
       api_key: "",
       api_format: upstream.api_format ?? "",
       has_api_key: upstream.has_api_key,
+      protocol_probe_model: upstream.protocol_probe?.model ?? "",
     }
   })
 
@@ -145,7 +146,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
         if (!patch) return
         await sdk.client.patchUpstream(props.id, patch)
         await sync.bootstrap({ fatal: false })
-        toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${patch.name ?? draft().name}`, variant: "success" })
+        toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${"name" in patch ? patch.name ?? draft().name : draft().name}`, variant: "success" })
       },
     })),
   )
@@ -238,6 +239,15 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
     return { api_format: result }
   }
 
+  if (field.key === "protocol_probe_model") {
+    const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.name || "upstream"}`, {
+      value: draft.protocol_probe_model,
+      placeholder: field.placeholder,
+    })
+    if (result === null) return
+    return { protocol_probe: { model: result } }
+  }
+
   const promptTarget = field.key === "name" ? draft.name : draft.base_url || "upstream"
   const result = await DialogPrompt.show(dialog, `${field.title}: ${promptTarget}`, {
     value: draft[field.key],
@@ -245,4 +255,38 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
   })
   if (result === null) return
   return { [field.key]: result } as Partial<Draft>
+}
+
+type StatusKind = "protocol_ok" | "protocol_error" | "reachable" | "unreachable" | "unknown"
+
+function statusForUpstream(upstream: RedactedUpstream, probe?: UpstreamProbeResult, pool?: string): { kind: StatusKind; label: string } {
+  const bindings = pool
+    ? (upstream.pool_readiness ?? []).filter((item) => item.pool === pool)
+    : (upstream.pool_readiness ?? [])
+  if (bindings.length > 0) {
+    const ready = bindings.filter((item) => item.readiness === "ready" && !item.stale).length
+    const count = `${ready}/${bindings.length} pools`
+    const failed = bindings.find((item) => item.readiness === "not_ready")
+    if (failed) return { kind: "protocol_error", label: `${failed.error || "protocol_error"} ${count}` }
+    if (bindings.some((item) => item.readiness !== "ready" || item.stale)) return { kind: "unknown", label: `unknown ${count}` }
+    return { kind: "protocol_ok", label: `${bindings[0]?.latency_ms ?? 0}ms ${count}` }
+  }
+  if (!probe) return { kind: "unknown", label: "" }
+  if (probe.mode === "protocol") {
+    return probe.ok
+      ? { kind: "protocol_ok", label: `${probe.latency_ms}ms` }
+      : { kind: "protocol_error", label: probe.error || String(probe.status_code) }
+  }
+  return probe.status_code > 0
+    ? { kind: "reachable", label: `reachable ${probe.latency_ms}ms` }
+    : { kind: "unreachable", label: probe.error || "unreachable" }
+}
+
+export function UpstreamStatusFooter(props: { upstream: RedactedUpstream; probe?: UpstreamProbeResult; pool?: string }) {
+  const { theme } = useTheme()
+  const status = statusForUpstream(props.upstream, props.probe, props.pool)
+  if (status.kind === "protocol_ok") return <span style={{ fg: theme.success }}>●{status.label}</span>
+  if (status.kind === "protocol_error" || status.kind === "unreachable") return <span style={{ fg: theme.error }}>✕{status.label}</span>
+  if (status.kind === "reachable") return <span style={{ fg: theme.warning }}>▲{status.label}</span>
+  return <span style={{ fg: theme.textMuted }}>—{status.label}</span>
 }

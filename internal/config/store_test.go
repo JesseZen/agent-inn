@@ -91,6 +91,94 @@ upstreams:
 	}
 }
 
+func TestLoadFileDecodesUpstreamPoolRouting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+workers:
+  codex:
+    port: 6767
+    upstream: primary
+    upstream_pool: coding-ha
+upstream_pools:
+  coding-ha:
+    upstreams:
+      - primary
+      - backup
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_success_threshold: 3
+      recovery_wait_seconds: 90
+upstreams:
+  primary:
+    base_url: https://primary.example/v1
+    api_key: sk-primary
+    stream_timeouts:
+      first_byte_seconds: 75
+      idle_seconds: 180
+    protocol_probe:
+      model: gpt-5-mini
+  backup:
+    base_url: https://backup.example/v1
+    protocol_probe:
+      model: gpt-5-mini-backup
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Pool     UpstreamPool
+		Worker   WorkerConfig
+		Upstream UpstreamProfile
+	}{
+		Pool:     cfg.UpstreamPools["coding-ha"],
+		Worker:   cfg.Workers["codex"],
+		Upstream: cfg.Upstreams["primary"],
+	}
+	want := struct {
+		Pool     UpstreamPool
+		Worker   WorkerConfig
+		Upstream UpstreamProfile
+	}{
+		Pool: UpstreamPool{
+			Name:      "coding-ha",
+			Upstreams: []string{"primary", "backup"},
+			CircuitBreaker: CircuitBreakerConfig{
+				FailureThreshold:         5,
+				RecoverySuccessThreshold: 3,
+				RecoveryWaitSeconds:      90,
+			},
+		},
+		Worker: WorkerConfig{
+			Name:           "codex",
+			Role:           "cli",
+			Launcher:       "codex",
+			Port:           6767,
+			Upstream:       "primary",
+			UpstreamID:     "primary",
+			UpstreamPool:   "coding-ha",
+			LogLevel:       "simple",
+			RequestModules: map[string]ModuleConfig{},
+			Hooks:          map[string]ModuleConfig{},
+		},
+		Upstream: UpstreamProfile{
+			Name:           "primary",
+			BaseURL:        "https://primary.example/v1",
+			APIKey:         "sk-primary",
+			StreamTimeouts: StreamTimeoutConfig{FirstByteSeconds: 75, IdleSeconds: 180},
+			ProtocolProbe:  ProtocolProbeConfig{Model: "gpt-5-mini"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pool routing config:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestLoadAppliesSettingsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -403,6 +491,100 @@ func TestStoreAsyncWriterDoesNotBlockUpdatesAndPersistsLatest(t *testing.T) {
 		loaded, err := LoadFile(path)
 		return err == nil && loaded.Upstreams["openai"].BaseURL == "https://latest.example/v1" && !store.Status().Dirty
 	})
+}
+
+func TestPoolMemberRequiresProtocolProbeModel(t *testing.T) {
+	cfg := Config{
+		Upstreams: map[string]UpstreamProfile{
+			"primary": {ProtocolProbe: ProtocolProbeConfig{Model: "probe-primary"}},
+			"backup":  {},
+		},
+		UpstreamPools: map[string]UpstreamPool{
+			"coding-ha": {Upstreams: []string{"primary", "backup"}},
+		},
+	}
+	cfg.ApplyDefaults()
+	err := cfg.Validate()
+	got := []string{}
+	if err != nil {
+		got = append(got, err.Error())
+	}
+	want := []string{`upstream pool "coding-ha" member "backup" requires protocol_probe.model`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected validation errors:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestPoolWorkersRequireCommonProxyURL(t *testing.T) {
+	cfg := Config{
+		Workers: map[string]WorkerConfig{
+			"alpha": {Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy-a.example"},
+			"beta":  {Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy-b.example"},
+		},
+		Upstreams: map[string]UpstreamProfile{
+			"primary": {ProtocolProbe: ProtocolProbeConfig{Model: "probe-primary"}},
+		},
+		UpstreamPools: map[string]UpstreamPool{
+			"coding-ha": {Upstreams: []string{"primary"}},
+		},
+	}
+	cfg.ApplyDefaults()
+	err := cfg.Validate()
+	got := []string{}
+	if err != nil {
+		got = append(got, err.Error())
+	}
+	want := []string{`upstream pool "coding-ha" workers must use one proxy_url`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected validation errors:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestPoolWorkersRequireCommonActiveUpstream(t *testing.T) {
+	tests := []struct {
+		name    string
+		workers map[string]WorkerConfig
+	}{
+		{
+			name: "split active members",
+			workers: map[string]WorkerConfig{
+				"alpha": {Upstream: "primary", UpstreamPool: "coding-ha"},
+				"beta":  {Upstream: "backup", UpstreamPool: "coding-ha"},
+			},
+		},
+		{
+			name: "active upstream is not a member",
+			workers: map[string]WorkerConfig{
+				"alpha": {Upstream: "outside", UpstreamPool: "coding-ha"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Config{
+				Workers: test.workers,
+				Upstreams: map[string]UpstreamProfile{
+					"primary": {ProtocolProbe: ProtocolProbeConfig{Model: "probe-primary"}},
+					"backup":  {ProtocolProbe: ProtocolProbeConfig{Model: "probe-backup"}},
+					"outside": {},
+				},
+				UpstreamPools: map[string]UpstreamPool{
+					"coding-ha": {Upstreams: []string{"primary", "backup"}},
+				},
+			}
+			cfg.ApplyDefaults()
+			err := cfg.Validate()
+			got := []string{}
+			if err != nil {
+				got = append(got, err.Error())
+			}
+			want := []string{`upstream pool "coding-ha" workers must use one active upstream`}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected validation errors:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
 }
 
 func eventually(t *testing.T, timeout time.Duration, ok func() bool) {

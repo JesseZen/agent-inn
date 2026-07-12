@@ -1,20 +1,15 @@
-import { afterEach, expect, mock, test } from "bun:test"
+import { afterEach, expect, mock, spyOn, test } from "bun:test"
 import { activeHostedSession, defaultWorker, json, mountHostedTerminalApp, staleHostedSessionA, staleHostedSessionB, wait } from "./proxy-hosted-terminal.fixture"
 import type { HostedSessionSummary } from "../src/proxy/backend"
+import * as launchModule from "../src/proxy/launch"
 
 afterEach(() => {
   mock.restore()
 })
 
 function installLaunchMock() {
-  mock.module("../src/proxy/launch", () => ({
-    async launchProxySession() {
-      return true
-    },
-    async setupHostedTerminalSession() {
-      return true
-    },
-  }))
+  spyOn(launchModule, "launchProxySession").mockResolvedValue(true)
+  spyOn(launchModule, "setupHostedTerminalSession").mockResolvedValue(true)
 }
 
 async function openBulkActions(app: Awaited<ReturnType<typeof mountHostedTerminalApp>>) {

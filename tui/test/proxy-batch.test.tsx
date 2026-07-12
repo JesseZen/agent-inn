@@ -1,11 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
 import { InputRenderable, TextareaRenderable } from "@opentui/core"
-import { afterEach, expect, mock, test } from "bun:test"
+import { afterEach, expect, mock, spyOn, test } from "bun:test"
 import { onMount } from "solid-js"
 import { SDKProvider, useSDK } from "../src/context/sdk"
 import { resolveSlashCommand } from "../src/keymap"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
+import * as launchModule from "../src/proxy/launch"
 
 const launchCalls: unknown[] = []
 
@@ -15,22 +16,14 @@ afterEach(() => {
 })
 
 function installLaunchMock() {
-  mock.module("../src/proxy/launch", () => ({
-    createProxyLaunchCommand() {
-      return ["ainn", "launch"]
-    },
-    renderProxyLaunchCommand(command: string[]) {
-      return command.join(" ")
-    },
-    async launchProxySession(opts: unknown) {
-      launchCalls.push(opts)
-      return true
-    },
-    async setupHostedTerminalSession(opts: unknown) {
-      launchCalls.push(opts)
-      return true
-    },
-  }))
+  spyOn(launchModule, "launchProxySession").mockImplementation(async (opts) => {
+    launchCalls.push(opts)
+    return true
+  })
+  spyOn(launchModule, "setupHostedTerminalSession").mockImplementation(async (opts) => {
+    launchCalls.push(opts)
+    return true
+  })
 }
 
 async function loadProxyFixture() {

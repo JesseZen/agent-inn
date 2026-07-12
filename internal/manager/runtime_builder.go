@@ -44,6 +44,24 @@ func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation app
 	if upstreamID == "" {
 		upstreamID = worker.Upstream
 	}
+	if worker.UpstreamPool != "" {
+		pool, ok := cfg.UpstreamPools[worker.UpstreamPool]
+		if !ok {
+			return appruntime.WorkerRuntime{}, fmt.Errorf("upstream pool %q not found", worker.UpstreamPool)
+		}
+		currentFound := false
+		for _, candidate := range pool.Upstreams {
+			if _, ok := cfg.Upstreams[candidate]; !ok {
+				return appruntime.WorkerRuntime{}, fmt.Errorf("upstream pool %q references missing upstream %q", worker.UpstreamPool, candidate)
+			}
+			if candidate == upstreamID {
+				currentFound = true
+			}
+		}
+		if !currentFound {
+			return appruntime.WorkerRuntime{}, fmt.Errorf("worker %q upstream %q is not in pool %q", workerName, upstreamID, worker.UpstreamPool)
+		}
+	}
 	profile, ok := cfg.Upstreams[upstreamID]
 	if !ok {
 		return appruntime.WorkerRuntime{}, fmt.Errorf("upstream %q not found", upstreamID)
@@ -100,9 +118,13 @@ func (RuntimeBuilder) Build(cfg config.Config, workerName string, generation app
 		Role:       appruntime.WorkerRole(worker.Role),
 		LogLevel:   appruntime.LogLevel(workerLogLevel(worker)),
 		ProxyURL:   worker.ProxyURL,
-		Upstream:   resolved,
-		Modules:    modules,
-		Hooks:      hooks,
+		StreamTimeouts: appruntime.StreamTimeouts{
+			FirstByteMilliseconds: int64(profile.StreamTimeouts.FirstByteSeconds) * 1000,
+			IdleMilliseconds:      int64(profile.StreamTimeouts.IdleSeconds) * 1000,
+		},
+		Upstream: resolved,
+		Modules:  modules,
+		Hooks:    hooks,
 	}
 	if len(plugins) > 0 {
 		runtime.Plugins = plugins

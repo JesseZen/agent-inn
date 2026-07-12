@@ -42,6 +42,7 @@ type Config struct {
 
 type Manager struct {
 	mu                 sync.RWMutex
+	failoverMu         sync.Mutex
 	config             config.Config
 	configPath         string
 	configStatus       config.Status
@@ -70,6 +71,18 @@ type Manager struct {
 	metricsTrackers    map[string]*worker.MetricsTracker
 	pendingMetrics     map[string]*pendingMetricsUpdate
 	metricsStatusSem   chan struct{}
+	circuits           *circuitBreaker
+	desiredProbes      map[probeExecutionKey]probeSpec
+	inFlightProbes     map[probeExecutionKey]probeSpec
+	pendingProbes      map[probeExecutionKey]probeSpec
+	probeGenerations   map[probeExecutionKey]int
+	probeRunner        func(context.Context, probeSpec) upstream.ProbeResult
+	probeContext       context.Context
+	cancelProbes       context.CancelFunc
+	probeWait          sync.WaitGroup
+	readiness          map[string]readinessObservation
+	readinessTimers    map[string]*time.Timer
+	exhaustedPools     map[string]string
 	hostedSessions     *HostedSessionRegistry
 	batchRegistry      *BatchRegistry
 	reconcileTurnHooks bool
@@ -82,6 +95,7 @@ type WorkerSummary struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	UpstreamID         string                                      `json:"upstream_id"`
+	UpstreamPool       string                                      `json:"upstream_pool,omitempty"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -144,6 +158,7 @@ type WorkerDetail struct {
 	Role               string                                      `json:"role"`
 	Launcher           string                                      `json:"launcher"`
 	UpstreamID         string                                      `json:"upstream_id"`
+	UpstreamPool       string                                      `json:"upstream_pool,omitempty"`
 	Upstream           upstream.RedactedUpstream                   `json:"upstream"`
 	ProxyURL           string                                      `json:"proxy_url,omitempty"`
 	ProxyURLRedacted   bool                                        `json:"proxy_url_redacted,omitempty"`
@@ -165,6 +180,7 @@ const (
 
 func New(cfg Config) *Manager {
 	cfg.Config.ApplyDefaults()
+	probeContext, cancelProbes := context.WithCancel(context.Background())
 	store := config.NewStore(cfg.ConfigPath, cfg.Config)
 	logger := cfg.Logger
 	if logger == nil {
@@ -201,10 +217,21 @@ func New(cfg Config) *Manager {
 		metricsTrackers:    map[string]*worker.MetricsTracker{},
 		pendingMetrics:     map[string]*pendingMetricsUpdate{},
 		metricsStatusSem:   make(chan struct{}, metricsHydrationConcurrencyLimit),
+		desiredProbes:      map[probeExecutionKey]probeSpec{},
+		inFlightProbes:     map[probeExecutionKey]probeSpec{},
+		pendingProbes:      map[probeExecutionKey]probeSpec{},
+		probeGenerations:   map[probeExecutionKey]int{},
+		probeContext:       probeContext,
+		cancelProbes:       cancelProbes,
+		readiness:          map[string]readinessObservation{},
+		readinessTimers:    map[string]*time.Timer{},
+		exhaustedPools:     map[string]string{},
 		hostedSessions:     NewHostedSessionRegistry(hostedSessionRegistryPath(cfg.Config.Settings.StateDir)),
 		batchRegistry:      NewBatchRegistry(BatchRegistryPath(cfg.Config.Settings.StateDir)),
 		reconcileTurnHooks: cfg.ReconcileTurnHooks,
 	}
+	m.circuits = newCircuitBreaker(func() time.Time { return m.clock() })
+	m.probeRunner = runProtocolProbe
 	m.metricsStore = newMetricsStore(cfg.Config.Settings, func() time.Time { return m.clock() })
 	if err := m.metricsStore.CleanupRetention(); err != nil {
 		m.logger.Error(logging.EventMetricsPersist, "operation", "retention_cleanup", "err", err.Error())
@@ -261,6 +288,14 @@ func (m *Manager) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) Close() {
+	m.cancelProbes()
+	m.probeWait.Wait()
+	m.failoverMu.Lock()
+	for key, timer := range m.readinessTimers {
+		timer.Stop()
+		delete(m.readinessTimers, key)
+	}
+	m.failoverMu.Unlock()
 	m.mu.RLock()
 	workerNames := make([]string, 0, len(m.processes))
 	for workerName := range m.processes {
@@ -355,6 +390,7 @@ func (m *Manager) workerSummaries() []WorkerSummary {
 			Role:               seed.worker.Role,
 			Launcher:           seed.worker.Launcher,
 			UpstreamID:         upstreamID,
+			UpstreamPool:       seed.worker.UpstreamPool,
 			Upstream:           redactedUpstream,
 			ProxyURL:           appruntime.RedactProxyURL(seed.worker.ProxyURL),
 			ProxyURLRedacted:   appruntime.ProxyURLRedacted(seed.worker.ProxyURL),
@@ -394,6 +430,7 @@ func (m *Manager) workerDetail(name string, worker config.WorkerConfig) WorkerDe
 		Role:               worker.Role,
 		Launcher:           worker.Launcher,
 		UpstreamID:         upstreamID,
+		UpstreamPool:       worker.UpstreamPool,
 		Upstream:           redactedUpstream,
 		ProxyURL:           appruntime.RedactProxyURL(worker.ProxyURL),
 		ProxyURLRedacted:   appruntime.ProxyURLRedacted(worker.ProxyURL),
@@ -983,6 +1020,7 @@ func (m *Manager) publishWorkerUpdated(name string, worker config.WorkerConfig) 
 		"role":               worker.Role,
 		"launcher":           worker.Launcher,
 		"upstream":           worker.Upstream,
+		"upstream_pool":      worker.UpstreamPool,
 		"proxy_url":          appruntime.RedactProxyURL(worker.ProxyURL),
 		"proxy_url_redacted": appruntime.ProxyURLRedacted(worker.ProxyURL),
 		"log_level":          workerLogLevel(worker),
@@ -1120,49 +1158,6 @@ func (m *Manager) StartHealthMonitor(interval time.Duration) func() {
 		}
 	}()
 	return func() { close(done) }
-}
-
-const defaultUpstreamProbeInterval = 1 * time.Minute
-
-// StartUpstreamProber 启动后台 ticker 定期 probe 所有 upstream。
-// interval <= 0 时使用 defaultUpstreamProbeInterval。启动时立即跑一次。
-func (m *Manager) StartUpstreamProber(interval time.Duration) func() {
-	if interval <= 0 {
-		interval = defaultUpstreamProbeInterval
-	}
-	done := make(chan struct{})
-	go func() {
-		m.probeAllUpstreams(context.Background())
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				m.probeAllUpstreams(context.Background())
-			case <-done:
-				return
-			}
-		}
-	}()
-	return func() { close(done) }
-}
-
-func (m *Manager) probeAllUpstreams(ctx context.Context) {
-	profiles := m.upstreamProfileSnapshot()
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var wg sync.WaitGroup
-	for _, name := range names {
-		wg.Add(1)
-		go func(n string) {
-			defer wg.Done()
-			m.probeUpstreamByName(ctx, n)
-		}(name)
-	}
-	wg.Wait()
 }
 
 type HTTPHealthChecker struct {
@@ -1325,16 +1320,21 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 func cloneConfig(cfg config.Config) config.Config {
 	out := config.Config{
-		Settings:  cfg.Settings,
-		Plugins:   clonePluginDefinitions(cfg.Plugins),
-		Workers:   make(map[string]config.WorkerConfig, len(cfg.Workers)),
-		Upstreams: make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
+		Settings:      cfg.Settings,
+		Plugins:       clonePluginDefinitions(cfg.Plugins),
+		Workers:       make(map[string]config.WorkerConfig, len(cfg.Workers)),
+		Upstreams:     make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
+		UpstreamPools: make(map[string]config.UpstreamPool, len(cfg.UpstreamPools)),
 	}
 	for name, worker := range cfg.Workers {
 		out.Workers[name] = cloneWorkerConfig(worker)
 	}
 	for name, profile := range cfg.Upstreams {
 		out.Upstreams[name] = profile
+	}
+	for name, pool := range cfg.UpstreamPools {
+		pool.Upstreams = append([]string(nil), pool.Upstreams...)
+		out.UpstreamPools[name] = pool
 	}
 	return out
 }
@@ -1363,6 +1363,7 @@ func cloneWorkerConfig(worker config.WorkerConfig) config.WorkerConfig {
 		Port:           worker.Port,
 		Upstream:       worker.Upstream,
 		UpstreamID:     worker.UpstreamID,
+		UpstreamPool:   worker.UpstreamPool,
 		ProxyURL:       worker.ProxyURL,
 		LogLevel:       workerLogLevel(worker),
 		RequestModules: cloneModules(worker.RequestModules),

@@ -13,13 +13,22 @@ const (
 	degradedLatencyThreshold = 1000 * time.Millisecond
 )
 
+type ProbeMode string
+
+const (
+	ProbeModeReachability ProbeMode = "reachability"
+	ProbeModeProtocol     ProbeMode = "protocol"
+)
+
 // ProbeResult 表示对单个 upstream 的一次探测结果。
 type ProbeResult struct {
-	OK         bool   `json:"ok"`
-	Degraded   bool   `json:"degraded,omitempty"`
-	StatusCode int    `json:"status_code"`
-	LatencyMS  int64  `json:"latency_ms"`
-	Error      string `json:"error,omitempty"`
+	OK            bool      `json:"ok"`
+	Degraded      bool      `json:"degraded,omitempty"`
+	StatusCode    int       `json:"status_code"`
+	LatencyMS     int64     `json:"latency_ms"`
+	Error         string    `json:"error,omitempty"`
+	Mode          ProbeMode `json:"mode"`
+	Authoritative bool      `json:"authoritative"`
 }
 
 // Probe 对 compiled 指向的 upstream 发起一次 GET 探测，使用默认超时。
@@ -41,34 +50,51 @@ func probeWithClient(ctx context.Context, compiled Compiled, client *http.Client
 	resp, err := client.Do(req)
 	latency := time.Since(start)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return ProbeResult{Error: "timeout", LatencyMS: latency.Milliseconds()}
-		}
-		return ProbeResult{Error: "connection_error", LatencyMS: latency.Milliseconds()}
+		return failedProbeResult(err, latency).withMode(ProbeModeReachability)
 	}
 	defer resp.Body.Close()
+	return classifyProbeStatus(resp.StatusCode, latency).withMode(ProbeModeReachability)
+}
 
-	result := ProbeResult{StatusCode: resp.StatusCode, LatencyMS: latency.Milliseconds()}
+func failedProbeResult(err error, latency time.Duration) ProbeResult {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ProbeResult{Error: "timeout", LatencyMS: latency.Milliseconds()}
+	}
+	return ProbeResult{Error: "connection_error", LatencyMS: latency.Milliseconds()}
+}
+
+func classifyProbeStatus(statusCode int, latency time.Duration) ProbeResult {
+	result := ProbeResult{StatusCode: statusCode, LatencyMS: latency.Milliseconds()}
 	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+	case statusCode >= 200 && statusCode < 300:
 		if latency >= degradedLatencyThreshold {
 			result.Degraded = true
 			result.Error = "slow"
 		} else {
 			result.OK = true
 		}
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
+	case statusCode == 401 || statusCode == 403:
 		result.Error = "auth_error"
-	case resp.StatusCode == 429:
+	case statusCode == 429:
 		result.Degraded = true
 		result.Error = "rate_limited"
-	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+	case statusCode >= 400 && statusCode < 500:
 		result.Degraded = true
 		result.Error = "client_error"
-	case resp.StatusCode >= 500:
+	case statusCode >= 500:
 		result.Error = "upstream_error"
 	default:
 		result.Error = "unexpected_status"
 	}
+	return result
+}
+
+func (result ProbeResult) withMode(mode ProbeMode) ProbeResult {
+	result.Mode = mode
+	return result
+}
+
+func (result ProbeResult) withAuthority() ProbeResult {
+	result.Authoritative = true
 	return result
 }

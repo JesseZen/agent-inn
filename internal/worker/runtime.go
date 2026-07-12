@@ -15,6 +15,7 @@ type RuntimeConfigSnapshot struct {
 	Generation       int
 	ProxyURL         string
 	HTTPClient       *http.Client
+	StreamTimeouts   appruntime.StreamTimeouts
 	Upstream         upstream.RuntimeUpstream
 	CompiledUpstream upstream.Compiled
 	// RequestModuleConfigs keeps raw operator config so upstream changes can rebuild derived defaults.
@@ -102,8 +103,9 @@ func snapshotFromRuntime(runtime appruntime.WorkerRuntime) (RuntimeConfigSnapsho
 		support[name] = hookSupport
 	}
 	snapshot := RuntimeConfigSnapshot{
-		Generation: int(runtime.Generation),
-		ProxyURL:   runtime.ProxyURL,
+		Generation:     int(runtime.Generation),
+		ProxyURL:       runtime.ProxyURL,
+		StreamTimeouts: runtime.StreamTimeouts,
 		Upstream: upstream.RuntimeUpstream{
 			Name:      string(runtime.Upstream.ID),
 			BaseURL:   runtime.Upstream.BaseURL,

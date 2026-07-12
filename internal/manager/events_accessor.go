@@ -114,6 +114,56 @@ func (e Event) AsUpstreamUpdated() (upstream string, ok bool) {
 	return upstream, true
 }
 
+func (e Event) AsUpstreamProbed() (PoolReadiness, bool) {
+	if e.Type != EventUpstreamProbed {
+		return PoolReadiness{}, false
+	}
+	data, err := json.Marshal(e.Payload)
+	if err != nil {
+		return PoolReadiness{}, false
+	}
+	var readiness PoolReadiness
+	if err := json.Unmarshal(data, &readiness); err != nil {
+		return PoolReadiness{}, false
+	}
+	return readiness, true
+}
+
+func (e Event) AsUpstreamPoolExhausted() (pool string, upstream string, reason string, ok bool) {
+	if e.Type != EventUpstreamPoolExhausted {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	upstream, _ = e.Payload["upstream"].(string)
+	reason, _ = e.Payload["reason"].(string)
+	return pool, upstream, reason, true
+}
+
+func (e Event) AsUpstreamCircuitChanged() (pool string, upstream string, state CircuitState, ok bool) {
+	if e.Type != EventUpstreamCircuitChanged {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	upstream, _ = e.Payload["upstream"].(string)
+	switch value := e.Payload["state"].(type) {
+	case CircuitState:
+		state = value
+	case string:
+		state = CircuitState(value)
+	}
+	return pool, upstream, state, true
+}
+
+func (e Event) AsUpstreamPoolSwitched() (pool string, previous string, upstream string, ok bool) {
+	if e.Type != EventUpstreamPoolSwitched {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	previous, _ = e.Payload["previous_upstream"].(string)
+	upstream, _ = e.Payload["upstream"].(string)
+	return pool, previous, upstream, true
+}
+
 // AsConfigStatusChanged 解析 config.status.changed 事件。ok=false 表示类型不匹配。
 func (e Event) AsConfigStatusChanged() (dirty bool, generation int, ok bool) {
 	if e.Type != EventConfigStatusChanged {

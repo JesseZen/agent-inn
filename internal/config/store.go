@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	atomicRename  = os.Rename
+	atomicRename   = os.Rename
 	atomicFsyncDir = fsyncDir
 )
 
@@ -44,6 +44,9 @@ func LoadFile(path string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.ApplyDefaults()
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 

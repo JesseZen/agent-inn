@@ -11,12 +11,15 @@ import (
 )
 
 type upstreamProbeResponse struct {
-	Upstream   string `json:"upstream"`
-	OK         bool   `json:"ok"`
-	Degraded   bool   `json:"degraded,omitempty"`
-	StatusCode int    `json:"status_code"`
-	LatencyMS  int64  `json:"latency_ms"`
-	Error      string `json:"error,omitempty"`
+	Upstream      string             `json:"upstream"`
+	OK            bool               `json:"ok"`
+	Degraded      bool               `json:"degraded,omitempty"`
+	StatusCode    int                `json:"status_code"`
+	LatencyMS     int64              `json:"latency_ms"`
+	Error         string             `json:"error,omitempty"`
+	Mode          upstream.ProbeMode `json:"mode"`
+	Authoritative bool               `json:"authoritative"`
+	Readiness     ReadinessState     `json:"readiness"`
 }
 
 func (m *Manager) handleUpstreamTest(rw http.ResponseWriter, r *http.Request) {
@@ -70,17 +73,26 @@ func (m *Manager) probeUpstreamByName(ctx context.Context, name string) upstream
 	if !ok {
 		return upstreamProbeResponse{Upstream: name, OK: false, Error: "not_found"}
 	}
+	mode := upstream.ProbeModeReachability
+	if profile.ProtocolProbe.Model != "" {
+		mode = upstream.ProbeModeProtocol
+	}
 	runtime, err := upstream.ResolveRuntime(name, profile)
 	if err != nil {
-		m.publishEvent(EventUpstreamProbed, map[string]any{"upstream": name, "ok": false, "error": redactedErrorMessage(err)})
-		return upstreamProbeResponse{Upstream: name, OK: false, Error: redactedErrorMessage(err)}
+		message := redactedErrorMessage(err)
+		m.publishEvent(EventUpstreamProbed, map[string]any{"upstream": name, "mode": mode, "authoritative": false, "readiness": ReadinessStateUnknown, "ok": false, "status_code": 0, "latency_ms": int64(0), "error": message})
+		return upstreamProbeResponse{Upstream: name, Error: message, Mode: mode, Readiness: ReadinessStateUnknown}
 	}
 	compiled, err := upstream.Compile(runtime)
 	if err != nil {
-		m.publishEvent(EventUpstreamProbed, map[string]any{"upstream": name, "ok": false, "error": redactedErrorMessage(err)})
-		return upstreamProbeResponse{Upstream: name, OK: false, Error: redactedErrorMessage(err)}
+		message := redactedErrorMessage(err)
+		m.publishEvent(EventUpstreamProbed, map[string]any{"upstream": name, "mode": mode, "authoritative": false, "readiness": ReadinessStateUnknown, "ok": false, "status_code": 0, "latency_ms": int64(0), "error": message})
+		return upstreamProbeResponse{Upstream: name, Error: message, Mode: mode, Readiness: ReadinessStateUnknown}
 	}
 	probe := upstream.Probe(ctx, compiled)
+	if profile.ProtocolProbe.Model != "" {
+		probe = upstream.ProbeProtocol(ctx, compiled, profile.ProtocolProbe.Model)
+	}
 	resp := upstreamProbeResponse{
 		Upstream:   name,
 		OK:         probe.OK,
@@ -88,14 +100,24 @@ func (m *Manager) probeUpstreamByName(ctx context.Context, name string) upstream
 		StatusCode: probe.StatusCode,
 		LatencyMS:  probe.LatencyMS,
 		Error:      probe.Error,
+		Mode:       probe.Mode,
+		Readiness:  ReadinessStateUnknown,
 	}
-	m.publishEvent(EventUpstreamProbed, map[string]any{
-		"upstream":    name,
-		"ok":          probe.OK,
-		"degraded":    probe.Degraded,
-		"status_code": probe.StatusCode,
-		"latency_ms":  probe.LatencyMS,
-		"error":       probe.Error,
-	})
+	payload := map[string]any{
+		"upstream":      name,
+		"mode":          probe.Mode,
+		"authoritative": false,
+		"readiness":     ReadinessStateUnknown,
+		"ok":            probe.OK,
+		"status_code":   probe.StatusCode,
+		"latency_ms":    probe.LatencyMS,
+	}
+	if probe.Degraded {
+		payload["degraded"] = true
+	}
+	if probe.Error != "" {
+		payload["error"] = probe.Error
+	}
+	m.publishEvent(EventUpstreamProbed, payload)
 	return resp
 }

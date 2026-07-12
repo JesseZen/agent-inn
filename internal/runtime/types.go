@@ -63,17 +63,23 @@ type UpstreamPublic struct {
 	APIFormat APIFormat  `json:"api_format,omitempty"`
 }
 
+type StreamTimeouts struct {
+	FirstByteMilliseconds int64 `json:"first_byte_ms,omitempty"`
+	IdleMilliseconds      int64 `json:"idle_ms,omitempty"`
+}
+
 type WorkerRuntime struct {
-	ID         WorkerID                 `json:"id"`
-	Generation Generation               `json:"generation"`
-	ListenPort int                      `json:"listen_port"`
-	Role       WorkerRole               `json:"role,omitempty"`
-	LogLevel   LogLevel                 `json:"log_level,omitempty"`
-	ProxyURL   string                   `json:"proxy_url,omitempty"`
-	Upstream   UpstreamRuntime          `json:"upstream"`
-	Plugins    map[string]PluginRuntime `json:"plugins,omitempty"`
-	Modules    map[string]ModuleConfig  `json:"modules,omitempty"`
-	Hooks      map[string]ModuleConfig  `json:"hooks,omitempty"`
+	ID             WorkerID                 `json:"id"`
+	Generation     Generation               `json:"generation"`
+	ListenPort     int                      `json:"listen_port"`
+	Role           WorkerRole               `json:"role,omitempty"`
+	LogLevel       LogLevel                 `json:"log_level,omitempty"`
+	ProxyURL       string                   `json:"proxy_url,omitempty"`
+	StreamTimeouts StreamTimeouts           `json:"stream_timeouts,omitempty"`
+	Upstream       UpstreamRuntime          `json:"upstream"`
+	Plugins        map[string]PluginRuntime `json:"plugins,omitempty"`
+	Modules        map[string]ModuleConfig  `json:"modules,omitempty"`
+	Hooks          map[string]ModuleConfig  `json:"hooks,omitempty"`
 }
 
 func (u UpstreamRuntime) Public() UpstreamPublic {

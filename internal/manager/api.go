@@ -12,7 +12,6 @@ import (
 	"github.com/jesse/agent-inn/internal/constants"
 	"github.com/jesse/agent-inn/internal/hostedhooks"
 	"github.com/jesse/agent-inn/internal/modulehook"
-	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func (m *Manager) registerRoutes(mux *http.ServeMux) {
@@ -122,6 +121,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		Port           int                            `json:"port"`
 		Launcher       string                         `json:"launcher"`
 		Upstream       string                         `json:"upstream"`
+		UpstreamPool   string                         `json:"upstream_pool"`
 		ProxyURL       string                         `json:"proxy_url"`
 		RequestModules map[string]config.ModuleConfig `json:"request_modules"`
 		Hooks          map[string]config.ModuleConfig `json:"hooks"`
@@ -172,6 +172,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		Launcher:       strings.TrimSpace(payload.Launcher),
 		Port:           payload.Port,
 		Upstream:       payload.Upstream,
+		UpstreamPool:   strings.TrimSpace(payload.UpstreamPool),
 		ProxyURL:       strings.TrimSpace(payload.ProxyURL),
 		RequestModules: payload.RequestModules,
 		Hooks:          payload.Hooks,
@@ -182,19 +183,51 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 	if worker.Hooks == nil {
 		worker.Hooks = map[string]config.ModuleConfig{}
 	}
-	if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
-		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-		return
+	pooled := worker.UpstreamPool != ""
+	oldProxyURL := ""
+	if pooled {
+		m.failoverMu.Lock()
+		if err := m.validatePoolAttachmentLocked(payload.Name, worker); err != nil {
+			m.failoverMu.Unlock()
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
+			m.failoverMu.Unlock()
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		oldProxyURL = m.poolProxyURL(worker.UpstreamPool)
+	} else {
+		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
 	}
-	m.updateConfig(func(cfgRoot *config.Config) {
-		cfgRoot.Workers[payload.Name] = worker
-	})
+	m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.Workers[payload.Name] = worker })
 	if err := m.StartWorker(payload.Name); err != nil {
 		m.updateConfig(func(cfgRoot *config.Config) {
 			delete(cfgRoot.Workers, payload.Name)
 		})
+		if pooled {
+			m.failoverMu.Unlock()
+		}
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 		return
+	}
+	if pooled {
+		m.mu.RLock()
+		pool := m.config.UpstreamPools[worker.UpstreamPool]
+		m.mu.RUnlock()
+		for _, upstreamName := range pool.Upstreams {
+			m.invalidatePoolReadinessLocked(worker.UpstreamPool, upstreamName)
+		}
+		m.invalidatePoolProbeIdentityLocked(worker.UpstreamPool)
+		if oldProxyURL != m.poolProxyURL(worker.UpstreamPool) {
+			m.resetPoolIdentityLocked(worker.UpstreamPool)
+		}
+		m.failoverMu.Unlock()
+		m.probeAllUpstreams(m.probeContext)
 	}
 	for _, summary := range m.workerSummaries() {
 		if summary.Name == payload.Name {
@@ -508,123 +541,6 @@ func (m *Manager) toggleLiveWorkerModule(workerName string, port int, moduleName
 		client = defaultWorkerClient()
 	}
 	return client.ToggleModule(port, moduleName)
-}
-
-func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.NotFound(rw, r)
-		return
-	}
-	out := map[string]any{}
-	for name, profile := range m.upstreamProfileSnapshot() {
-		runtime, _ := upstream.Resolve(name, profile)
-		out[name] = map[string]any{
-			"name":        name,
-			"base_url":    profile.BaseURL,
-			"has_api_key": runtime.APIKey != "",
-			"api_format":  profile.APIFormat,
-		}
-	}
-	writeJSON(rw, http.StatusOK, map[string]any{"upstreams": out})
-}
-
-func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/api/upstreams/")
-	if name == "test" && r.Method == http.MethodPost {
-		m.handleUpstreamTestAll(rw, r)
-		return
-	}
-	if strings.HasSuffix(name, "/test") && r.Method == http.MethodPost {
-		parts := strings.Split(name, "/")
-		if len(parts) == 2 && parts[1] == "test" {
-			m.handleUpstreamTest(rw, r)
-			return
-		}
-	}
-	if name == "" || strings.Contains(name, "/") {
-		http.NotFound(rw, r)
-		return
-	}
-	if r.Method == http.MethodDelete {
-		if _, ok := m.upstreamProfileSnapshot()[name]; !ok {
-			http.NotFound(rw, r)
-			return
-		}
-		for workerName, worker := range m.workerConfigSnapshot() {
-			if workerUpstreamID(worker) != name {
-				continue
-			}
-			if m.workerStatus(workerName) == WorkerStateRunning {
-				if err := m.StopWorker(workerName); err != nil {
-					writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
-					return
-				}
-			}
-		}
-		m.updateConfig(func(cfgRoot *config.Config) {
-			delete(cfgRoot.Upstreams, name)
-		})
-		writeJSON(rw, http.StatusOK, map[string]any{"upstream": name})
-		return
-	}
-	if r.Method != http.MethodPatch {
-		http.NotFound(rw, r)
-		return
-	}
-	type upstreamPatch struct {
-		Name      *string `json:"name,omitempty"`
-		BaseURL   *string `json:"base_url,omitempty"`
-		APIKey    *string `json:"api_key,omitempty"`
-		APIFormat *string `json:"api_format,omitempty"`
-	}
-	var patch upstreamPatch
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
-		return
-	}
-	current, ok := m.upstreamProfileSnapshot()[name]
-	if !ok {
-		http.NotFound(rw, r)
-		return
-	}
-	profile := current
-	if patch.Name != nil {
-		profile.Name = strings.TrimSpace(*patch.Name)
-		if profile.Name == "" {
-			profile.Name = name
-		}
-	}
-	if patch.BaseURL != nil {
-		profile.BaseURL = *patch.BaseURL
-	}
-	if patch.APIKey != nil {
-		profile.APIKey = *patch.APIKey
-	}
-	if patch.APIFormat != nil {
-		profile.APIFormat = *patch.APIFormat
-	}
-	m.updateConfig(func(cfgRoot *config.Config) {
-		cfgRoot.Upstreams[name] = profile
-	})
-	m.bumpLiveWorkersUsingUpstream(name)
-	applyErrors := m.applyRuntimeToLiveWorkersUsingUpstream(name)
-	runtime, err := upstream.ResolveWithDisplayName(name, profile.Name, profile)
-	if err != nil {
-		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
-		return
-	}
-	m.publishEvent(EventUpstreamUpdated, map[string]any{"upstream": name})
-	body := map[string]any{
-		"id":          name,
-		"name":        runtime.Name,
-		"base_url":    profile.BaseURL,
-		"has_api_key": runtime.APIKey != "",
-		"api_format":  profile.APIFormat,
-	}
-	if len(applyErrors) > 0 {
-		body["apply_errors"] = applyErrors
-	}
-	writeJSON(rw, http.StatusOK, body)
 }
 
 func (m *Manager) applyRuntimeToLiveWorkersUsingUpstream(upstreamName string) []string {

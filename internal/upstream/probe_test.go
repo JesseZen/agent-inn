@@ -41,7 +41,7 @@ func TestProbeSuccess(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 2 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: true, StatusCode: http.StatusOK}
+	want := ProbeResult{OK: true, StatusCode: http.StatusOK, Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -57,7 +57,7 @@ func TestProbeUnauthorized(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 2 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, StatusCode: http.StatusUnauthorized, Error: "auth_error"}
+	want := ProbeResult{OK: false, StatusCode: http.StatusUnauthorized, Error: "auth_error", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -73,7 +73,7 @@ func TestProbeUpstreamError(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 2 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, StatusCode: http.StatusBadGateway, Error: "upstream_error"}
+	want := ProbeResult{OK: false, StatusCode: http.StatusBadGateway, Error: "upstream_error", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -94,7 +94,7 @@ func TestProbeTimeout(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 50 * time.Millisecond})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, Error: "timeout"}
+	want := ProbeResult{OK: false, Error: "timeout", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -111,7 +111,7 @@ func TestProbeDegradedSlowLatency(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 3 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusOK, Error: "slow"}
+	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusOK, Error: "slow", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -127,7 +127,7 @@ func TestProbeDegradedRateLimited(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 2 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusTooManyRequests, Error: "rate_limited"}
+	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusTooManyRequests, Error: "rate_limited", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -143,7 +143,7 @@ func TestProbeDegradedClientError(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 2 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusNotFound, Error: "client_error"}
+	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusNotFound, Error: "client_error", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

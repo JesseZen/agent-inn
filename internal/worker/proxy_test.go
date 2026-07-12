@@ -1836,6 +1836,207 @@ func TestWorkerLogsBadGatewayStatusOnUpstreamFail(t *testing.T) {
 	t.Fatalf("missing request.done status=502 in log output: %s", logBuf.String())
 }
 
+func TestWorkerMetricsClassifyQualifiedUpstreamFailures(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseURL     string
+		status      int
+		wantFailure *UpstreamFailure
+	}{
+		{
+			name:    "transport",
+			baseURL: "http://127.0.0.1:1",
+			status:  http.StatusBadGateway,
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureTransport,
+				BeforeFirstByte: true,
+			},
+		},
+		{
+			name:   "upstream status",
+			status: http.StatusServiceUnavailable,
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureStatus,
+				BeforeFirstByte: true,
+				StatusCode:      http.StatusServiceUnavailable,
+			},
+		},
+		{
+			name:   "authentication is not failover",
+			status: http.StatusUnauthorized,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			baseURL := test.baseURL
+			if baseURL == "" {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(test.status)
+				}))
+				defer server.Close()
+				baseURL = server.URL
+			}
+
+			metrics := &concurrencyDetectingWriter{}
+			workerInstance, err := New(Options{
+				Snapshot: RuntimeConfigSnapshot{
+					Generation: 1,
+					Upstream:   upstream.RuntimeUpstream{Name: "primary", BaseURL: baseURL},
+				},
+				MetricsWriter: metrics,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			response := httptest.NewRecorder()
+			workerInstance.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)))
+			var event RequestMetricEvent
+			if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
+				t.Fatal(err)
+			}
+
+			got := struct {
+				Status  int
+				Failure *UpstreamFailure
+			}{Status: response.Code, Failure: event.Failure}
+			want := struct {
+				Status  int
+				Failure *UpstreamFailure
+			}{Status: test.status, Failure: test.wantFailure}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected upstream failure event:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestWorkerMetricsIgnoreCallerCancellation(t *testing.T) {
+	metrics := &concurrencyDetectingWriter{}
+	workerInstance, err := New(Options{
+		Snapshot: RuntimeConfigSnapshot{
+			Generation: 1,
+			Upstream:   upstream.RuntimeUpstream{Name: "primary", BaseURL: "https://primary.example"},
+		},
+		MetricsWriter: metrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	request := httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)).WithContext(ctx)
+	response := httptest.NewRecorder()
+	workerInstance.ServeHTTP(response, request)
+	var event RequestMetricEvent
+	if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
+		t.Fatal(err)
+	}
+
+	got := struct {
+		Status  int
+		Failure *UpstreamFailure
+	}{response.Code, event.Failure}
+	want := struct {
+		Status  int
+		Failure *UpstreamFailure
+	}{http.StatusBadGateway, nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected canceled request metric:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestWorkerMetricsClassifyStreamingTimeouts(t *testing.T) {
+	tests := []struct {
+		name           string
+		initialChunk   string
+		timeouts       appruntime.StreamTimeouts
+		wantFailure    *UpstreamFailure
+		wantBodyPrefix string
+	}{
+		{
+			name:     "first byte",
+			timeouts: appruntime.StreamTimeouts{FirstByteMilliseconds: 20},
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureFirstByteTimeout,
+				BeforeFirstByte: true,
+			},
+		},
+		{
+			name:         "idle after chunk",
+			initialChunk: "data: ready\n\n",
+			timeouts: appruntime.StreamTimeouts{
+				FirstByteMilliseconds: 1000,
+				IdleMilliseconds:      20,
+			},
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureIdleTimeout,
+				BeforeFirstByte: false,
+			},
+			wantBodyPrefix: "data: ready\n\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				if test.initialChunk != "" {
+					_, _ = io.WriteString(w, test.initialChunk)
+				}
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+
+			metrics := &concurrencyDetectingWriter{}
+			workerInstance, err := New(Options{
+				Runtime: appruntime.WorkerRuntime{
+					Generation:     1,
+					ListenPort:     6767,
+					StreamTimeouts: test.timeouts,
+					Upstream: appruntime.UpstreamRuntime{
+						ID:      "primary",
+						BaseURL: server.URL,
+					},
+				},
+				MetricsWriter: metrics,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			response := httptest.NewRecorder()
+			workerInstance.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{}`)))
+			var event RequestMetricEvent
+			if err := json.Unmarshal(waitForMetricEvents(t, metrics, 1), &event); err != nil {
+				t.Fatal(err)
+			}
+
+			got := struct {
+				Status     int
+				BodyPrefix bool
+				Failure    *UpstreamFailure
+			}{
+				Status:     response.Code,
+				BodyPrefix: strings.HasPrefix(response.Body.String(), test.wantBodyPrefix),
+				Failure:    event.Failure,
+			}
+			want := struct {
+				Status     int
+				BodyPrefix bool
+				Failure    *UpstreamFailure
+			}{Status: http.StatusOK, BodyPrefix: true, Failure: test.wantFailure}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected stream timeout event:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestNewWithNilLoggerDoesNotWriteStdout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
