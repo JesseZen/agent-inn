@@ -4,6 +4,9 @@ export const coreEn = {
   "category.question": "Question",
   "category.permission": "Permission",
   "category.autocomplete": "Autocomplete",
+  "workspace.noResponse": "no response",
+  "workspace.noProjectCopyDirectory": "No project copy directory returned",
+  "workspace.localProject": "local project",
 
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
@@ -87,6 +90,7 @@ export const coreEn = {
   "session.toolcall": "{{count}} toolcall",
   "session.toolcalls": "{{count}} toolcalls",
   "session.toolcallDuration": "{{toolcalls}} · {{duration}}",
+  "session.subagentPosition": "{{index}} of {{total}}",
 
   "prompt.clear": "Clear prompt",
   "prompt.submitAction": "Submit prompt",

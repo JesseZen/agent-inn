@@ -4,6 +4,9 @@ export const coreZhCN = {
   "category.question": "问题",
   "category.permission": "权限",
   "category.autocomplete": "自动补全",
+  "workspace.noResponse": "无响应",
+  "workspace.noProjectCopyDirectory": "未返回项目副本目录",
+  "workspace.localProject": "本地项目",
 
   "session.notFound": "未找到会话：{{sessionID}}",
   "session.retryError": "重试错误",
@@ -87,6 +90,7 @@ export const coreZhCN = {
   "session.toolcall": "{{count}} 次工具调用",
   "session.toolcalls": "{{count}} 次工具调用",
   "session.toolcallDuration": "{{toolcalls}} · {{duration}}",
+  "session.subagentPosition": "{{index}} / {{total}}",
 
   "prompt.clear": "清除提示词",
   "prompt.submitAction": "提交提示词",
