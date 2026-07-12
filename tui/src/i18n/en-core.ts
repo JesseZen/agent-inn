@@ -445,4 +445,5 @@ export const coreEn = {
   "dialog.retry.previous": "Previous retry option",
   "dialog.retry.next": "Next retry option",
   "dialog.retry.confirm": "Confirm retry option",
+  "dialog.retry.dontShowAgain": "don't show again",
 } as const satisfies Record<string, string>

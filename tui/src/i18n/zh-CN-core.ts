@@ -445,4 +445,5 @@ export const coreZhCN = {
   "dialog.retry.previous": "上一个重试选项",
   "dialog.retry.next": "下一个重试选项",
   "dialog.retry.confirm": "确认重试选项",
+  "dialog.retry.dontShowAgain": "不要再显示",
 } as const satisfies Record<string, string>
