@@ -29,6 +29,7 @@ import { PromptHistoryProvider } from "../../../src/prompt/history"
 import { PromptStashProvider } from "../../../src/prompt/stash"
 import { Prompt, type PromptRef } from "../../../src/component/prompt"
 import { AinnKeymapProvider, registerAinnKeymap } from "../../../src/keymap"
+import { promptOffsetWidth } from "../../../src/prompt/display"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { tmpdir } from "../../fixture/fixture"
 import { Locale } from "../../../src/util/locale"
@@ -121,6 +122,7 @@ async function mountPrompt(input: {
   const pluginRuntime = createPluginRuntime()
   let promptRef!: PromptRef
   let textarea!: TextareaRenderable
+  let keymap!: ReturnType<typeof createDefaultOpenTuiKeymap>
   let submitted = 0
 
   function LocaleSetter() {
@@ -133,7 +135,7 @@ async function mountPrompt(input: {
 
   function Harness() {
     const renderer = useRenderer()
-    const keymap = createDefaultOpenTuiKeymap(renderer)
+    keymap = createDefaultOpenTuiKeymap(renderer)
     const resolvedConfig = createTuiResolvedConfig({
       keybinds: input.keybinds,
       leader_timeout: 1000,
@@ -216,12 +218,115 @@ async function mountPrompt(input: {
     app,
     promptRef: () => promptRef,
     textarea: () => textarea,
+    keymap: () => keymap,
     submitted: () => submitted,
     cleanup() {
       app.renderer.destroy()
     },
   }
 }
+
+test("Chinese attachment markers use display-width extmarks for selection and replacement", async () => {
+  await using tmp = await tmpdir()
+  const image = path.join(tmp.path, "image.png")
+  const pdf = path.join(tmp.path, "document.pdf")
+  await Bun.write(image, new Uint8Array([1]))
+  await Bun.write(pdf, new Uint8Array([1]))
+  const prompt = await mountPrompt({ root: tmp.path, locale: "zh-CN" })
+
+  try {
+    prompt.promptRef().set({ input: "前缀 ", parts: [] })
+    prompt.textarea().cursorOffset = promptOffsetWidth(prompt.textarea().plainText)
+    await prompt.textarea().onPaste?.(new PasteEvent(new TextEncoder().encode(image)))
+    await prompt.textarea().onPaste?.(new PasteEvent(new TextEncoder().encode(pdf)))
+    await wait(() => prompt.promptRef().current.parts.length === 2)
+
+    const parts = prompt.promptRef().current.parts
+    const markers = parts.map((part) => {
+      if (part.type !== "file" || !part.source?.text) throw new Error("expected file marker")
+      return { value: part.source.text.value, start: part.source.text.start, end: part.source.text.end }
+    })
+    expect(markers).toEqual([
+      { value: "[图片 1]", start: promptOffsetWidth("前缀 "), end: promptOffsetWidth("前缀 [图片 1]") },
+      {
+        value: "[PDF 1]",
+        start: promptOffsetWidth("前缀 [图片 1] "),
+        end: promptOffsetWidth("前缀 [图片 1] [PDF 1]"),
+      },
+    ])
+
+    for (const marker of [...markers].reverse()) {
+      prompt.textarea().setSelection(marker.start, marker.end)
+      expect(prompt.textarea().getSelectedText()).toBe(marker.value)
+      prompt.textarea().deleteSelection()
+      prompt.textarea().insertText("替换")
+    }
+    expect(prompt.textarea().plainText).toBe("前缀 替换 替换 ")
+  } finally {
+    prompt.cleanup()
+  }
+})
+
+test("Chinese editor remaps file and agent markers with display-width ranges", async () => {
+  await using tmp = await tmpdir()
+  const editor = path.join(tmp.path, "editor.sh")
+  await Bun.write(editor, '#!/bin/sh\nprintf \'前缀 [图片 1] @代理 后缀\' > "$1"\n')
+  await Bun.$`chmod +x ${editor}`
+  const previousEditor = process.env.EDITOR
+  process.env.EDITOR = editor
+  const prompt = await mountPrompt({ root: tmp.path, locale: "zh-CN" })
+
+  try {
+    prompt.promptRef().set({
+      input: "原始 [图片 1] @代理 ",
+      parts: [
+        {
+          type: "file",
+          mime: "image/png",
+          filename: "image.png",
+          url: "data:image/png;base64,AQ==",
+          source: {
+            type: "file",
+            path: "image.png",
+            text: {
+              start: promptOffsetWidth("原始 "),
+              end: promptOffsetWidth("原始 [图片 1]"),
+              value: "[图片 1]",
+            },
+          },
+        },
+        {
+          type: "agent",
+          name: "代理",
+          source: {
+            start: promptOffsetWidth("原始 [图片 1] "),
+            end: promptOffsetWidth("原始 [图片 1] @代理"),
+            value: "@代理",
+          },
+        },
+      ],
+    })
+    expect(prompt.keymap().dispatchCommand("prompt.editor")).toMatchObject({ ok: true })
+    await wait(() => prompt.textarea().plainText === "前缀 [图片 1] @代理 后缀", 5000)
+
+    expect(prompt.promptRef().current.parts.map((part) => part.type === "file" ? part.source?.text : part.source)).toEqual([
+      {
+        start: promptOffsetWidth("前缀 "),
+        end: promptOffsetWidth("前缀 [图片 1]"),
+        value: "[图片 1]",
+      },
+      {
+        start: promptOffsetWidth("前缀 [图片 1] "),
+        end: promptOffsetWidth("前缀 [图片 1] @代理"),
+        value: "@代理",
+      },
+    ])
+  } finally {
+    prompt.cleanup()
+    if (previousEditor === undefined) delete process.env.EDITOR
+    else process.env.EDITOR = previousEditor
+  }
+})
 
 test("main prompt submits with return and inserts newline with shift return by default", async () => {
   await using tmp = await tmpdir()

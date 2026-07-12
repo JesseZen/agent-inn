@@ -467,11 +467,12 @@ export function Prompt(props: PromptProps) {
 
               if (!virtualText) return part
 
-              const newStart = normalized.indexOf(virtualText)
+              const stringStart = normalized.indexOf(virtualText)
               // if the virtual text is deleted, remove the part
-              if (newStart === -1) return null
+              if (stringStart === -1) return null
 
-              const newEnd = newStart + virtualText.length
+              const newStart = promptOffsetWidth(normalized.slice(0, stringStart))
+              const newEnd = newStart + promptOffsetWidth(virtualText)
 
               if (part.type === "file" && part.source?.text) {
                 return {
@@ -917,12 +918,12 @@ export function Prompt(props: PromptProps) {
           title: language.t("prompt.nextHistory"),
           category: language.t("category.prompt"),
           run() {
-            if (input.cursorOffset !== input.plainText.length) {
+            if (input.cursorOffset !== promptOffsetWidth(input.plainText)) {
               if (
                 input.scrollY + input.visualCursor.visualRow ===
                 Math.max(0, input.editorView.getTotalVirtualLineCount() - 1)
               )
-                input.cursorOffset = input.plainText.length
+                input.cursorOffset = promptOffsetWidth(input.plainText)
               return false
             }
 
@@ -932,7 +933,7 @@ export function Prompt(props: PromptProps) {
             setStore("prompt", item)
             setStore("mode", item.mode ?? "normal")
             restoreExtmarksFromParts(item.parts)
-            input.cursorOffset = input.plainText.length
+            input.cursorOffset = promptOffsetWidth(input.plainText)
           },
         },
       ],
@@ -1260,7 +1261,7 @@ export function Prompt(props: PromptProps) {
     const virtualText = pdf
       ? language.t("prompt.pastePdf", { count: count + 1 })
       : language.t("prompt.pasteImage", { count: count + 1 })
-    const extmarkEnd = extmarkStart + virtualText.length
+    const extmarkEnd = extmarkStart + promptOffsetWidth(virtualText)
     const textToInsert = virtualText + " "
 
     input.insertText(textToInsert)
