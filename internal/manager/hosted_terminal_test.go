@@ -112,7 +112,7 @@ func TestTmuxMainWindowPaneStartCommandForSettings(t *testing.T) {
 			},
 		},
 	})
-	want := []string{"tmux", "-L", "ainn", "list-panes", "-t", "ainn-host:0", "-F", "#{pane_start_command}"}
+	want := []string{"tmux", "-L", "ainn", "list-panes", "-t", "ainn-host:0", "-F", "#{window_index}\t#{pane_start_command}"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}

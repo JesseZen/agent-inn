@@ -175,7 +175,7 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 				return 1
 			}
 		}
-	} else if paneStartCommand, err := runner.Run(tmuxHostCommand(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings))); err != nil {
+	} else if paneStartOutput, err := runner.Run(tmuxHostCommand(manager.TmuxMainWindowPaneStartCommandForSettings(cfg.Settings))); err != nil {
 		if printTmuxTraceWriteError(stderr, err) {
 			return 1
 		}
@@ -190,13 +190,30 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 			fmt.Fprintf(stderr, "failed to create main tmux window: %v\n", err)
 			return 1
 		}
-	} else if !strings.Contains(paneStartCommand, exe) {
-		if _, err := runner.Run(tmuxHostCommand(manager.TmuxRespawnMainWindowCommandForSettings(cfg.Settings, rootCmd))); err != nil {
-			if printTmuxTraceWriteError(stderr, err) {
+	} else {
+		paneStartOutput = strings.TrimSpace(paneStartOutput)
+		windowIndex := tmuxMainWindowIndex
+		paneStartCommand := paneStartOutput
+		if index, command, found := strings.Cut(paneStartOutput, "\t"); found {
+			windowIndex = strings.TrimSpace(index)
+			paneStartCommand = command
+		}
+		if windowIndex != tmuxMainWindowIndex {
+			if _, err := runner.Run(tmuxHostCommand(manager.TmuxCreateMainWindowCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd))); err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to create main tmux window: %v\n", err)
 				return 1
 			}
-			fmt.Fprintf(stderr, "failed to respawn main tmux window: %v\n", err)
-			return 1
+		} else if !strings.Contains(paneStartCommand, exe) {
+			if _, err := runner.Run(tmuxHostCommand(manager.TmuxRespawnMainWindowCommandForSettings(cfg.Settings, rootCmd))); err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to respawn main tmux window: %v\n", err)
+				return 1
+			}
 		}
 	}
 	if _, err := runner.Run(tmuxHostCommand(manager.TmuxResetMainWindowStatusCommandForSettings(cfg.Settings))); err != nil {

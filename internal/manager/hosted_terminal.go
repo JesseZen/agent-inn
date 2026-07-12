@@ -141,7 +141,7 @@ func TmuxAttachCommandForSettings(settings config.Settings) []string {
 }
 
 func TmuxMainWindowPaneStartCommandForSettings(settings config.Settings) []string {
-	return append(tmuxPrefixForSettings(settings), "list-panes", "-t", tmuxMainWindowTargetForSettings(settings), "-F", "#{pane_start_command}")
+	return append(tmuxPrefixForSettings(settings), "list-panes", "-t", tmuxMainWindowTargetForSettings(settings), "-F", "#{window_index}\t#{pane_start_command}")
 }
 
 func TmuxRespawnMainWindowCommandForSettings(settings config.Settings, command []string) []string {

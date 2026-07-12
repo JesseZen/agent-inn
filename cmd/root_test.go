@@ -1632,6 +1632,63 @@ func TestRunRootMainTUIWindowMovesFreshHostWindowToZeroWhenBaseIndexDiffers(t *t
 	}
 }
 
+func TestRunRootMainTUIWindowDoesNotUseNamePrefixAsWindowZero(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+
+	var got [][]string
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "has-session" {
+					return "ok\n", nil
+				}
+				if len(args) > 3 && args[3] == "list-panes" {
+					return "5\tenv " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run in tmux bootstrap parent: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	for _, call := range got {
+		if len(call) > 3 && call[3] == "respawn-pane" {
+			t.Fatalf("respawned a name-prefix match instead of creating window 0: %#v", got)
+		}
+	}
+	created := false
+	for _, call := range got {
+		if len(call) > 3 && call[3] == "new-window" {
+			created = true
+			break
+		}
+	}
+	if !created {
+		t.Fatalf("expected a new main window after resolving actual index 5: %#v", got)
+	}
+}
+
 func TestRunRootMainTUIWindowOutsideTmuxSelectsWindowZeroThenAttaches(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
@@ -1673,7 +1730,7 @@ func TestRunRootMainTUIWindowOutsideTmuxSelectsWindowZeroThenAttaches(t *testing
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysCommand("ainn-test"),
 		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
@@ -1730,7 +1787,7 @@ func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		tmuxResetMainWindowStatusSocketCommand("/tmp/tmux-1000/ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysSocketCommand("/tmp/tmux-1000/ainn-test"),
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
@@ -1787,7 +1844,7 @@ func TestRunRootMainTUIWindowUsesCurrentSocketPathInsideTmux(t *testing.T) {
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/custom/ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-S", "/tmp/custom/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/custom/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		tmuxResetMainWindowStatusSocketCommand("/tmp/custom/ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysSocketCommand("/tmp/custom/ainn-test"),
 		{"tmux", "-S", "/tmp/custom/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
@@ -1847,7 +1904,7 @@ func TestRunRootMainTUIWindowFailsWhenInsideTmuxClientPaneIsMissing(t *testing.T
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		tmuxResetMainWindowStatusSocketCommand("/tmp/tmux-1000/ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysSocketCommand("/tmp/tmux-1000/ainn-test"),
 		{"tmux", "-S", "/tmp/tmux-1000/ainn-test", "list-clients", "-F", "#{client_name}\t#{pane_id}"},
@@ -2010,7 +2067,7 @@ func TestRunRootMainTUIWindowRecreatesMissingMainWindowOnExistingHost(t *testing
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host:0", "-n", "ainn", "-P", "-F", "#{window_id}", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
 		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysCommand("ainn-test"),
@@ -2063,7 +2120,7 @@ func TestRunRootMainTUIWindowRespawnsWindowZeroWhenPaneCommandDiffers(t *testing
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"},
+		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
 		{"tmux", "-L", "ainn-test", "respawn-pane", "-k", "-t", "ainn-test-host:0", "env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", dir, "--manager-port", "19090"},
 		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysCommand("ainn-test"),
@@ -2110,7 +2167,7 @@ func TestRunRootMainTUIWindowAbortsWhenMainWindowInspectFailsWithoutMissingWindo
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}\n"
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{window_index}\t#{pane_start_command}\n"
 	if string(got) != want {
 		t.Fatalf("expected bootstrap to stop after list-panes, got %q want %q", string(got), want)
 	}
@@ -2268,7 +2325,7 @@ func TestRunRootMainTUIWindowLogsFailedCommandBeforeReturningError(t *testing.T)
 	want := []tmuxTraceView{
 		{Argv: []string{"tmux", "-V"}, Stdout: "tmux 3.6b\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
-		{Argv: []string{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{pane_start_command}"}, Stdout: "env AINN_TMUX_ROOT_CHILD=1 " + fakeTmuxCurrentExecutable(t) + "\n", Stderr: "", Err: "", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"}, Stdout: "env AINN_TMUX_ROOT_CHILD=1 " + fakeTmuxCurrentExecutable(t) + "\n", Stderr: "", Err: "", HasDuration: true},
 		{Argv: tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: tmuxExtendedKeysCommand("ainn-test"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
@@ -2490,7 +2547,7 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}\n-L ainn-test set-window-option -t ainn-test-host:0 -u window-status-format ; set-window-option -t ainn-test-host:0 -u window-status-current-format\n-L ainn-test set-option -s extended-keys always ; set-option -s extended-keys-format csi-u ; set-option -s terminal-features[3] xterm*:extkeys\n-L ainn-test select-window -t ainn-test-host:0\n"
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{window_index}\t#{pane_start_command}\n-L ainn-test set-window-option -t ainn-test-host:0 -u window-status-format ; set-window-option -t ainn-test-host:0 -u window-status-current-format\n-L ainn-test set-option -s extended-keys always ; set-option -s extended-keys-format csi-u ; set-option -s terminal-features[3] xterm*:extkeys\n-L ainn-test select-window -t ainn-test-host:0\n"
 	if string(got) != want {
 		t.Fatalf("expected bootstrap to stop after select-window, got %q want %q", string(got), want)
 	}
@@ -2650,7 +2707,7 @@ func TestRunRootMainTUIWindowWritesHumanTraceToStderr(t *testing.T) {
 	for _, want := range []string{
 		"tmux trace: tmux -V",
 		`stdout="tmux 3.6b\n"`,
-		"tmux trace: tmux -L ainn-test list-panes -t ainn-test-host:0 -F #{pane_start_command}",
+		"tmux trace: tmux -L ainn-test list-panes -t ainn-test-host:0 -F #{window_index}\t#{pane_start_command}",
 		"tmux trace: tmux -L ainn-test select-window -t ainn-test-host:0",
 		"tmux trace: tmux -L ainn-test attach-session -t ainn-test-host",
 		"duration_ms=",
