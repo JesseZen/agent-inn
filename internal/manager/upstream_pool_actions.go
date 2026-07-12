@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/jesse/agent-inn/internal/config"
 )
 
 func (m *Manager) handleUpstreamPoolSwitch(rw http.ResponseWriter, r *http.Request, poolName string) {
@@ -39,5 +41,32 @@ func (m *Manager) handleUpstreamPoolSwitch(rw http.ResponseWriter, r *http.Reque
 		writeJSON(rw, status, map[string]any{"error": redactedErrorMessage(err)})
 		return
 	}
+	writeJSON(rw, http.StatusOK, m.upstreamPoolSummary(poolName))
+}
+
+func (m *Manager) handleUpstreamPoolProbe(rw http.ResponseWriter, _ *http.Request, poolName string) {
+	m.failoverMu.Lock()
+	m.mu.RLock()
+	pool := m.config.UpstreamPools[poolName]
+	attached := false
+	for _, worker := range m.config.Workers {
+		if worker.UpstreamPool == poolName {
+			attached = true
+			break
+		}
+	}
+	m.mu.RUnlock()
+	now := m.clock()
+	if pool.Mode == config.UpstreamPoolModeActive && attached {
+		for _, upstreamName := range pool.Upstreams {
+			key := poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}
+			schedule := m.probeSchedules[key]
+			schedule.NextProbeAt = now
+			schedule.Reason = ProbeScheduleManual
+			m.probeSchedules[key] = schedule
+		}
+	}
+	m.failoverMu.Unlock()
+	m.probeAllUpstreams(m.probeContext)
 	writeJSON(rw, http.StatusOK, m.upstreamPoolSummary(poolName))
 }

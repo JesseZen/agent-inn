@@ -106,6 +106,10 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 			m.handleUpstreamPoolSwitch(rw, r, name)
 			return
 		}
+		if r.Method == http.MethodPost && parts[1] == "probe" {
+			m.handleUpstreamPoolProbe(rw, r, name)
+			return
+		}
 		http.NotFound(rw, r)
 		return
 	}

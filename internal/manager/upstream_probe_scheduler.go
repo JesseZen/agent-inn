@@ -80,6 +80,7 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 		if !exists || previous.Fingerprint != spec.Fingerprint || !slices.Equal(previous.Pools, spec.Pools) {
 			m.probeGenerations[spec.Key]++
 			spec.Generation = m.probeGenerations[spec.Key]
+			delete(m.pendingProbes, spec.Key)
 			for _, poolName := range previous.Pools {
 				m.invalidatePoolReadinessLocked(poolName, previous.Upstream)
 			}
@@ -105,7 +106,7 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 	for _, listed := range specs {
 		spec := m.desiredProbes[listed.Key]
 		if inFlight, exists := m.inFlightProbes[spec.Key]; exists {
-			if spec.Due && (inFlight.Generation != spec.Generation || inFlight.Fingerprint != spec.Fingerprint) {
+			if spec.Due && (spec.Reason == ProbeScheduleManual || inFlight.Generation != spec.Generation || inFlight.Fingerprint != spec.Fingerprint) {
 				m.pendingProbes[spec.Key] = spec
 			}
 			continue
@@ -174,37 +175,14 @@ func (m *Manager) buildProbeSpecifications() ([]probeSpec, map[string]struct{}, 
 			continue
 		}
 		for _, upstreamName := range pool.Upstreams {
-			profile := profiles[upstreamName]
-			runtime, err := upstream.ResolveRuntime(upstreamName, profile)
+			built, err := buildProbeSpecification(upstreamName, profiles[upstreamName], proxyURL)
 			if err != nil {
 				return nil, nil, err
 			}
-			compiled, err := upstream.Compile(runtime)
-			if err != nil {
-				return nil, nil, err
-			}
-			credentialHash := sha256.Sum256([]byte(compiled.AuthorizationHeader))
-			credentialFingerprint := hex.EncodeToString(credentialHash[:])
-			model := strings.TrimSpace(profile.ProtocolProbe.Model)
-			fingerprintHash := sha256.Sum256([]byte(strings.Join([]string{
-				compiled.BaseURL.String(),
-				string(compiled.APIFormat),
-				credentialFingerprint,
-				model,
-				proxyURL,
-			}, probeFingerprintSeparator)))
-			key := probeExecutionKey{Upstream: upstreamName, ProxyURL: proxyURL}
+			key := built.Key
 			spec := specsByKey[key]
 			if spec.Upstream == "" {
-				spec = probeSpec{
-					Key:                   key,
-					Upstream:              upstreamName,
-					ProxyURL:              proxyURL,
-					Compiled:              compiled,
-					CredentialFingerprint: credentialFingerprint,
-					Model:                 model,
-					Fingerprint:           hex.EncodeToString(fingerprintHash[:]),
-				}
+				spec = built
 			}
 			spec.Pools = append(spec.Pools, poolName)
 			schedule, scheduled := m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}]
@@ -238,6 +216,29 @@ func (m *Manager) buildProbeSpecifications() ([]probeSpec, map[string]struct{}, 
 		specs = append(specs, specsByKey[key])
 	}
 	return specs, pooled, nil
+}
+
+func buildProbeSpecification(upstreamName string, profile config.UpstreamProfile, proxyURL string) (probeSpec, error) {
+	runtime, err := upstream.ResolveRuntime(upstreamName, profile)
+	if err != nil {
+		return probeSpec{}, err
+	}
+	compiled, err := upstream.Compile(runtime)
+	if err != nil {
+		return probeSpec{}, err
+	}
+	credentialHash := sha256.Sum256([]byte(compiled.AuthorizationHeader))
+	credentialFingerprint := hex.EncodeToString(credentialHash[:])
+	model := strings.TrimSpace(profile.ProtocolProbe.Model)
+	fingerprintHash := sha256.Sum256([]byte(strings.Join([]string{
+		compiled.BaseURL.String(), string(compiled.APIFormat), credentialFingerprint, model, proxyURL,
+	}, probeFingerprintSeparator)))
+	key := probeExecutionKey{Upstream: upstreamName, ProxyURL: proxyURL}
+	return probeSpec{
+		Key: key, Upstream: upstreamName, ProxyURL: proxyURL, Compiled: compiled,
+		CredentialFingerprint: credentialFingerprint, Model: model,
+		Fingerprint: hex.EncodeToString(fingerprintHash[:]),
+	}, nil
 }
 
 func (m *Manager) startProbeLocked(spec probeSpec) {
