@@ -109,6 +109,37 @@ func TestSyncCodexProfileFilesUsesDerivedWorkerProfile(t *testing.T) {
 	}
 }
 
+func TestSyncGrokConfigWritesWorkerProxyModels(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Config{
+		Settings: config.Settings{StateDir: filepath.Join(home, "state")},
+		Workers: map[string]config.WorkerConfig{
+			"worker-main": {Port: 11199, Upstream: "openai", Launcher: "grok"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{"openai": {BaseURL: "https://api.openai.com/v1"}},
+	}
+
+	if err := syncGrokConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "state", "grok-home", ".grok", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got grokConfig
+	if err := toml.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := grokConfig{
+		Model: map[string]grokModel{
+			"worker-main": {Model: "grok-4.5", BaseURL: "http://127.0.0.1:11199", Name: "worker-main", EnvKey: "XAI_API_KEY"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestSyncCodexProfileFilesRejectsLongProfileBeforeWriting(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

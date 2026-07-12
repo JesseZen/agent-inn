@@ -7,7 +7,10 @@ import (
 	"github.com/jesse/agent-inn/internal/constants"
 )
 
-const claudeCodeLauncherName = "claudecode"
+const (
+	claudeCodeLauncherName = "claudecode"
+	grokLauncherName       = "grok"
+)
 
 type CodexLaunchOptions struct {
 	Profile             string
@@ -32,6 +35,8 @@ type LaunchOptions struct {
 	Workspace           string
 	AddDirs             []string
 	WorkerPort          int
+	GrokHome            string
+	GrokExecutable      string
 	Model               string
 	LauncherSessionID   string
 	LauncherSessionMode LauncherSessionMode
@@ -70,6 +75,25 @@ func BuildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
 }
 
 func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
+	if opts.Launcher == grokLauncherName {
+		cmd := []string{"env"}
+		if opts.GrokHome != "" {
+			cmd = append(cmd, "HOME="+opts.GrokHome)
+		}
+		executable := opts.GrokExecutable
+		if executable == "" {
+			executable = "grok"
+		}
+		cmd = append(cmd, "XAI_API_KEY=ainn", executable)
+		model := opts.Profile
+		if model == "" {
+			model = opts.Model
+		}
+		if model != "" {
+			cmd = append(cmd, "--model", model)
+		}
+		return cmd, nil
+	}
 	if opts.Launcher == claudeCodeLauncherName {
 		cmd := []string{
 			"env",

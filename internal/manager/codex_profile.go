@@ -18,6 +18,7 @@ const (
 	codexLaunchWireAPI      = "responses"
 	codexProfilePrefix      = "ainn-x-"
 	codexProfileMaxBytes    = 243
+	defaultGrokModel        = "grok-4.5"
 )
 
 var codexPassthroughProfilePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
@@ -31,6 +32,17 @@ type codexProfileEntry struct {
 	Name    string `toml:"name"`
 	BaseURL string `toml:"base_url"`
 	WireAPI string `toml:"wire_api,omitempty"`
+}
+
+type grokConfig struct {
+	Model map[string]grokModel `toml:"model"`
+}
+
+type grokModel struct {
+	Model   string `toml:"model"`
+	BaseURL string `toml:"base_url"`
+	Name    string `toml:"name"`
+	EnvKey  string `toml:"env_key"`
 }
 
 func CodexProfileName(workerID string) (string, error) {
@@ -89,6 +101,37 @@ func syncCodexProfileFiles(cfg config.Config) error {
 		}
 	}
 	return nil
+}
+
+func syncGrokConfig(cfg config.Config) error {
+	models := make(map[string]grokModel)
+	for name, worker := range cfg.Workers {
+		if worker.Launcher != grokLauncherName {
+			continue
+		}
+		model := cfg.Upstreams[worker.Upstream].ProtocolProbe.Model
+		if model == "" {
+			model = defaultGrokModel
+		}
+		models[name] = grokModel{
+			Model:   model,
+			BaseURL: fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, worker.Port),
+			Name:    name,
+			EnvKey:  "XAI_API_KEY",
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	stateDir := cfg.Settings.StateDir
+	if stateDir == "" {
+		stateDir = "~/.ainn"
+	}
+	data, err := toml.Marshal(grokConfig{Model: models})
+	if err != nil {
+		return err
+	}
+	return writeTextFile(filepath.Join(expandHomePath(stateDir), "grok-home", ".grok", "config.toml"), string(data), 0600)
 }
 
 func writeTextFile(path string, text string, mode os.FileMode) error {

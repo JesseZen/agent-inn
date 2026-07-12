@@ -6,7 +6,7 @@ import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { createMemo } from "solid-js"
 
-type Launcher = "codex" | "claudecode"
+type Launcher = "codex" | "claudecode" | "grok"
 
 export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../ui/dialog").useDialog>, sdk: ReturnType<typeof import("../context/sdk").useSDK>["client"], toast: ReturnType<typeof import("../ui/toast").useToast>) {
   const name = await DialogPrompt.show(dialog, "Worker Name", { placeholder: "e.g. worker-main" })
@@ -27,6 +27,11 @@ function LauncherStep(props: { name: string }) {
       title: "Claude Code",
       value: "claudecode",
       description: "claude launcher",
+    },
+    {
+      title: "Grok Build",
+      value: "grok",
+      description: "grok coding agent",
     },
   ]
 

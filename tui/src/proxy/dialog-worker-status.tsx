@@ -15,7 +15,7 @@ import { DialogPoolPicker } from "./dialog-pool-picker"
 
 const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
-const LAUNCHERS = ["codex", "claudecode"] as const
+const LAUNCHERS = ["codex", "claudecode", "grok"] as const
 type Launcher = (typeof LAUNCHERS)[number]
 const REDACTED_PROXY_URL_VALUE = "******"
 
@@ -207,7 +207,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
             <DialogSelect
               title={`Launcher: ${props.worker.name}`}
               options={LAUNCHERS.map((launcher) => ({
-                title: launcher === "claudecode" ? "Claude Code" : "Codex CLI",
+                title: launcher === "claudecode" ? "Claude Code" : launcher === "grok" ? "Grok Build" : "Codex CLI",
                 value: launcher,
                 category: launcher === current ? "Current" : "Options",
               }))}

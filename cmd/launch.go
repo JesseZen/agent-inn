@@ -128,6 +128,8 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	launcher := "codex"
+	grokHome := ""
+	grokExecutable := ""
 	var cfg config.Config
 	configLoaded := false
 	var configLoadErr error
@@ -137,18 +139,37 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		if workerID, workerCfg, ok := workerConfigByPort(cfg, port); ok {
 			launcher = workerCfg.Launcher
 			*profile = workerID
+			if launcher == "grok" {
+				stateDir := cfg.Settings.StateDir
+				if stateDir == "" {
+					stateDir = config.DefaultConfigDir
+				}
+				grokHome = filepath.Join(expandHome(stateDir), "grok-home")
+				candidate := expandHome("~/.grok/bin/grok")
+				if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+					grokExecutable = candidate
+				} else if resolved, lookErr := exec.LookPath("grok"); lookErr == nil {
+					grokExecutable = resolved
+				}
+			}
 		}
 	} else {
 		configLoadErr = err
 	}
+	if launcher == "grok" && grokExecutable == "" {
+		fmt.Fprintln(stderr, "grok launcher is not installed or not executable (expected ~/.grok/bin/grok or grok in PATH)")
+		return 1
+	}
 
 	opts := manager.LaunchOptions{
-		Launcher:   launcher,
-		Profile:    *profile,
-		Workspace:  *workspace,
-		AddDirs:    addDirs,
-		WorkerPort: port,
-		Model:      *model,
+		Launcher:       launcher,
+		Profile:        *profile,
+		Workspace:      *workspace,
+		AddDirs:        addDirs,
+		WorkerPort:     port,
+		GrokHome:       grokHome,
+		GrokExecutable: grokExecutable,
+		Model:          *model,
 	}
 	if *mode == modeHostedTerminal {
 		if !configLoaded {
@@ -318,7 +339,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
 		reopenOpts.Model = session.Model
 		if session.LauncherSessionID == "" {
-			if session.TurnGeneration > 0 && workerCfg.Launcher != "claudecode" {
+			if session.TurnGeneration > 0 && workerCfg.Launcher == "codex" {
 				fmt.Fprintf(stderr, "hosted session %q is stale and has no launcher session id\n", sessionID)
 				return 1
 			}

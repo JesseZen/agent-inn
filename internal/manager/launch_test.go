@@ -107,6 +107,31 @@ func TestBuildClaudeCodeExternalLaunchKeepsAgentView(t *testing.T) {
 	}
 }
 
+func TestBuildGrokLaunchCommandUsesWorkerProxy(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:       "grok",
+		Profile:        "worker-main",
+		GrokHome:       "/tmp/ainn-grok-home",
+		GrokExecutable: "/Users/test/.grok/bin/grok",
+		WorkerPort:     11199,
+		Model:          "worker-main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		"HOME=/tmp/ainn-grok-home",
+		"XAI_API_KEY=ainn",
+		"/Users/test/.grok/bin/grok",
+		"--model",
+		"worker-main",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected grok launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
+
 func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "codex",

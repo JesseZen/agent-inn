@@ -207,6 +207,14 @@ Leaving `api_format` empty or unset = native Responses API passthrough, no trans
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `launcher` defaults to `"codex"`, and `log_level` defaults to `"simple"`.
 
+`launcher: grok` starts the installed xAI Grok Build CLI with an AINN-managed
+worker URL. AINN writes an isolated Grok model configuration under the
+configured state directory and sets `XAI_API_KEY=ainn`; the worker replaces
+that token with the selected upstream API key. Grok Build login and user
+configuration remain outside AINN. Basic launch, hosted terminal, rename,
+delete, and worker changes are supported; Grok-specific turn status and resume
+tracking are not.
+
 `upstream_pool` is optional. A pool keeps its members in priority order: the Manager opens a member's circuit after qualified upstream failures, hot-switches the pool's workers to the next healthy member, and automatically returns to the preferred member after recovery. `stream_timeouts` can set the first SSE byte and SSE idle limits for an upstream. `protocol_probe.model` enables a low-output streaming request that verifies the upstream's configured API protocol; without it, AINN uses the lightweight base URL probe.
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
