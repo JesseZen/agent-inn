@@ -24,7 +24,13 @@ type BatchListOption =
       batch: BatchRun
     }
 
-export function DialogBatch() {
+export type BatchSessionLauncher = typeof launchProxySession
+
+type DialogBatchProps = {
+  launchSession?: BatchSessionLauncher
+}
+
+export function DialogBatch(props: DialogBatchProps = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
@@ -53,7 +59,7 @@ export function DialogBatch() {
 
   async function launchVariant(batch: BatchRun, variant: BatchVariant, hostedTerminalAttachMode: HostedTerminalAttachMode) {
     const settings = await sdk.client.getSettings()
-    await launchProxySession({
+    await (props.launchSession ?? launchProxySession)({
       executable: import.meta.env?.AINN_EXECUTABLE || undefined,
       workerPort: batch.worker_port,
       profile: batch.worker_name,
@@ -133,7 +139,7 @@ export function DialogBatch() {
       await launchVariant(batch, variant, "setup-only")
     }
     if (batch.variants.length > 0) await launchVariant(batch, batch.variants[0], "open")
-    dialog.replace(() => <DialogBatchRun batch={batch} />)
+    dialog.replace(() => <DialogBatchRun batch={batch} launchSession={props.launchSession} />)
   }
 
   return (
@@ -147,13 +153,13 @@ export function DialogBatch() {
           createBatch()
           return
         }
-        dialog.replace(() => <DialogBatchRun batch={selected.batch} />)
+        dialog.replace(() => <DialogBatchRun batch={selected.batch} launchSession={props.launchSession} />)
       }}
     />
   )
 }
 
-export function DialogBatchRun(props: { batch: BatchRun }) {
+export function DialogBatchRun(props: { batch: BatchRun; launchSession?: BatchSessionLauncher }) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
@@ -177,7 +183,7 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
 
   async function openVariant(variant: BatchVariant) {
     const settings = await sdk.client.getSettings()
-    await launchProxySession({
+    await (props.launchSession ?? launchProxySession)({
       executable: import.meta.env?.AINN_EXECUTABLE || undefined,
       workerPort: props.batch.worker_port,
       profile: props.batch.worker_name,
@@ -211,7 +217,7 @@ export function DialogBatchRun(props: { batch: BatchRun }) {
             if (!confirmed) return
             try {
               await sdk.client.deleteBatch(props.batch.id)
-              dialog.replace(() => <DialogBatch />)
+              dialog.replace(() => <DialogBatch launchSession={props.launchSession} />)
             } catch (err) {
               await DialogAlert.show(dialog, "Delete batch failed", String(err instanceof Error ? err.message : err))
             }

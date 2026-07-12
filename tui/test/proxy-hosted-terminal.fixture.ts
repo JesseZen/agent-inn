@@ -75,7 +75,7 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
 
   const events = createEventSource()
   const calls = createFetch(override)
-  let api: TuiPluginApi | undefined
+  let api!: TuiPluginApi
   let pluginStarts = 0
   let started!: () => void
   const ready = new Promise<void>((resolve) => {

@@ -1,21 +1,6 @@
-import { afterEach, expect, mock, test } from "bun:test"
+import { expect, test } from "bun:test"
 import { activeHostedSession, defaultWorker, json, mountHostedTerminalApp, staleHostedSessionA, staleHostedSessionB, wait } from "./proxy-hosted-terminal.fixture"
 import type { HostedSessionSummary } from "../src/proxy/backend"
-
-afterEach(() => {
-  mock.restore()
-})
-
-function installLaunchMock() {
-  mock.module("../src/proxy/launch", () => ({
-    async launchProxySession() {
-      return true
-    },
-    async setupHostedTerminalSession() {
-      return true
-    },
-  }))
-}
 
 async function openBulkActions(app: Awaited<ReturnType<typeof mountHostedTerminalApp>>) {
   await app.openHostedTerminalPicker()
@@ -79,7 +64,6 @@ test("bulk session actions delete every selected hosted session", async () => {
 })
 
 test("bulk session actions rebind every selected session to one compatible worker", async () => {
-  installLaunchMock()
   const localWorker = { ...defaultWorker, id: "local-cli", name: "local-cli", port: 11200 }
   const patches: Array<{ session_id: string; worker_id: string }> = []
   let sessions: HostedSessionSummary[] = [staleHostedSessionA, staleHostedSessionB]
@@ -125,7 +109,6 @@ test("bulk session actions rebind every selected session to one compatible worke
 })
 
 test("bulk session actions reject changing a running session worker", async () => {
-  installLaunchMock()
   const runningSession = { ...activeHostedSession, turn_state: "running" as const }
   const patches: Array<{ session_id: string; worker_id: string }> = []
   const app = await mountHostedTerminalApp(async (url, request) => {

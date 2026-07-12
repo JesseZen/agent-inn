@@ -517,13 +517,8 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{}
 	for name, profile := range m.upstreamProfileSnapshot() {
-		runtime, _ := upstream.Resolve(name, profile)
-		out[name] = map[string]any{
-			"name":        name,
-			"base_url":    profile.BaseURL,
-			"has_api_key": runtime.APIKey != "",
-			"api_format":  profile.APIFormat,
-		}
+		runtime, _ := upstream.ResolveWithDisplayName(name, profile.Name, profile)
+		out[name] = runtime.Redacted()
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"upstreams": out})
 }

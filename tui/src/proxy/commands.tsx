@@ -1,15 +1,15 @@
 import type { TuiPluginApi } from "@agent-inn/plugin/tui"
 import { DialogSettings } from "./dialog-settings"
 import { DialogLogs } from "./dialog-logs"
-import { DialogTopology } from "./dialog-topology"
+import { DialogDashboard, type DashboardSnapshot } from "./dialog-dashboard"
 import { DialogUpstream } from "./dialog-upstream"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { DialogWorkers } from "./dialog-workers"
 import { DialogLaunch } from "./dialog-launch"
-import { DialogBatch } from "./dialog-batch"
+import { DialogBatch, type BatchSessionLauncher } from "./dialog-batch"
 import { DialogStatus } from "./dialog-status"
 
-export function registerProxyCommands(api: TuiPluginApi) {
+export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSessionLauncher?: BatchSessionLauncher } = {}) {
   return api.keymap.registerLayer({
     commands: [
       {
@@ -91,17 +91,19 @@ export function registerProxyCommands(api: TuiPluginApi) {
         category: "Proxy",
         slashName: "batch",
         run() {
-          api.ui.dialog.replace(() => <DialogBatch />)
+          api.ui.dialog.replace(() => <DialogBatch launchSession={dependencies.batchSessionLauncher} />)
         },
       },
       {
         namespace: "palette",
-        name: "proxy.topology",
-        title: "View topology",
+        name: "proxy.dashboard",
+        title: "View relationship dashboard",
         category: "Proxy",
-        slashName: "topology",
+        slashName: "dashboard",
+        slashAliases: ["topology"],
         run() {
-          api.ui.dialog.replace(() => <DialogTopology />)
+          const snapshot: DashboardSnapshot = { state: null, scrollTop: 0 }
+          api.ui.dialog.replace(() => <DialogDashboard snapshot={snapshot} />)
         },
       },
     ],

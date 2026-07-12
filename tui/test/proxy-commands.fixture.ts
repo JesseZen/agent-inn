@@ -21,6 +21,7 @@ import {
   type RedactedUpstream,
   type WorkerSummary,
 } from "../src/proxy/backend"
+import type { ProxyLaunchOptions } from "../src/proxy/launch"
 
 type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal" | "metrics"> & {
   launch?: Partial<ProxySettings["launch"]>
@@ -59,11 +60,15 @@ type ProxyHarnessInput = {
   upstreams?: HarnessUpstream[]
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
+  batchSessionLauncher?: (opts: ProxyLaunchOptions) => Promise<boolean>
   hostedSessions?: HostedSessionSummary[]
+  hostedSessionsError?: string
   patchWorkerDelayMs?: number
   strictModuleWorkerIDs?: boolean
   metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
+  width?: number
+  height?: number
 }
 
 function createProxyHarness(input: ProxyHarnessInput = {}) {
@@ -139,6 +144,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       },
     ],
   ])
+  if (input.workers) workers.clear()
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions = [...(input.hostedSessions ?? [])]
   const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
@@ -313,6 +319,10 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
     if (url.pathname === "/api/hosted-sessions") {
       calls.listHostedSessions += 1
+      if (input.hostedSessionsError) {
+        await Bun.sleep(25)
+        return json({ error: input.hostedSessionsError }, { status: 500 })
+      }
       return json({ sessions: hostedSessions })
     }
     if (url.pathname.startsWith("/api/hosted-sessions/")) {
@@ -669,6 +679,28 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     fetch: override,
     hostedSessions,
     metrics,
+    replaceDashboardData(next: {
+      workers: HarnessWorker[]
+      upstreams: HarnessUpstream[]
+      hostedSessions: HostedSessionSummary[]
+    }) {
+      providers.clear()
+      for (const upstream of next.upstreams) {
+        const id = upstream.id ?? upstream.name
+        providers.set(id, { ...upstream, id })
+      }
+      workers.clear()
+      for (const worker of next.workers) {
+        const upstreamID = worker.upstream_id ?? worker.upstream.id ?? worker.upstream.name
+        workers.set(worker.id ?? worker.name, {
+          ...worker,
+          id: worker.id ?? worker.name,
+          upstream_id: upstreamID,
+          upstream: { ...worker.upstream, id: worker.upstream.id ?? upstreamID },
+        })
+      }
+      hostedSessions.splice(0, hostedSessions.length, ...next.hostedSessions)
+    },
     emitManagerEvent(type: string, payload: Record<string, unknown> = {}) {
       if (!managerEvents) throw new Error("manager event source not ready")
       managerEvents.enqueue(managerEventEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`))
@@ -683,7 +715,7 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
   const data = path.join(home, ".local", "share", app)
   const cache = path.join(home, ".cache", app)
   const state = path.join(home, ".local", "state", app)
-  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const setup = await createTestRenderer({ width: input.width ?? 80, height: input.height ?? 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   await mkdir(state, { recursive: true })
@@ -712,9 +744,9 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
       events: events.source,
       args: {},
       pluginHost: {
-        async start(input) {
-          api = input.api
-          registerProxyCommands(api)
+        async start(plugin) {
+          api = plugin.api
+          registerProxyCommands(api, { batchSessionLauncher: input.batchSessionLauncher })
           started()
         },
         async dispose() {},
@@ -746,6 +778,10 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
     emitManagerEvent: proxy.emitManagerEvent,
     hostedSessions: proxy.hostedSessions,
     metrics: proxy.metrics,
+    replaceDashboardData(input: Parameters<typeof proxy.replaceDashboardData>[0]) {
+      proxy.replaceDashboardData(input)
+      proxy.emitManagerEvent("config.changed")
+    },
     setup,
     frame() {
       return setup.captureCharFrame()

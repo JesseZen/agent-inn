@@ -1,36 +1,22 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
 import { InputRenderable, TextareaRenderable } from "@opentui/core"
-import { afterEach, expect, mock, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { onMount } from "solid-js"
 import { SDKProvider, useSDK } from "../src/context/sdk"
 import { resolveSlashCommand } from "../src/keymap"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
+import type { ProxyLaunchOptions } from "../src/proxy/launch"
 
 const launchCalls: unknown[] = []
 
 afterEach(() => {
   launchCalls.length = 0
-  mock.restore()
 })
 
-function installLaunchMock() {
-  mock.module("../src/proxy/launch", () => ({
-    createProxyLaunchCommand() {
-      return ["ainn", "launch"]
-    },
-    renderProxyLaunchCommand(command: string[]) {
-      return command.join(" ")
-    },
-    async launchProxySession(opts: unknown) {
-      launchCalls.push(opts)
-      return true
-    },
-    async setupHostedTerminalSession(opts: unknown) {
-      launchCalls.push(opts)
-      return true
-    },
-  }))
+async function recordLaunch(opts: ProxyLaunchOptions) {
+  launchCalls.push(opts)
+  return true
 }
 
 async function loadProxyFixture() {
@@ -50,9 +36,8 @@ async function submitPrompt(app: Awaited<ReturnType<(typeof import("./proxy-comm
 }
 
 test("proxy batch command is registered", async () => {
-  installLaunchMock()
   const { mountProxyApp } = await loadProxyFixture()
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ batchSessionLauncher: recordLaunch })
 
   try {
     await app.render()
@@ -63,9 +48,8 @@ test("proxy batch command is registered", async () => {
 })
 
 test("proxy batch create flow sets up variants before opening one hosted terminal", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ batchSessionLauncher: recordLaunch })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -152,9 +136,11 @@ test("proxy batch create flow sets up variants before opening one hosted termina
 })
 
 test("proxy batch create flow does not inspect tmux windows", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
-  const app = await mountProxyApp({ batchHostedSessionWindowMode: "missing" })
+  const app = await mountProxyApp({
+    batchHostedSessionWindowMode: "missing",
+    batchSessionLauncher: recordLaunch,
+  })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -199,9 +185,8 @@ test("proxy batch create flow does not inspect tmux windows", async () => {
 })
 
 test("proxy batch create flow omits blank count so the backend default applies", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ batchSessionLauncher: recordLaunch })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -238,9 +223,8 @@ test("proxy batch create flow omits blank count so the backend default applies",
 })
 
 test("proxy batch create flow re-prompts invalid variant count before creating", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ batchSessionLauncher: recordLaunch })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -285,7 +269,6 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
 })
 
 test("batch detail shows hosted session states", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
     id: "batch_1",
@@ -311,7 +294,7 @@ test("batch detail shows hosted session states", async () => {
       },
     ],
   }
-  const app = await mountProxyApp({ batches: [batch] })
+  const app = await mountProxyApp({ batches: [batch], batchSessionLauncher: recordLaunch })
   app.hostedSessions.push(
     {
       session_id: "session_1",
@@ -361,7 +344,6 @@ test("batch detail shows hosted session states", async () => {
 })
 
 test("batch detail applies hosted session state events without polling", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
     id: "batch_1",
@@ -380,7 +362,7 @@ test("batch detail applies hosted session state events without polling", async (
       },
     ],
   }
-  const app = await mountProxyApp({ batches: [batch] })
+  const app = await mountProxyApp({ batches: [batch], batchSessionLauncher: recordLaunch })
   app.hostedSessions.push({
     session_id: "session_1",
     session_label: "fix scroll batch_1 #1",
@@ -424,7 +406,6 @@ test("batch detail applies hosted session state events without polling", async (
 })
 
 test("batch detail deletes all variants after confirmation", async () => {
-  installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
   const batch = {
     id: "batch_1",
@@ -443,7 +424,7 @@ test("batch detail deletes all variants after confirmation", async () => {
       },
     ],
   }
-  const app = await mountProxyApp({ batches: [batch] })
+  const app = await mountProxyApp({ batches: [batch], batchSessionLauncher: recordLaunch })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
