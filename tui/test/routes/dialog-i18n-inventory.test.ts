@@ -7,6 +7,7 @@ import { zhCN } from "../../src/i18n/zh-CN"
 // skill, upstream, and error values are intentionally excluded.
 export const dialogInventory = {
   "dialog.agent.native": "native",
+  "dialog.agent.select": "Select agent",
   "dialog.console.loadingOrgs": "Loading orgs...",
   "dialog.console.noOrgs": "No orgs found",
   "dialog.console.switchedOrg": "Switched to {{orgName}}",
@@ -15,12 +16,15 @@ export const dialogInventory = {
   "dialog.mcp.enabled": "Enabled",
   "dialog.mcp.disabled": "Disabled",
   "dialog.mcp.toggle": "toggle",
+  "dialog.mcp.title": "MCPs",
   "dialog.model.recent": "Recent",
   "dialog.model.popularProviders": "Popular providers",
   "dialog.model.select": "Select model",
   "dialog.model.connectProvider": "Connect provider",
   "dialog.model.viewProviders": "View all providers",
   "dialog.model.favorite": "Favorite",
+  "dialog.model.free": "Free",
+  "dialog.model.favoriteDescription": "(Favorite)",
   "dialog.move.loadingDirectories": "Loading project directories...",
   "dialog.move.noDirectories": "No project directories found",
   "dialog.move.current": "Current",
@@ -31,6 +35,10 @@ export const dialogInventory = {
   "dialog.move.new": "new",
   "dialog.move.delete": "delete",
   "dialog.move.refresh": "refresh",
+  "dialog.move.deleting": "Deleting {{directory}}",
+  "dialog.move.confirmDelete": "Press {{shortcut}} again to confirm",
+  "dialog.move.title": "Move session",
+  "dialog.move.loadError": "Could not load project directories",
   "dialog.provider.popular": "Popular",
   "dialog.provider.providers": "Providers",
   "dialog.provider.other": "Other",
@@ -51,6 +59,7 @@ export const dialogInventory = {
   "dialog.provider.zenHelp": "Go to https://opencode.ai/zen to get a key",
   "dialog.provider.goHelp": "Go to https://opencode.ai/go and enable OpenCode Go",
   "dialog.provider.savedCredential": "Saved credential for {{providerID}}. Configure it in ainn.json to use it.",
+  "dialog.provider.goDescription": "Low cost subscription for everyone",
   "dialog.sessionDelete.deleteWorkspace": "Delete workspace",
   "dialog.sessionDelete.deleteDescription": "Delete the workspace and all sessions attached to it.",
   "dialog.sessionDelete.restoreWorkspace": "Restore to new workspace",
@@ -58,6 +67,8 @@ export const dialogInventory = {
   "dialog.sessionDelete.confirm": "Confirm recovery option",
   "dialog.sessionDelete.deleteBroken": "Delete broken session",
   "dialog.sessionDelete.restoreBroken": "Restore broken session",
+  "dialog.sessionDelete.unavailable":
+    "The session \"{{session}}\" could not be deleted because the workspace \"{{workspace}}\" is not available.",
   "dialog.sessionList.createFailed": "Failed to create workspace",
   "dialog.sessionList.deleteWorkspaceFailed": "Failed to delete workspace",
   "dialog.sessionList.switch": "switch",
@@ -68,17 +79,34 @@ export const dialogInventory = {
   "dialog.sessionList.delete": "delete",
   "dialog.sessionList.rename": "rename",
   "dialog.sessionList.deleteFailed": "Failed to delete session",
+  "dialog.sessionList.confirmDelete": "Press {{shortcut}} again to confirm",
   "dialog.skill.category": "Skills",
   "dialog.skill.placeholder": "Search skills...",
   "dialog.stash.title": "Stash",
   "dialog.stash.delete": "delete",
+  "dialog.stash.justNow": "just now",
+  "dialog.stash.minutesAgo": "{{count}}m ago",
+  "dialog.stash.hoursAgo": "{{count}}h ago",
+  "dialog.stash.daysAgo": "{{count}}d ago",
+  "dialog.stash.lines": "~{{count}} lines",
   "dialog.status.noMcp": "No MCP Servers",
   "dialog.status.connected": "Connected",
   "dialog.status.disabled": "Disabled in configuration",
   "dialog.status.noFormatters": "No Formatters",
   "dialog.status.noPlugins": "No Plugins",
+  "dialog.status.title": "Status",
+  "dialog.status.mcpCount": "{{count}} MCP Servers",
+  "dialog.status.connectedNeedsAuth": "Needs authentication (run: ainn mcp auth {{name}})",
+  "dialog.status.lspCount": "{{count}} LSP Servers",
+  "dialog.status.formatterCount": "{{count}} Formatters",
+  "dialog.status.pluginCount": "{{count}} Plugins",
+  "dialog.status.needsAuth": "Needs authentication (run: ainn mcp auth {{name}})",
   "dialog.variant.default": "Default",
   "dialog.variant.select": "Select variant",
+  "dialog.logo.title": "Logo",
+  "dialog.tag.title": "Autocomplete",
+  "dialog.theme.title": "Themes",
+  "dialog.sessionRename.title": "Rename Session",
   "dialog.workspaceCreate.loadFailed": "Failed to load workspace adapters",
   "dialog.workspaceCreate.warpFailed": "Failed to warp session",
   "dialog.workspaceCreate.new": "New workspace",
@@ -89,6 +117,9 @@ export const dialogInventory = {
   "dialog.workspaceCreate.allDescription": "Choose from all workspaces",
   "dialog.workspaceCreate.warp": "Warp",
   "dialog.workspaceCreate.existing": "Existing Workspace",
+  "dialog.workspaceCreate.warpConflictTitle": "Unable to Warp Session",
+  "dialog.workspaceCreate.warpConflictMessage":
+    "Unable to apply file changes to this workspace. It has existing changes that conflict or is based off a different branch. Session has not been warped.",
   "dialog.workspaceList.deleting": "Deleting...",
   "dialog.workspaceList.deleteFailed": "Failed to delete workspace",
   "dialog.workspaceList.delete": "delete",
@@ -97,6 +128,22 @@ export const dialogInventory = {
   "dialog.workspaceUnavailable.restore": "Restore workspace",
   "dialog.workspaceChanges.title": "File Changes Found",
   "dialog.workspaceChanges.message": "Do you want to move these changes with the session?",
+  "dialog.workspaceList.title": "Workspaces",
+  "dialog.workspaceList.confirmDelete": "Delete {{name}}? Press delete again",
+  "dialog.workspaceUnavailable.unavailable":
+    "The workspace is not available. You can cancel or restore it to continue.",
+  "dialog.workspaceUnavailable.title": "Workspace Unavailable",
+  "dialog.workspaceUnavailable.sessionAttached": "This session is attached to a workspace that is no longer available.",
+  "dialog.workspaceUnavailable.restoreQuestion": "Would you like to restore this session into a new workspace?",
+  "dialog.workspaceUnavailable.cancelLabel": "cancel",
+  "dialog.workspaceUnavailable.restoreLabel": "restore",
+  "dialog.workspaceChanges.defaultTitle": "File Changes Found",
+  "dialog.workspaceChanges.defaultMessage": "Do you want to move these changes with the session?",
+  "dialog.workspaceChanges.no": "no",
+  "dialog.workspaceChanges.yes": "yes",
+  "dialog.retry.previous": "Previous retry option",
+  "dialog.retry.next": "Next retry option",
+  "dialog.retry.confirm": "Confirm retry option",
 } as const
 
 function placeholders(value: string) {
@@ -104,7 +151,7 @@ function placeholders(value: string) {
 }
 
 test("dialog source inventory has exact dictionary coverage", () => {
-  expect(Object.keys(dialogInventory)).toHaveLength(90)
+  expect(Object.keys(dialogInventory)).toHaveLength(134)
 
   for (const [key, value] of Object.entries(dialogInventory)) {
     expect((en as Record<string, string>)[key]).toBe(value)
