@@ -63,13 +63,15 @@ func TmuxStartHostCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings), "new-session", "-d", "-s", tmuxHostSessionForSettings(settings))
 }
 
-func TmuxStartHostWithWindowCommandForSettings(settings config.Settings, windowName string, command []string) []string {
+func TmuxStartHostWithWindowCommandForSettings(settings config.Settings, windowName string, workspace string, command []string) []string {
 	args := append(
 		tmuxPrefixForSettings(settings),
 		"new-session", "-d", "-s", tmuxHostSessionForSettings(settings),
-		"-n", windowName,
-		"-P", "-F", "#{window_id}\t#{window_index}",
 	)
+	if workspace != "" {
+		args = append(args, "-c", workspace)
+	}
+	args = append(args, "-n", windowName, "-P", "-F", "#{window_id}\t#{window_index}")
 	return append(args, command...)
 }
 
@@ -86,11 +88,15 @@ func TmuxStartMainWindowHostCommandForSettings(settings config.Settings, windowN
 // TmuxCreateWindowCommand returns the argv that creates a new window in the AINN host
 // running the given command.
 func TmuxCreateWindowCommand(windowName string, command []string) []string {
-	return TmuxCreateWindowCommandForSettings(defaultTmuxSettings(), windowName, command)
+	return TmuxCreateWindowCommandForSettings(defaultTmuxSettings(), windowName, "", command)
 }
 
-func TmuxCreateWindowCommandForSettings(settings config.Settings, windowName string, command []string) []string {
-	args := append(tmuxPrefixForSettings(settings), "new-window", "-t", tmuxHostSessionForSettings(settings), "-n", windowName, "-P", "-F", "#{window_id}")
+func TmuxCreateWindowCommandForSettings(settings config.Settings, windowName string, workspace string, command []string) []string {
+	args := append(tmuxPrefixForSettings(settings), "new-window", "-t", tmuxHostSessionForSettings(settings))
+	if workspace != "" {
+		args = append(args, "-c", workspace)
+	}
+	args = append(args, "-n", windowName, "-P", "-F", "#{window_id}")
 	return append(args, command...)
 }
 

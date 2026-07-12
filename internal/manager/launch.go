@@ -69,11 +69,20 @@ func BuildLaunchCommand(opts LaunchOptions) []string {
 			"env",
 			"ANTHROPIC_BASE_URL=http://" + constants.LocalhostAddr + ":" + strconv.Itoa(opts.WorkerPort),
 			"ANTHROPIC_AUTH_TOKEN=ainn",
-			"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+			constants.ClaudeCodeProviderManagedEnv,
 			"claude",
 		}
 		if opts.LauncherSessionMode == LauncherSessionModeResume {
 			cmd = append(cmd, "--resume", opts.LauncherSessionID)
+		}
+		for _, dir := range opts.AddDirs {
+			if dir == "" {
+				continue
+			}
+			cmd = append(cmd, "--add-dir", dir)
+		}
+		if opts.Model != "" {
+			cmd = append(cmd, "--model", opts.Model)
 		}
 		return cmd
 	}

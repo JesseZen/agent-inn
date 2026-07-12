@@ -4,6 +4,11 @@ package constants
 // LocalhostAddr 是 worker 与 manager 监听/回连的回环地址。
 const LocalhostAddr = "127.0.0.1"
 
+const (
+	ClaudeCodeProviderManagedEnv  = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1"
+	ClaudeCodeDisableAgentViewEnv = "CLAUDE_CODE_DISABLE_AGENT_VIEW=1"
+)
+
 // LockFileName 是 root 进程独占锁文件的文件名，存放在 XDG_RUNTIME_DIR 或回退到 os.TempDir。
 const LockFileName = "ainn.lock"
 

@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -38,7 +39,9 @@ func TestRenderCodexLaunchCommandQuotesArguments(t *testing.T) {
 func TestBuildClaudeCodeLaunchCommandInjectsManagedAnthropicEnv(t *testing.T) {
 	cmd := BuildLaunchCommand(LaunchOptions{
 		Launcher:   "claudecode",
+		AddDirs:    []string{"/tmp/shared"},
 		WorkerPort: 11199,
+		Model:      "claude-opus-4-8",
 	})
 	want := []string{
 		"env",
@@ -46,9 +49,27 @@ func TestBuildClaudeCodeLaunchCommandInjectsManagedAnthropicEnv(t *testing.T) {
 		"ANTHROPIC_AUTH_TOKEN=ainn",
 		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 		"claude",
+		"--add-dir",
+		"/tmp/shared",
+		"--model",
+		"claude-opus-4-8",
 	}
-	if strings.Join(cmd, "\n") != strings.Join(want, "\n") {
+	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("unexpected claude launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
+
+func TestBuildClaudeCodeExternalLaunchKeepsAgentView(t *testing.T) {
+	cmd := BuildLaunchCommand(LaunchOptions{Launcher: "claudecode", WorkerPort: 11199})
+	want := []string{
+		"env",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
+		"ANTHROPIC_AUTH_TOKEN=ainn",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+		"claude",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected external claude launch command:\ngot  %#v\nwant %#v", cmd, want)
 	}
 }
 
@@ -84,7 +105,9 @@ func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 func TestBuildLaunchCommandResumesClaudeCodeSession(t *testing.T) {
 	cmd := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "claudecode",
+		AddDirs:             []string{"/tmp/shared"},
 		WorkerPort:          11199,
+		Model:               "claude-opus-4-8",
 		LauncherSessionID:   "9e98a56c-7224-4bf2-9263-b4e470e9673d",
 		LauncherSessionMode: LauncherSessionModeResume,
 	})
@@ -96,8 +119,12 @@ func TestBuildLaunchCommandResumesClaudeCodeSession(t *testing.T) {
 		"claude",
 		"--resume",
 		"9e98a56c-7224-4bf2-9263-b4e470e9673d",
+		"--add-dir",
+		"/tmp/shared",
+		"--model",
+		"claude-opus-4-8",
 	}
-	if strings.Join(cmd, "\n") != strings.Join(want, "\n") {
+	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("unexpected claude resume command:\ngot  %#v\nwant %#v", cmd, want)
 	}
 }

@@ -65,6 +65,30 @@ func hostedTestLaunchCommand(t *testing.T, configDir string, sessionID string, c
 	return append(env, command...)
 }
 
+func TestHostedSessionLaunchCommandDisablesClaudeDaemon(t *testing.T) {
+	got := hostedSessionLaunchCommand([]string{
+		"env",
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
+		"ANTHROPIC_AUTH_TOKEN=ainn",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+		"claude",
+	}, "/tmp/config", "hs_1", true)
+	want := []string{
+		"env",
+		"AINN_HOSTED_SESSION_ID=hs_1",
+		"AINN_CONFIG_DIR=/tmp/config",
+		"AINN_EXECUTABLE=" + hostedSessionExecutable(),
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
+		"ANTHROPIC_AUTH_TOKEN=ainn",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
+		"CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
+		"claude",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected hosted claude command:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
 func hostedTestAcknowledgeHookCommand(t *testing.T, settings config.Settings, configDir string) []string {
 	t.Helper()
 	exe, err := os.Executable()
@@ -419,7 +443,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
-		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai", "--cd", "/tmp/work")...),
+		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai", "--cd", "/tmp/work")...),
 		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	)
 	if len(got) != len(want) {
@@ -645,7 +669,7 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	want = append(want, manager.TmuxThemeCommandForSettings(cfg.Settings))
 	want = append(want,
 		manager.TmuxSelectWindowCommandForSettings(cfg.Settings, "solve problem A"),
-		manager.TmuxCreateWindowCommandForSettings(cfg.Settings, "solve problem A", launchCmd),
+		manager.TmuxCreateWindowCommandForSettings(cfg.Settings, "solve problem A", "/tmp/work", launchCmd),
 		manager.TmuxAttachCommandForSettings(cfg.Settings),
 	)
 	if !reflect.DeepEqual(got, want) {
@@ -2286,7 +2310,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
 		manager.TmuxAttachCommand(),
 	)
 	if !reflect.DeepEqual(got, want) {
@@ -2381,7 +2405,7 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5")...),
 		manager.TmuxAttachCommand(),
 	)
 	if !reflect.DeepEqual(got, want) {
@@ -2499,6 +2523,7 @@ upstreams:
 		SessionLabel:      "solve problem A",
 		WorkerName:        "claude-main",
 		WorkerPort:        11199,
+		Workspace:         "/tmp/work",
 		LauncherSessionID: "9e98a56c-7224-4bf2-9263-b4e470e9673d",
 	})
 	if err != nil {
@@ -2526,7 +2551,7 @@ upstreams:
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11200", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "ANTHROPIC_BASE_URL=http://127.0.0.1:11200", "ANTHROPIC_AUTH_TOKEN=ainn", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1", "claude", "--resume", "9e98a56c-7224-4bf2-9263-b4e470e9673d")...),
 		manager.TmuxAttachCommand(),
 	)
 	if !reflect.DeepEqual(got, want) {

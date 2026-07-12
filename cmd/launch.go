@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/constants"
 	"github.com/jesse/agent-inn/internal/manager"
 )
 
@@ -313,7 +314,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
 		}
 		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
-		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, launchCmd))
+		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, session.Workspace, launchCmd))
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to reopen tmux window: %v\n", err)
 			return 1
@@ -347,7 +348,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(opts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
-		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, launchCmd))
+		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, opts.Workspace, launchCmd))
 		if err != nil {
 			cleanupIncompleteSession()
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
@@ -414,7 +415,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	}
 	if !reuseFirstWindow {
 		if _, err := runner.Run(manager.TmuxSelectWindowCommandForSettings(settings, windowName)); err != nil {
-			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, launchCmd))
+			windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, windowName, opts.Workspace, launchCmd))
 			if err != nil {
 				cleanupIncompleteSession()
 				fmt.Fprintf(stderr, "failed to create tmux window: %v\n", err)
@@ -720,7 +721,13 @@ func hostedSessionLaunchCommand(command []string, configDir string, sessionID st
 	}
 	env = append(env, "AINN_CONFIG_DIR="+configDir, "AINN_EXECUTABLE="+executable)
 	if len(command) > 0 && command[0] == "env" {
-		return append(env, command[1:]...)
+		for _, arg := range command[1:] {
+			env = append(env, arg)
+			if arg == constants.ClaudeCodeProviderManagedEnv {
+				env = append(env, constants.ClaudeCodeDisableAgentViewEnv)
+			}
+		}
+		return env
 	}
 	return append(env, command...)
 }
