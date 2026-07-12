@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { onMount } from "solid-js"
@@ -78,6 +78,7 @@ test("LanguageProvider keeps the in-memory locale when KV cannot write", async (
   await using tmp = await tmpdir()
   const state = path.join(tmp.path, "state-file")
   await Bun.write(state, "state path is intentionally a file")
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {})
 
   let locale: string | undefined
   let ready = false
@@ -106,7 +107,9 @@ test("LanguageProvider keeps the in-memory locale when KV cannot write", async (
     while (!ready) await Bun.sleep(10)
     await Bun.sleep(300)
     expect(locale).toBe("zh-CN")
+    expect(errorSpy.mock.calls.map(([message]) => message)).toEqual(["Failed to read KV state", "Failed to write KV state"])
   } finally {
+    errorSpy.mockRestore()
     app.renderer.destroy()
   }
 })
