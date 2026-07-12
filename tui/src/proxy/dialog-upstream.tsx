@@ -167,7 +167,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
       },
     })),
   )
-  const deleteAction: DialogSelectOption<string> = {
+  const deleteAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.upstream.delete"),
     value: "delete",
     description: draft().name,
@@ -183,8 +183,8 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
       }
       dialog.pop()
     },
-  }
-  const testAction: DialogSelectOption<string> = {
+  }))
+  const testAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.upstream.test"),
     value: "test",
     description: t("proxy.upstream.probeDescription"),
@@ -200,9 +200,9 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
         toast.error(err)
       }
     },
-  }
+  }))
 
-  return <DialogSelect title={t("proxy.upstream.editTitle", { name: draft().name })} options={[...options(), testAction, deleteAction]} placeholder={t("proxy.upstream.selectField")} footer={<EscHint dialog={dialog} />} />
+  return <DialogSelect title={t("proxy.upstream.editTitle", { name: draft().name })} options={[...options(), testAction(), deleteAction()]} placeholder={t("proxy.upstream.selectField")} footer={<EscHint dialog={dialog} />} />
 }
 
 function describe(field: Field, draft: Draft, t: Translate) {

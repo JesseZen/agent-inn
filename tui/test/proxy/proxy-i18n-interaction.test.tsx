@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import { TextareaRenderable } from "@opentui/core"
 import { mountProxyApp, openWorkerDetail, runCommand, wait, type ProxyApp } from "./../proxy-commands.fixture"
+import { useLanguage, type Locale } from "../../src/context/language"
+import { DialogUpstreamEditor } from "../../src/proxy/dialog-upstream"
 
 function setLocaleEnvironment(locale: string) {
   const previous = { LC_ALL: process.env.LC_ALL, LC_MESSAGES: process.env.LC_MESSAGES, LANG: process.env.LANG }
@@ -65,6 +67,71 @@ test("Proxy command labels react to a runtime locale switch", async () => {
     await wait(() => proxyCommandLabel(app, "proxy.workers").title === "管理工作进程")
 
     expect(proxyCommandLabel(app, "proxy.workers")).toEqual({ title: "管理工作进程", category: "代理" })
+    await Bun.sleep(500)
+  } finally {
+    await app.cleanup()
+    restoreLocale()
+  }
+})
+
+test("mounted upstream actions react to locale and draft name changes", async () => {
+  const restoreLocale = setLocaleEnvironment("en_US.UTF-8")
+  const localeSetters: Array<(locale: Locale) => void> = []
+
+  function UpstreamEditorProbe() {
+    const language = useLanguage()
+    localeSetters[0] = language.setLocale
+    return (
+      <DialogUpstreamEditor
+        id="openai"
+        draft={{
+          name: "openai",
+          base_url: "https://api.openai.com/v1",
+          api_key: "",
+          api_format: "chat_completions",
+          has_api_key: true,
+          protocol_probe_model: "",
+        }}
+        mode="saved"
+      />
+    )
+  }
+
+  const app = await mountProxyApp({ height: 40 })
+  try {
+    app.api.ui.dialog.replace(() => <UpstreamEditorProbe />)
+    await app.render()
+    await waitForFrame(app, "Delete Upstream")
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused upstream name prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("OpenAI Main")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.patchUpstream.length === 1)
+    await wait(() => app.lines().some((line) => line.includes("Delete Upstream") && line.includes("OpenAI Main")))
+
+    const setLocale = localeSetters[0]
+    if (!setLocale) throw new Error("expected mounted language context")
+    setLocale("zh-CN")
+    await app.render()
+    await wait(() => app.lines().some((line) => line.includes("删除上游") && line.includes("OpenAI Main")))
+
+    expect({
+      testAction: app.frame().includes("测试上游"),
+      deleteAction: app.frame().includes("删除上游"),
+      probeDescription: app.frame().includes("探测可达性和认证"),
+      renamedDescription: app.lines().some((line) => line.includes("删除上游") && line.includes("OpenAI Main")),
+      englishAction: app.frame().includes("Delete Upstream"),
+    }).toEqual({
+      testAction: true,
+      deleteAction: true,
+      probeDescription: true,
+      renamedDescription: true,
+      englishAction: false,
+    })
     await Bun.sleep(500)
   } finally {
     await app.cleanup()
