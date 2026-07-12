@@ -126,6 +126,72 @@ type UpstreamProfile struct {
 	ProtocolProbe  ProtocolProbeConfig `yaml:"protocol_probe,omitempty" json:"protocol_probe,omitempty"`
 }
 
+func (c Config) Clone() Config {
+	out := Config{
+		Settings:      c.Settings,
+		Plugins:       make(map[string]PluginDefinition, len(c.Plugins)),
+		Workers:       make(map[string]WorkerConfig, len(c.Workers)),
+		Upstreams:     make(map[string]UpstreamProfile, len(c.Upstreams)),
+		UpstreamPools: make(map[string]UpstreamPool, len(c.UpstreamPools)),
+	}
+	for name, plugin := range c.Plugins {
+		out.Plugins[name] = plugin
+	}
+	for name, worker := range c.Workers {
+		worker.RequestModules = cloneModuleConfigs(worker.RequestModules)
+		worker.Hooks = cloneModuleConfigs(worker.Hooks)
+		out.Workers[name] = worker
+	}
+	for name, profile := range c.Upstreams {
+		out.Upstreams[name] = profile
+	}
+	for name, pool := range c.UpstreamPools {
+		pool.Upstreams = append([]string(nil), pool.Upstreams...)
+		out.UpstreamPools[name] = pool
+	}
+	return out
+}
+
+func cloneModuleConfigs(modules map[string]ModuleConfig) map[string]ModuleConfig {
+	if modules == nil {
+		return nil
+	}
+	out := make(map[string]ModuleConfig, len(modules))
+	for name, module := range modules {
+		module.Params = cloneConfigParams(module.Params)
+		out[name] = module
+	}
+	return out
+}
+
+func cloneConfigParams(params map[string]any) map[string]any {
+	if params == nil {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for name, value := range params {
+		out[name] = cloneConfigValue(value)
+	}
+	return out
+}
+
+func cloneConfigValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return cloneConfigParams(value)
+	case []any:
+		out := make([]any, len(value))
+		for index, item := range value {
+			out[index] = cloneConfigValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), value...)
+	default:
+		return value
+	}
+}
+
 func (c *Config) ApplyDefaults() {
 	if c.Settings.StateDir == "" {
 		c.Settings.StateDir = DefaultConfigDir

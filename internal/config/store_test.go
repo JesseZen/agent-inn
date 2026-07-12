@@ -493,6 +493,75 @@ func TestStoreAsyncWriterDoesNotBlockUpdatesAndPersistsLatest(t *testing.T) {
 	})
 }
 
+func TestStoreOwnsInputConfig(t *testing.T) {
+	input := storeOwnershipFixture()
+	want := storeOwnershipFixture()
+	store := NewStore(filepath.Join(t.TempDir(), "config.yaml"), input)
+
+	input.Plugins["tool_filter"] = PluginDefinition{Kind: "changed"}
+	worker := input.Workers["app"]
+	worker.RequestModules["tool_filter"].Params["blocked_tools"].([]any)[0] = "changed"
+	worker.Hooks["config_patch"].Params["paths"].(map[string]any)["state"] = "changed"
+	input.Workers["app"] = worker
+	input.Upstreams["primary"] = UpstreamProfile{BaseURL: "https://changed.example/v1"}
+	pool := input.UpstreamPools["coding-ha"]
+	pool.Upstreams[0] = "changed"
+	input.UpstreamPools["coding-ha"] = pool
+
+	if got := store.Config(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("store retained aliases to input config:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestStoreConfigReturnsIndependentSnapshot(t *testing.T) {
+	want := storeOwnershipFixture()
+	store := NewStore(filepath.Join(t.TempDir(), "config.yaml"), storeOwnershipFixture())
+	snapshot := store.Config()
+
+	snapshot.Plugins["tool_filter"] = PluginDefinition{Kind: "changed"}
+	worker := snapshot.Workers["app"]
+	worker.RequestModules["tool_filter"].Params["blocked_tools"].([]any)[0] = "changed"
+	worker.Hooks["config_patch"].Params["paths"].(map[string]any)["state"] = "changed"
+	snapshot.Workers["app"] = worker
+	snapshot.Upstreams["primary"] = UpstreamProfile{BaseURL: "https://changed.example/v1"}
+	pool := snapshot.UpstreamPools["coding-ha"]
+	pool.Upstreams[0] = "changed"
+	snapshot.UpstreamPools["coding-ha"] = pool
+
+	if got := store.Config(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("store returned an aliased config snapshot:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func storeOwnershipFixture() Config {
+	cfg := Config{
+		Plugins: map[string]PluginDefinition{
+			"tool_filter": {Kind: PluginKindRequestMiddleware, Source: PluginSourceBuiltin},
+		},
+		Workers: map[string]WorkerConfig{
+			"app": {
+				Port:     6767,
+				Upstream: "primary",
+				RequestModules: map[string]ModuleConfig{
+					"tool_filter": {Enabled: true, Params: map[string]any{"blocked_tools": []any{"shell"}}},
+				},
+				Hooks: map[string]ModuleConfig{
+					"config_patch": {Enabled: true, Params: map[string]any{"paths": map[string]any{"state": "/tmp/state"}}},
+				},
+			},
+		},
+		Upstreams: map[string]UpstreamProfile{
+			"primary": {BaseURL: "https://primary.example/v1", ProtocolProbe: ProtocolProbeConfig{Model: "probe"}},
+			"backup":  {BaseURL: "https://backup.example/v1", ProtocolProbe: ProtocolProbeConfig{Model: "probe"}},
+		},
+		UpstreamPools: map[string]UpstreamPool{
+			"coding-ha": {Upstreams: []string{"primary", "backup"}},
+		},
+	}
+	cfg.ApplyDefaults()
+	return cfg
+}
+
 func TestPoolMemberRequiresProtocolProbeModel(t *testing.T) {
 	cfg := Config{
 		Upstreams: map[string]UpstreamProfile{

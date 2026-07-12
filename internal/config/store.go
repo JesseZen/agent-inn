@@ -66,6 +66,7 @@ func removeStaleTempFiles(path string) error {
 }
 
 func NewStore(path string, cfg Config) *Store {
+	cfg = cfg.Clone()
 	cfg.ApplyDefaults()
 	return &Store{
 		path:   path,
@@ -83,7 +84,7 @@ func (s *Store) Status() Status {
 func (s *Store) Config() Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.config
+	return s.config.Clone()
 }
 
 func (s *Store) Update(fn func(*Config)) {
