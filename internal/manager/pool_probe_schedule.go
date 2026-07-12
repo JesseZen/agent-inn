@@ -49,6 +49,23 @@ func poolProbeFailureDelay(policy config.PoolProbeConfig, consecutiveFailures in
 	return time.Duration(delaySeconds) * time.Second
 }
 
+func (m *Manager) schedulePoolProbeSuccessLocked(poolName string, upstreamName string, now time.Time) {
+	m.mu.RLock()
+	pool := m.config.UpstreamPools[poolName]
+	m.mu.RUnlock()
+	intervalSeconds := pool.Probe.StableIntervalSeconds
+	circuit := m.circuits.Status(poolCircuitKey(poolName, upstreamName), pool.CircuitBreaker)
+	if circuit.State == CircuitStateHalfOpen {
+		intervalSeconds = pool.Probe.AlertIntervalSeconds
+	}
+	key := poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}
+	schedule := m.probeSchedules[key]
+	schedule.NextProbeAt = now.Add(time.Duration(intervalSeconds) * time.Second)
+	schedule.ConsecutiveFailures = 0
+	schedule.Reason = ProbeScheduleStable
+	m.probeSchedules[key] = schedule
+}
+
 func (m *Manager) poolProbeStateLocked(poolName string) PoolProbeState {
 	m.mu.RLock()
 	pool := m.config.UpstreamPools[poolName]

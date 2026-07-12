@@ -41,11 +41,14 @@ func TestManagerUpstreamPoolCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantListed := []upstreamPoolSummary{{
-		ID:             "coding-ha",
-		Name:           "coding-ha",
-		Mode:           config.UpstreamPoolModeActive,
-		Upstreams:      []string{"primary", "backup"},
-		Probe:          config.PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60},
+		ID:        "coding-ha",
+		Name:      "coding-ha",
+		Mode:      config.UpstreamPoolModeActive,
+		Upstreams: []string{"primary", "backup"},
+		Probe: config.PoolProbeConfig{
+			StableIntervalSeconds: config.DefaultPoolProbeStableIntervalSeconds,
+			AlertIntervalSeconds:  config.DefaultPoolProbeAlertIntervalSeconds,
+		},
 		CircuitBreaker: config.CircuitBreakerConfig{FailureThreshold: 3, RecoverySuccessThreshold: 2, RecoveryWaitSeconds: 60},
 		ActiveUpstream: "primary",
 		Workers:        []string{"app"},
@@ -73,7 +76,10 @@ func TestManagerUpstreamPoolCRUD(t *testing.T) {
 		Name:      "research-ha",
 		Mode:      config.UpstreamPoolModeActive,
 		Upstreams: []string{"tertiary", "backup"},
-		Probe:     config.PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60},
+		Probe: config.PoolProbeConfig{
+			StableIntervalSeconds: config.DefaultPoolProbeStableIntervalSeconds,
+			AlertIntervalSeconds:  config.DefaultPoolProbeAlertIntervalSeconds,
+		},
 		CircuitBreaker: config.CircuitBreakerConfig{
 			FailureThreshold: 5, RecoverySuccessThreshold: 4, RecoveryWaitSeconds: 30,
 		},

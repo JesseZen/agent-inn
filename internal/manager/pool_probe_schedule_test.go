@@ -187,7 +187,10 @@ func TestPoolProbeScheduleStates(t *testing.T) {
 }
 
 func TestPoolProbeScheduleFailureDelay(t *testing.T) {
-	policy := config.PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60}
+	policy := config.PoolProbeConfig{
+		StableIntervalSeconds: config.DefaultPoolProbeStableIntervalSeconds,
+		AlertIntervalSeconds:  config.DefaultPoolProbeAlertIntervalSeconds,
+	}
 	got := make([]time.Duration, 0, 5)
 	for failures := 1; failures <= 5; failures++ {
 		got = append(got, poolProbeFailureDelay(policy, failures))
@@ -195,6 +198,55 @@ func TestPoolProbeScheduleFailureDelay(t *testing.T) {
 	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected failure delays:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestPoolProbeScheduleSuccessTransition(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 1, 2, 3, 0, time.UTC)
+	current := now
+	m := newPoolProbeScheduleTestManager(t, now)
+	defer m.Close()
+	m.clock = func() time.Time { return current }
+	pool := m.config.UpstreamPools["coding-ha"]
+	stableKey := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "backup"}
+	halfOpenKey := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}
+
+	m.failoverMu.Lock()
+	m.probeSchedules[stableKey] = poolProbeSchedule{
+		NextProbeAt:         now,
+		ConsecutiveFailures: 3,
+		Reason:              ProbeScheduleRecovery,
+	}
+	m.probeSchedules[halfOpenKey] = poolProbeSchedule{
+		NextProbeAt:         now,
+		ConsecutiveFailures: 5,
+		Reason:              ProbeScheduleRecovery,
+	}
+	for failure := 0; failure < pool.CircuitBreaker.FailureThreshold; failure++ {
+		m.circuits.RecordFailure(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
+	}
+	current = now.Add(time.Duration(pool.CircuitBreaker.RecoveryWaitSeconds) * time.Second)
+	if !m.circuits.Allow(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker) {
+		m.failoverMu.Unlock()
+		t.Fatal("circuit did not enter half-open state")
+	}
+	m.schedulePoolProbeSuccessLocked("coding-ha", "backup", now)
+	m.schedulePoolProbeSuccessLocked("coding-ha", "primary", now)
+	got := []poolProbeSchedule{m.probeSchedules[stableKey], m.probeSchedules[halfOpenKey]}
+	m.failoverMu.Unlock()
+
+	want := []poolProbeSchedule{
+		{
+			NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second),
+			Reason:      ProbeScheduleStable,
+		},
+		{
+			NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeAlertIntervalSeconds) * time.Second),
+			Reason:      ProbeScheduleStable,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected success transitions:\n got %#v\nwant %#v", got, want)
 	}
 }
 
