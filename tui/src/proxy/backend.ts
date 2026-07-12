@@ -48,9 +48,21 @@ export type CircuitBreaker = {
 
 export type CircuitBreakerConfig = CircuitBreaker
 
+export type PoolMode = "active" | "disabled"
+export type PoolProbeState = "paused" | "idle" | "stable" | "alert"
+export type PoolSwitchMode = "normal" | "force"
+export type PoolProbeConfig = {
+  stable_interval_seconds: number
+  alert_interval_seconds: number
+}
+
 export type UpstreamPool = {
   id: string
   name: string
+  mode: PoolMode
+  probe: PoolProbeConfig
+  probe_state: PoolProbeState
+  next_probe_at?: string
   upstreams: string[]
   circuit_breaker: CircuitBreaker
   active_upstream?: string
@@ -109,7 +121,7 @@ export type ProxyConfig = {
   plugins?: Record<string, PluginDefinition>
   workers?: Record<string, WorkerConfig>
   upstreams?: Record<string, UpstreamProfile>
-  upstream_pools?: Record<string, Pick<UpstreamPool, "name" | "upstreams" | "circuit_breaker">>
+  upstream_pools?: Record<string, Pick<UpstreamPool, "name" | "mode" | "upstreams" | "probe" | "circuit_breaker">>
 }
 
 export type MetricsRangeName = "today" | "last_24h"

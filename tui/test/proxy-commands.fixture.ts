@@ -18,6 +18,8 @@ import {
   type ProxyConfigStatus,
   type ProxySettings,
   type PluginDefinition,
+  type PoolProbeConfig,
+  type PoolSwitchMode,
   type UpstreamPool,
   type CircuitBreaker,
   type RedactedUpstream,
@@ -61,6 +63,10 @@ const defaultCircuitBreaker: CircuitBreaker = {
   failure_threshold: 3,
   recovery_success_threshold: 2,
   recovery_wait_seconds: 60,
+}
+const defaultPoolProbe: PoolProbeConfig = {
+  stable_interval_seconds: 900,
+  alert_interval_seconds: 60,
 }
 
 type ProxyHarnessInput = {
@@ -235,7 +241,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     patchWorkerBodies: [] as Array<Record<string, unknown>>,
     patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } } }>,
     createUpstreamPool: [] as Array<{ name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }>,
-    patchUpstreamPool: [] as Array<{ id: string; body: { upstreams?: string[]; circuit_breaker?: CircuitBreaker } }>,
+    patchUpstreamPool: [] as Array<{
+      id: string
+      body: Partial<Pick<UpstreamPool, "mode" | "probe" | "upstreams" | "circuit_breaker">>
+    }>,
+    switchUpstreamPool: [] as Array<{ id: string; body: { upstream: string; mode: PoolSwitchMode } }>,
+    probeUpstreamPool: [] as string[],
     patchSettings: [] as ProxySettingsPatch[],
     deleteWorker: [] as number[],
     deleteUpstream: [] as string[],
@@ -395,6 +406,9 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const pool: UpstreamPool = {
         id: body.name,
         name: body.name,
+        mode: "active",
+        probe: defaultPoolProbe,
+        probe_state: "idle",
         upstreams: [...body.upstreams],
         circuit_breaker: body.circuit_breaker ?? defaultCircuitBreaker,
         workers: [],
@@ -404,14 +418,39 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       return json(pool, { status: 201 })
     }
 
+    const upstreamPoolActionRoute = url.pathname.match(/^\/api\/upstream-pools\/([^/]+)\/(switch|probe)$/)
+    if (upstreamPoolActionRoute && method === "POST") {
+      const id = decodeURIComponent(upstreamPoolActionRoute[1]!)
+      const current = upstreamPools.get(id)!
+      if (upstreamPoolActionRoute[2] === "switch") {
+        const body = JSON.parse(String(init?.body ?? "null")) as { upstream: string; mode: PoolSwitchMode }
+        calls.switchUpstreamPool.push({ id, body })
+        const upstream = providers.get(body.upstream)!
+        for (const worker of workers.values()) {
+          if (worker.upstream_pool === id) {
+            setWorker({ ...worker, upstream_id: upstream.id, upstream })
+          }
+        }
+        const pool = { ...current, active_upstream: body.upstream }
+        upstreamPools.set(id, pool)
+        return json(pool)
+      }
+      calls.probeUpstreamPool.push(id)
+      return json(current)
+    }
+
     const upstreamPoolRoute = url.pathname.match(/^\/api\/upstream-pools\/([^/]+)$/)
     if (upstreamPoolRoute && method === "PATCH") {
       const id = decodeURIComponent(upstreamPoolRoute[1]!)
-      const body = JSON.parse(String(init?.body ?? "null")) as { upstreams?: string[]; circuit_breaker?: CircuitBreaker }
+      const body = JSON.parse(String(init?.body ?? "null")) as Partial<
+        Pick<UpstreamPool, "mode" | "probe" | "upstreams" | "circuit_breaker">
+      >
       calls.patchUpstreamPool.push({ id, body })
       const current = upstreamPools.get(id)!
       const pool = {
         ...current,
+        ...(body.mode !== undefined ? { mode: body.mode } : {}),
+        ...(body.probe !== undefined ? { probe: body.probe } : {}),
         ...(body.upstreams !== undefined ? { upstreams: [...body.upstreams] } : {}),
         ...(body.circuit_breaker !== undefined ? { circuit_breaker: body.circuit_breaker } : {}),
       }

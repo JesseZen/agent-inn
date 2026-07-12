@@ -158,6 +158,9 @@ test("dashboard renders pool hierarchy with inactive members and opens the pool 
       {
         id: "primary",
         name: "primary",
+        mode: "active",
+        probe: { stable_interval_seconds: 900, alert_interval_seconds: 60 },
+        probe_state: "stable",
         upstreams: [openai.id, fallback.id],
         circuit_breaker: {
           failure_threshold: 3,

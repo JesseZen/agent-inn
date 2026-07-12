@@ -93,6 +93,9 @@ test("buildDashboardModel nests pool workers under their active member and keeps
   const pool: UpstreamPool = {
     id: "primary-pool",
     name: "Primary Pool",
+    mode: "active",
+    probe: { stable_interval_seconds: 900, alert_interval_seconds: 60 },
+    probe_state: "stable",
     upstreams: [openai.id, fallback.id],
     circuit_breaker: {
       failure_threshold: 3,

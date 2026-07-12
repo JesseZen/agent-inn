@@ -7,6 +7,10 @@ import { mountProxyApp, openUpstreamManager, openWorkerDetail, runCommand, wait 
 const pool: UpstreamPool = {
   id: "codex-ha",
   name: "codex-ha",
+  mode: "active",
+  probe: { stable_interval_seconds: 900, alert_interval_seconds: 60 },
+  probe_state: "stable",
+  next_probe_at: "2026-07-13T02:45:00Z",
   upstreams: ["openai", "anthropic"],
   circuit_breaker: {
     failure_threshold: 3,

@@ -17,6 +17,10 @@ import type {
   ProxySettingsResponse,
   RedactedUpstream,
   PoolReadiness,
+  PoolMode,
+  PoolProbeConfig,
+  PoolProbeState,
+  PoolSwitchMode,
   CircuitBreaker,
   UpstreamPool,
   UpstreamProbeResult,
@@ -40,6 +44,10 @@ export type {
   ProxySettingsResponse,
   RedactedUpstream,
   PoolReadiness,
+  PoolMode,
+  PoolProbeConfig,
+  PoolProbeState,
+  PoolSwitchMode,
   CircuitBreaker,
   UpstreamPool,
   UpstreamProbeResult,
@@ -175,12 +183,25 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             body: JSON.stringify(input),
           })
         },
-        async patchUpstreamPool(id: string, patch: { upstreams?: string[]; circuit_breaker?: CircuitBreaker }) {
+        async patchUpstreamPool(
+          id: string,
+          patch: Partial<Pick<UpstreamPool, "mode" | "probe" | "upstreams" | "circuit_breaker">>,
+        ) {
           return request<UpstreamPool>(`/api/upstream-pools/${encodeURIComponent(id)}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(patch),
           })
+        },
+        async switchUpstreamPool(id: string, input: { upstream: string; mode: PoolSwitchMode }) {
+          return request<UpstreamPool>(`/api/upstream-pools/${encodeURIComponent(id)}/switch`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          })
+        },
+        async probeUpstreamPool(id: string) {
+          return request<UpstreamPool>(`/api/upstream-pools/${encodeURIComponent(id)}/probe`, { method: "POST" })
         },
         async deleteUpstreamPool(id: string) {
           return request<{ pool: string }>(`/api/upstream-pools/${encodeURIComponent(id)}`, {
