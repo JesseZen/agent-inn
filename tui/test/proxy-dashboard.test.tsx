@@ -36,11 +36,21 @@ function framePoint(frame: string, value: string) {
 }
 
 function selectedLine(frame: string) {
-  return frame.split("\n").find((line) => line.includes("›"))?.trim() ?? ""
+  return (
+    frame
+      .split("\n")
+      .find((line) => line.includes("›"))
+      ?.trim() ?? ""
+  )
 }
 
 function lineForeground(app: Awaited<ReturnType<typeof mountProxyApp>>, value: string) {
-  const line = app.setup.captureSpans().lines.find((item) => item.spans.map((span) => span.text).join("").includes(value))
+  const line = app.setup.captureSpans().lines.find((item) =>
+    item.spans
+      .map((span) => span.text)
+      .join("")
+      .includes(value),
+  )
   const span = line?.spans.find((item) => item.text.includes(value)) ?? line?.spans.find((item) => item.text.trim() !== "")
   if (!span) throw new Error(`missing rendered span for ${value}`)
   return span.fg
@@ -64,8 +74,18 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
   const app = await mountProxyApp({
     hostedSessions: [activeSession, staleSession],
     upstreams: [
-      { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true },
-      { id: "missing-key", name: "missing key upstream", base_url: "https://example.com/v1", has_api_key: false },
+      {
+        id: "openai",
+        name: "openai",
+        base_url: "https://api.openai.com/v1",
+        has_api_key: true,
+      },
+      {
+        id: "missing-key",
+        name: "missing key upstream",
+        base_url: "https://example.com/v1",
+        has_api_key: false,
+      },
     ],
     workers: [
       {
@@ -83,7 +103,11 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
         name: "failed worker",
         upstream_id: "missing-key",
         port: 6768,
-        upstream: { id: "missing-key", name: "missing key upstream", has_api_key: false },
+        upstream: {
+          id: "missing-key",
+          name: "missing key upstream",
+          has_api_key: false,
+        },
         status: "failed",
         snapshot_generation: 1,
         log_level: "simple",
@@ -103,7 +127,89 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
       hierarchy: ["◆ openai", "└─ app", "Active build", "Stale review"].every((label) => frame.includes(label)),
       warnings: ["missing key", "failed"].every((label) => frame.includes(label)),
       oldLegend: frame.includes("■ upstream"),
-    }).toEqual({ title: true, summary: true, hierarchy: true, warnings: true, oldLegend: false })
+    }).toEqual({
+      title: true,
+      summary: true,
+      hierarchy: true,
+      warnings: true,
+      oldLegend: false,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("dashboard renders pool hierarchy with inactive members and opens the pool editor", async () => {
+  const openai = {
+    id: "openai",
+    name: "openai",
+    base_url: "https://api.openai.com/v1",
+    has_api_key: true,
+  }
+  const fallback = {
+    id: "fallback",
+    name: "fallback",
+    base_url: "https://fallback.example/v1",
+    has_api_key: true,
+  }
+  const app = await mountProxyApp({
+    upstreams: [openai, fallback],
+    upstreamPools: [
+      {
+        id: "primary",
+        name: "primary",
+        upstreams: [openai.id, fallback.id],
+        circuit_breaker: {
+          failure_threshold: 3,
+          recovery_success_threshold: 2,
+          recovery_wait_seconds: 60,
+        },
+        active_upstream: openai.id,
+        workers: ["app"],
+        readiness: [],
+      },
+    ],
+    workers: [
+      {
+        id: "app",
+        name: "app",
+        upstream_id: openai.id,
+        upstream_pool: "primary",
+        port: 6767,
+        upstream: openai,
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+    ],
+    hostedSessions: [activeSession],
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.dashboard")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("▣ primary") && app.frame().includes("◆ fallback")
+    })
+    const frame = app.frame()
+    expect({
+      summary: frame.includes("POOLS") && frame.includes("UPSTREAMS"),
+      hierarchy: ["▣ primary", "◆ openai", "└─ app", "Active build", "◆ fallback"].every((value) => frame.includes(value)),
+      active: frame.includes("active"),
+      depths: [framePoint(frame, "▣ primary").x, framePoint(frame, "◆ openai").x, framePoint(frame, "└─ app").x, framePoint(frame, "Active build").x].every(
+        (depth, index, depths) => index === 0 || depth > depths[index - 1]!,
+      ),
+      selected: selectedLine(frame),
+    }).toEqual({
+      summary: true,
+      hierarchy: true,
+      active: true,
+      depths: true,
+      selected: expect.stringContaining("▣ primary"),
+    })
+
+    app.api.keymap.dispatchCommand("dashboard.submit")
+    await app.render()
+    expect(app.frame()).toContain("Edit Pool: primary")
   } finally {
     await app.cleanup()
   }
@@ -111,7 +217,14 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
 
 test("dashboard keeps sibling workers aligned when only one has sessions", async () => {
   const app = await mountProxyApp({
-    upstreams: [{ id: "fastapi", name: "fastapi", base_url: "https://example.com/v1", has_api_key: true }],
+    upstreams: [
+      {
+        id: "fastapi",
+        name: "fastapi",
+        base_url: "https://example.com/v1",
+        has_api_key: true,
+      },
+    ],
     workers: [
       {
         id: "worker-0p02",
@@ -134,14 +247,16 @@ test("dashboard keeps sibling workers aligned when only one has sessions", async
         log_level: "simple",
       },
     ],
-    hostedSessions: [{
-      ...activeSession,
-      session_id: "hs-10dolloars",
-      session_label: "0p02 1",
-      worker_id: "worker-10dolloars",
-      worker_name: "10dolloars",
-      worker_port: 50137,
-    }],
+    hostedSessions: [
+      {
+        ...activeSession,
+        session_id: "hs-10dolloars",
+        session_label: "0p02 1",
+        worker_id: "worker-10dolloars",
+        worker_name: "10dolloars",
+        worker_port: 50137,
+      },
+    ],
   })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
@@ -157,7 +272,9 @@ test("dashboard keeps sibling workers aligned when only one has sessions", async
 })
 
 test("dashboard shows fixed keys and contextual actions for selected rows", async () => {
-  const app = await mountProxyApp({ hostedSessions: [activeSession, staleSession] })
+  const app = await mountProxyApp({
+    hostedSessions: [activeSession, staleSession],
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await wait(async () => {
@@ -193,11 +310,15 @@ test("dashboard shows fixed keys and contextual actions for selected rows", asyn
 })
 
 test("dashboard renders a precise empty state", async () => {
-  const app = await mountProxyApp({ workers: [], upstreams: [], hostedSessions: [] })
+  const app = await mountProxyApp({
+    workers: [],
+    upstreams: [],
+    hostedSessions: [],
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await app.render()
-    expect(app.frame()).toContain("No workers, upstreams, or sessions configured")
+    expect(app.frame()).toContain("No pools, workers, upstreams, or sessions configured")
   } finally {
     await app.cleanup()
   }
@@ -208,8 +329,18 @@ test("dashboard mouse toggles the unbound relationship group", async () => {
     workers: [],
     hostedSessions: [],
     upstreams: [
-      { id: "alpha", name: "Alpha API", base_url: "https://alpha.example/v1", has_api_key: true },
-      { id: "beta", name: "Beta API", base_url: "https://beta.example/v1", has_api_key: true },
+      {
+        id: "alpha",
+        name: "Alpha API",
+        base_url: "https://alpha.example/v1",
+        has_api_key: true,
+      },
+      {
+        id: "beta",
+        name: "Beta API",
+        base_url: "https://beta.example/v1",
+        has_api_key: true,
+      },
     ],
   })
   try {
@@ -220,11 +351,11 @@ test("dashboard mouse toggles the unbound relationship group", async () => {
     })
     const before = app.frame()
 
-    await app.setup.mockMouse.click(...Object.values(framePoint(before, "⚠ UNBOUND 2")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(before, "⚠ UNBOUND 2")) as [number, number]))
     await app.render()
     const expanded = app.frame()
 
-    await app.setup.mockMouse.click(...Object.values(framePoint(expanded, "⚠ UNBOUND 2")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(expanded, "⚠ UNBOUND 2")) as [number, number]))
     await app.render()
     const collapsed = app.frame()
 
@@ -248,16 +379,16 @@ test("dashboard disclosure toggles hierarchy while labels open details", async (
     })
 
     expect(app.frame()).toContain("▾ ◆ openai")
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "▾ ◆ openai")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "▾ ◆ openai")) as [number, number]))
     await app.render()
     expect({
       collapsed: app.frame().includes("▸ ◆ openai") && !app.frame().includes("Active build"),
       upstreamDetail: app.frame().includes("Edit Upstream"),
     }).toEqual({ collapsed: true, upstreamDetail: false })
 
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "▸ ◆ openai")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "▸ ◆ openai")) as [number, number]))
     await app.render()
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "◆ openai")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "◆ openai")) as [number, number]))
     await app.render()
     expect(app.frame()).toContain("Edit Upstream")
 
@@ -266,16 +397,16 @@ test("dashboard disclosure toggles hierarchy while labels open details", async (
       await app.render()
       return app.frame().includes("▾ └─ app")
     })
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "▾ └─ app")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "▾ └─ app")) as [number, number]))
     await app.render()
     expect({
       collapsed: app.frame().includes("▸ └─ app") && !app.frame().includes("Active build"),
       workerDetail: app.frame().includes("Worker actions"),
     }).toEqual({ collapsed: true, workerDetail: false })
 
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "▸ └─ app")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "▸ └─ app")) as [number, number]))
     await app.render()
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "└─ app")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "└─ app")) as [number, number]))
     await app.render()
     expect(app.frame()).toContain("Worker actions")
   } finally {
@@ -284,13 +415,17 @@ test("dashboard disclosure toggles hierarchy while labels open details", async (
 })
 
 test("dashboard restores the same view after closing a detail", async () => {
-  const app = await mountProxyApp({ hostedSessions: [activeSession], width: 140, height: 18 })
+  const app = await mountProxyApp({
+    hostedSessions: [activeSession],
+    width: 140,
+    height: 18,
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await wait(async () => {
       await app.render()
       return app.frame().includes("◆ openai") && app.setup.renderer.currentFocusedRenderable instanceof InputRenderable
-    })
+    }, 5000)
     await app.mockInput.typeText("openai")
     await app.render()
 
@@ -302,7 +437,11 @@ test("dashboard restores the same view after closing a detail", async () => {
       filter: dashboardInput.value,
       scrollTop: dashboardScroll.scrollTop,
       selected: selectedLine(app.frame()),
-      titleColumn: app.frame().split("\n").find((line) => line.includes("Dashboard"))!.indexOf("Dashboard"),
+      titleColumn: app
+        .frame()
+        .split("\n")
+        .find((line) => line.includes("Dashboard"))!
+        .indexOf("Dashboard"),
     }
     app.api.keymap.dispatchCommand("dashboard.submit")
     await app.render()
@@ -314,10 +453,12 @@ test("dashboard restores the same view after closing a detail", async () => {
     await wait(async () => {
       await app.render()
       const restoredInput = app.setup.renderer.currentFocusedRenderable
-      return app.frame().includes("Dashboard") &&
+      return (
+        app.frame().includes("Dashboard") &&
         restoredInput instanceof InputRenderable &&
         restoredInput.value === before.filter &&
         findDashboardScrollBox(app.setup.renderer.root)?.scrollTop === before.scrollTop
+      )
     })
 
     const restoredInput = app.setup.renderer.currentFocusedRenderable
@@ -326,7 +467,11 @@ test("dashboard restores the same view after closing a detail", async () => {
       filter: restoredInput instanceof InputRenderable ? restoredInput.value : null,
       scrollTop: restoredScroll.scrollTop,
       selected: selectedLine(app.frame()),
-      titleColumn: app.frame().split("\n").find((line) => line.includes("Dashboard"))!.indexOf("Dashboard"),
+      titleColumn: app
+        .frame()
+        .split("\n")
+        .find((line) => line.includes("Dashboard"))!
+        .indexOf("Dashboard"),
     }).toEqual({
       filter: before.filter,
       scrollTop: before.scrollTop,
@@ -339,7 +484,9 @@ test("dashboard restores the same view after closing a detail", async () => {
 })
 
 test("dashboard keeps configured relationships visible when hosted sessions fail to load", async () => {
-  const app = await mountProxyApp({ hostedSessionsError: "session refresh failed" })
+  const app = await mountProxyApp({
+    hostedSessionsError: "session refresh failed",
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await wait(async () => {
@@ -400,7 +547,7 @@ test("dashboard rows open existing upstream, worker, and session details", async
       return app.frame().includes("Active build")
     })
 
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "◆ openai")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "◆ openai")) as [number, number]))
     await app.render()
     expect(app.frame()).toContain("Edit Upstream")
 
@@ -409,7 +556,7 @@ test("dashboard rows open existing upstream, worker, and session details", async
       await app.render()
       return app.frame().includes("Active build")
     })
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "└─ app")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "└─ app")) as [number, number]))
     await app.render()
     expect(app.frame()).toContain("Worker actions")
 
@@ -418,7 +565,7 @@ test("dashboard rows open existing upstream, worker, and session details", async
       await app.render()
       return app.frame().includes("Active build")
     })
-    await app.setup.mockMouse.click(...Object.values(framePoint(app.frame(), "Active build")) as [number, number])
+    await app.setup.mockMouse.click(...(Object.values(framePoint(app.frame(), "Active build")) as [number, number]))
     await app.render()
     expect(app.frame()).toContain("Hosted Terminal")
   } finally {
@@ -445,7 +592,10 @@ test("dashboard keyboard navigation expands, collapses, wraps, and submits stabl
     expect({
       selected: selectedLine(app.frame()),
       sessionsVisible: app.frame().includes("Active build"),
-    }).toEqual({ selected: expect.stringContaining("└─ app"), sessionsVisible: false })
+    }).toEqual({
+      selected: expect.stringContaining("└─ app"),
+      sessionsVisible: false,
+    })
     app.api.keymap.dispatchCommand("dashboard.collapse")
     await app.render()
     expect(selectedLine(app.frame())).toContain("◆ openai")
@@ -467,7 +617,10 @@ test("dashboard keyboard navigation expands, collapses, wraps, and submits stabl
     expect({
       selected: selectedLine(app.frame()),
       sessionsVisible: app.frame().includes("Active build"),
-    }).toEqual({ selected: expect.stringContaining("└─ app"), sessionsVisible: true })
+    }).toEqual({
+      selected: expect.stringContaining("└─ app"),
+      sessionsVisible: true,
+    })
     app.api.keymap.dispatchCommand("dashboard.expand")
     await app.render()
     expect(selectedLine(app.frame())).toContain("Active build")
@@ -502,7 +655,11 @@ test("dashboard filtering expands only the matching relationship path", async ()
       selected: selectedLine(frame),
       path: ["◆ openai", "└─ app", "Stale review"].every((value) => frame.includes(value)),
       unrelated: frame.includes("anthropic"),
-    }).toEqual({ selected: expect.stringContaining("Stale review"), path: true, unrelated: false })
+    }).toEqual({
+      selected: expect.stringContaining("Stale review"),
+      path: true,
+      unrelated: false,
+    })
   } finally {
     await app.cleanup()
   }
@@ -568,7 +725,10 @@ test("dashboard page down changes selection and scroll position", async () => {
       await app.render()
       return scroll.scrollTop > 0
     })
-    expect({ selectionChanged: selectedLine(app.frame()) !== before, scrollTop: scroll.scrollTop > 0 }).toEqual({
+    expect({
+      selectionChanged: selectedLine(app.frame()) !== before,
+      scrollTop: scroll.scrollTop > 0,
+    }).toEqual({
       selectionChanged: true,
       scrollTop: true,
     })
@@ -578,8 +738,18 @@ test("dashboard page down changes selection and scroll position", async () => {
 })
 
 test("dashboard reconciles reactive data by stable id and opens new warnings", async () => {
-  const openai = { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true }
-  const anthropic = { id: "anthropic", name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true }
+  const openai = {
+    id: "openai",
+    name: "openai",
+    base_url: "https://api.openai.com/v1",
+    has_api_key: true,
+  }
+  const anthropic = {
+    id: "anthropic",
+    name: "anthropic",
+    base_url: "https://api.anthropic.com/v1",
+    has_api_key: true,
+  }
   const appWorker = {
     id: "app",
     name: "app",
@@ -598,7 +768,10 @@ test("dashboard reconciles reactive data by stable id and opens new warnings", a
     port: 6768,
     upstream: anthropic,
   }
-  const app = await mountProxyApp({ upstreams: [openai, anthropic], workers: [appWorker, cliWorker] })
+  const app = await mountProxyApp({
+    upstreams: [openai, anthropic],
+    workers: [appWorker, cliWorker],
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await wait(async () => {
@@ -609,17 +782,28 @@ test("dashboard reconciles reactive data by stable id and opens new warnings", a
     await app.render()
     expect(selectedLine(app.frame())).toContain("◆ openai")
 
-    app.replaceDashboardData({ upstreams: [openai, anthropic], workers: [appWorker, { ...cliWorker, status: "failed" }], hostedSessions: [] })
+    app.replaceDashboardData({
+      upstreams: [openai, anthropic],
+      workers: [appWorker, { ...cliWorker, status: "failed" }],
+      hostedSessions: [],
+    })
     await wait(async () => {
       await app.render()
       return app.frame().includes("└─ cli")
     })
-    expect({ selected: selectedLine(app.frame()), warningExpanded: app.frame().includes("└─ cli") }).toEqual({
+    expect({
+      selected: selectedLine(app.frame()),
+      warningExpanded: app.frame().includes("└─ cli"),
+    }).toEqual({
       selected: expect.stringContaining("◆ openai"),
       warningExpanded: true,
     })
 
-    app.replaceDashboardData({ upstreams: [anthropic], workers: [{ ...cliWorker, status: "failed" }], hostedSessions: [] })
+    app.replaceDashboardData({
+      upstreams: [anthropic],
+      workers: [{ ...cliWorker, status: "failed" }],
+      hostedSessions: [],
+    })
     await wait(async () => {
       await app.render()
       return !app.frame().includes("◆ openai")
@@ -631,8 +815,18 @@ test("dashboard reconciles reactive data by stable id and opens new warnings", a
 })
 
 test("dashboard drags workers and upstreams through stable upstream ids", async () => {
-  const openai = { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true }
-  const anthropic = { id: "anthropic-id", name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true }
+  const openai = {
+    id: "openai",
+    name: "openai",
+    base_url: "https://api.openai.com/v1",
+    has_api_key: true,
+  }
+  const anthropic = {
+    id: "anthropic-id",
+    name: "anthropic",
+    base_url: "https://api.anthropic.com/v1",
+    has_api_key: true,
+  }
   const app = await mountProxyApp({
     upstreams: [openai, anthropic],
     workers: [
@@ -687,20 +881,32 @@ test("dashboard drags workers and upstreams through stable upstream ids", async 
 })
 
 test("dashboard drags an unbound upstream onto a worker", async () => {
-  const openai = { id: "openai", name: "openai", base_url: "https://api.openai.com/v1", has_api_key: true }
-  const anthropic = { id: "anthropic-id", name: "anthropic", base_url: "https://api.anthropic.com/v1", has_api_key: true }
+  const openai = {
+    id: "openai",
+    name: "openai",
+    base_url: "https://api.openai.com/v1",
+    has_api_key: true,
+  }
+  const anthropic = {
+    id: "anthropic-id",
+    name: "anthropic",
+    base_url: "https://api.anthropic.com/v1",
+    has_api_key: true,
+  }
   const app = await mountProxyApp({
     upstreams: [openai, anthropic],
-    workers: [{
-      id: "app",
-      name: "app",
-      upstream_id: "anthropic-id",
-      port: 6767,
-      upstream: anthropic,
-      status: "running",
-      snapshot_generation: 1,
-      log_level: "simple",
-    }],
+    workers: [
+      {
+        id: "app",
+        name: "app",
+        upstream_id: "anthropic-id",
+        port: 6767,
+        upstream: anthropic,
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+    ],
   })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
@@ -727,7 +933,9 @@ test("dashboard drags an unbound upstream onto a worker", async () => {
 })
 
 test("dashboard rebinds stale sessions and rejects running session drags", async () => {
-  const app = await mountProxyApp({ hostedSessions: [staleSession, activeSession] })
+  const app = await mountProxyApp({
+    hostedSessions: [staleSession, activeSession],
+  })
   try {
     app.api.keymap.dispatchCommand("proxy.dashboard")
     await wait(async () => {
@@ -751,7 +959,10 @@ test("dashboard rebinds stale sessions and rejects running session drags", async
     expect({
       patches: app.calls.patchHostedSession,
       workerDialog: app.frame().includes("Worker actions"),
-    }).toEqual({ patches: [{ session_id: "hs_stale", worker_id: "cli-openrouter" }], workerDialog: false })
+    }).toEqual({
+      patches: [{ session_id: "hs_stale", worker_id: "cli-openrouter" }],
+      workerDialog: false,
+    })
   } finally {
     await app.cleanup()
   }

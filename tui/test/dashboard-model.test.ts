@@ -9,7 +9,7 @@ import {
   scrollDashboardRowIntoView,
 } from "../src/proxy/dashboard/navigation"
 import { dashboardDropLabel, dashboardDropPair, isValidDashboardDrop } from "../src/proxy/dashboard/drag"
-import type { HostedSessionSummary, RedactedUpstream, WorkerSummary } from "../src/proxy/backend"
+import type { HostedSessionSummary, RedactedUpstream, UpstreamPool, WorkerSummary } from "../src/proxy/backend"
 
 const openai: RedactedUpstream = {
   id: "upstream-openai",
@@ -41,21 +41,199 @@ const session: HostedSessionSummary = {
 
 test("buildDashboardModel preserves stable hierarchy and computes complete summary", () => {
   expect(buildDashboardModel([worker], [openai], [session])).toEqual({
-    summary: { upstreams: 1, healthyWorkers: 1, workers: 1, sessions: 1, unbound: 0 },
-    domains: [{
-      id: "upstream:upstream-openai",
-      upstream: { id: "upstream:upstream-openai", kind: "upstream", label: "OpenAI Main", data: openai },
-      workers: [{
-        worker: { id: "worker:worker-app", kind: "worker", label: "App Main", data: worker },
-        sessions: [{ id: "session:hs_1", kind: "session", label: "Build release", data: session }],
-      }],
+    summary: {
+      pools: 0,
+      upstreams: 1,
+      healthyWorkers: 1,
+      workers: 1,
+      sessions: 1,
+      unbound: 0,
+    },
+    domains: [
+      {
+        kind: "upstream",
+        id: "upstream:upstream-openai",
+        upstream: {
+          id: "upstream:upstream-openai",
+          kind: "upstream",
+          label: "OpenAI Main",
+          data: openai,
+        },
+        workers: [
+          {
+            worker: {
+              id: "worker:worker-app",
+              kind: "worker",
+              label: "App Main",
+              data: worker,
+            },
+            sessions: [
+              {
+                id: "session:hs_1",
+                kind: "session",
+                label: "Build release",
+                data: session,
+              },
+            ],
+          },
+        ],
+        healthyWorkers: 1,
+        totalWorkers: 1,
+        totalSessions: 1,
+        warning: false,
+      },
+    ],
+    unboundUpstreams: [],
+    unboundSessions: [],
+  })
+})
+
+test("buildDashboardModel nests pool workers under their active member and keeps inactive members", () => {
+  const fallback = { ...openai, id: "upstream-fallback", name: "Fallback" }
+  const pool: UpstreamPool = {
+    id: "primary-pool",
+    name: "Primary Pool",
+    upstreams: [openai.id, fallback.id],
+    circuit_breaker: {
+      failure_threshold: 3,
+      recovery_success_threshold: 2,
+      recovery_wait_seconds: 60,
+    },
+    active_upstream: openai.id,
+    workers: [worker.name],
+    readiness: [],
+  }
+  const pooledWorker = { ...worker, upstream_pool: pool.id }
+  const model = buildDashboardModel([pooledWorker], [openai, fallback], [session], [pool])
+  const state = dashboardInitialState(model)
+
+  expect({
+    summary: model.summary,
+    domain: model.domains[0],
+    rows: dashboardVisibleRows(model, state),
+  }).toEqual({
+    summary: {
+      pools: 1,
+      upstreams: 2,
+      healthyWorkers: 1,
+      workers: 1,
+      sessions: 1,
+      unbound: 0,
+    },
+    domain: {
+      kind: "pool",
+      id: "pool:primary-pool",
+      pool: {
+        id: "pool:primary-pool",
+        kind: "pool",
+        label: "Primary Pool",
+        data: pool,
+      },
+      members: [
+        {
+          upstream: {
+            id: "pool-member:primary-pool:upstream-openai",
+            kind: "upstream",
+            label: "OpenAI Main",
+            data: openai,
+          },
+          workers: [
+            {
+              worker: {
+                id: "worker:worker-app",
+                kind: "worker",
+                label: "App Main",
+                data: pooledWorker,
+              },
+              sessions: [
+                {
+                  id: "session:hs_1",
+                  kind: "session",
+                  label: "Build release",
+                  data: session,
+                },
+              ],
+            },
+          ],
+          active: true,
+        },
+        {
+          upstream: {
+            id: "pool-member:primary-pool:upstream-fallback",
+            kind: "upstream",
+            label: "Fallback",
+            data: fallback,
+          },
+          workers: [],
+          active: false,
+        },
+      ],
+      workers: [
+        {
+          worker: {
+            id: "worker:worker-app",
+            kind: "worker",
+            label: "App Main",
+            data: pooledWorker,
+          },
+          sessions: [
+            {
+              id: "session:hs_1",
+              kind: "session",
+              label: "Build release",
+              data: session,
+            },
+          ],
+        },
+      ],
       healthyWorkers: 1,
       totalWorkers: 1,
       totalSessions: 1,
       warning: false,
-    }],
-    unboundUpstreams: [],
-    unboundSessions: [],
+    },
+    rows: [
+      {
+        id: "pool:primary-pool",
+        kind: "domain",
+        depth: 0,
+        node: model.domains[0].kind === "pool" ? model.domains[0].pool : undefined,
+        expandable: true,
+      },
+      {
+        id: "pool-member:primary-pool:upstream-openai",
+        kind: "upstream",
+        depth: 1,
+        parentID: "pool:primary-pool",
+        node: model.domains[0].kind === "pool" ? model.domains[0].members[0].upstream : undefined,
+        expandable: true,
+        active: true,
+      },
+      {
+        id: "worker:worker-app",
+        kind: "worker",
+        depth: 2,
+        parentID: "pool-member:primary-pool:upstream-openai",
+        node: model.domains[0].workers[0].worker,
+        expandable: true,
+      },
+      {
+        id: "session:hs_1",
+        kind: "session",
+        depth: 3,
+        parentID: "worker:worker-app",
+        node: model.domains[0].workers[0].sessions[0],
+        expandable: false,
+      },
+      {
+        id: "pool-member:primary-pool:upstream-fallback",
+        kind: "upstream",
+        depth: 1,
+        parentID: "pool:primary-pool",
+        node: model.domains[0].kind === "pool" ? model.domains[0].members[1].upstream : undefined,
+        expandable: false,
+        active: false,
+      },
+    ],
   })
 })
 
@@ -97,52 +275,80 @@ test("buildDashboardModel keeps missing relationships visible and counts each un
   }
 
   expect(buildDashboardModel([missingWorker], [orphan], [unboundSession])).toEqual({
-    summary: { upstreams: 2, healthyWorkers: 0, workers: 1, sessions: 1, unbound: 2 },
-    domains: [{
-      id: "upstream:upstream-missing",
-      upstream: {
-        id: "upstream:upstream-missing",
-        kind: "upstream",
-        label: "Removed provider",
-        data: missingUpstream,
-      },
-      workers: [{
-        worker: {
-          id: "worker:worker-missing-provider",
-          kind: "worker",
-          label: "Stranded worker",
-          data: missingWorker,
-        },
-        sessions: [],
-      }],
+    summary: {
+      pools: 0,
+      upstreams: 2,
       healthyWorkers: 0,
-      totalWorkers: 1,
-      totalSessions: 0,
-      warning: true,
-    }],
-    unboundUpstreams: [{
-      id: "upstream:upstream-orphan",
-      kind: "upstream",
-      label: "Unused",
-      data: orphan,
-    }],
-    unboundSessions: [{
-      id: "session:hs_orphan",
-      kind: "session",
-      label: "Lost session",
-      data: unboundSession,
-    }],
+      workers: 1,
+      sessions: 1,
+      unbound: 2,
+    },
+    domains: [
+      {
+        kind: "upstream",
+        id: "upstream:upstream-missing",
+        upstream: {
+          id: "upstream:upstream-missing",
+          kind: "upstream",
+          label: "Removed provider",
+          data: missingUpstream,
+        },
+        workers: [
+          {
+            worker: {
+              id: "worker:worker-missing-provider",
+              kind: "worker",
+              label: "Stranded worker",
+              data: missingWorker,
+            },
+            sessions: [],
+          },
+        ],
+        healthyWorkers: 0,
+        totalWorkers: 1,
+        totalSessions: 0,
+        warning: true,
+      },
+    ],
+    unboundUpstreams: [
+      {
+        id: "upstream:upstream-orphan",
+        kind: "upstream",
+        label: "Unused",
+        data: orphan,
+      },
+    ],
+    unboundSessions: [
+      {
+        id: "session:hs_orphan",
+        kind: "session",
+        label: "Lost session",
+        data: unboundSession,
+      },
+    ],
   })
 })
 
 test("dashboardInitialState expands active and warning domains but leaves quiet domains collapsed", () => {
   const quietUpstream = { ...openai, id: "upstream-quiet", name: "Quiet" }
-  const quietWorker = { ...worker, id: "worker-quiet", name: "Quiet worker", upstream_id: quietUpstream.id, upstream: quietUpstream }
-  const failedWorker = { ...worker, id: "worker-failed", name: "Failed worker", status: "failed" }
+  const quietWorker = {
+    ...worker,
+    id: "worker-quiet",
+    name: "Quiet worker",
+    upstream_id: quietUpstream.id,
+    upstream: quietUpstream,
+  }
+  const failedWorker = {
+    ...worker,
+    id: "worker-failed",
+    name: "Failed worker",
+    status: "failed",
+  }
   const model = buildDashboardModel([worker, failedWorker, quietWorker], [openai, quietUpstream], [session])
 
   expect(dashboardInitialState(model)).toEqual({
     expandedDomains: new Set(["upstream:upstream-openai"]),
+    expandedUpstreams: new Set(),
     expandedSessionGroups: new Set(),
     collapsedSessionGroups: new Set(),
     unboundExpanded: false,
@@ -159,10 +365,16 @@ test("dashboardVisibleRows derives hierarchy, filtered paths, previews, and unbo
     turn_state: "idle",
   }))
   const orphanUpstream = { ...openai, id: "upstream-unused", name: "Unused" }
-  const orphanSession = { ...session, session_id: "hs_orphan", session_label: "Detached", worker_id: "gone" }
+  const orphanSession = {
+    ...session,
+    session_id: "hs_orphan",
+    session_label: "Detached",
+    worker_id: "gone",
+  }
   const model = buildDashboardModel([worker], [openai, orphanUpstream], [...sessions, orphanSession])
   const state = {
     expandedDomains: new Set(["upstream:upstream-openai"]),
+    expandedUpstreams: new Set<string>(),
     expandedSessionGroups: new Set<string>(),
     collapsedSessionGroups: new Set<string>(),
     unboundExpanded: false,
@@ -171,37 +383,129 @@ test("dashboardVisibleRows derives hierarchy, filtered paths, previews, and unbo
   }
 
   expect(dashboardVisibleRows(model, state)).toEqual([
-    { id: "upstream:upstream-openai", kind: "domain", depth: 0, node: model.domains[0].upstream, expandable: true },
-    { id: "worker:worker-app", kind: "worker", depth: 1, parentID: "upstream:upstream-openai", node: model.domains[0].workers[0].worker, expandable: true },
-    { id: "session:hs_1", kind: "session", depth: 2, parentID: "worker:worker-app", node: model.domains[0].workers[0].sessions[0], expandable: false },
-    { id: "session:hs_2", kind: "session", depth: 2, parentID: "worker:worker-app", node: model.domains[0].workers[0].sessions[1], expandable: false },
-    { id: "session:hs_3", kind: "session", depth: 2, parentID: "worker:worker-app", node: model.domains[0].workers[0].sessions[2], expandable: false },
-    { id: "session-more:worker:worker-app", kind: "session-more", depth: 2, parentID: "worker:worker-app", expandable: true, count: 2 },
+    {
+      id: "upstream:upstream-openai",
+      kind: "domain",
+      depth: 0,
+      node: model.domains[0].kind === "upstream" ? model.domains[0].upstream : undefined,
+      expandable: true,
+    },
+    {
+      id: "worker:worker-app",
+      kind: "worker",
+      depth: 1,
+      parentID: "upstream:upstream-openai",
+      node: model.domains[0].workers[0].worker,
+      expandable: true,
+    },
+    {
+      id: "session:hs_1",
+      kind: "session",
+      depth: 2,
+      parentID: "worker:worker-app",
+      node: model.domains[0].workers[0].sessions[0],
+      expandable: false,
+    },
+    {
+      id: "session:hs_2",
+      kind: "session",
+      depth: 2,
+      parentID: "worker:worker-app",
+      node: model.domains[0].workers[0].sessions[1],
+      expandable: false,
+    },
+    {
+      id: "session:hs_3",
+      kind: "session",
+      depth: 2,
+      parentID: "worker:worker-app",
+      node: model.domains[0].workers[0].sessions[2],
+      expandable: false,
+    },
+    {
+      id: "session-more:worker:worker-app",
+      kind: "session-more",
+      depth: 2,
+      parentID: "worker:worker-app",
+      expandable: true,
+      count: 2,
+    },
     { id: "unbound", kind: "unbound", depth: 0, expandable: true, count: 2 },
   ])
 
-  expect(dashboardVisibleRows(model, {
-    ...state,
-    collapsedSessionGroups: new Set(["worker:worker-app"]),
-    query: "release",
-  })).toEqual([
-    { id: "upstream:upstream-openai", kind: "domain", depth: 0, node: model.domains[0].upstream, expandable: true },
-    { id: "worker:worker-app", kind: "worker", depth: 1, parentID: "upstream:upstream-openai", node: model.domains[0].workers[0].worker, expandable: true },
-    { id: "session:hs_5", kind: "session", depth: 2, parentID: "worker:worker-app", node: model.domains[0].workers[0].sessions[4], expandable: false },
+  expect(
+    dashboardVisibleRows(model, {
+      ...state,
+      collapsedSessionGroups: new Set(["worker:worker-app"]),
+      query: "release",
+    }),
+  ).toEqual([
+    {
+      id: "upstream:upstream-openai",
+      kind: "domain",
+      depth: 0,
+      node: model.domains[0].kind === "upstream" ? model.domains[0].upstream : undefined,
+      expandable: true,
+    },
+    {
+      id: "worker:worker-app",
+      kind: "worker",
+      depth: 1,
+      parentID: "upstream:upstream-openai",
+      node: model.domains[0].workers[0].worker,
+      expandable: true,
+    },
+    {
+      id: "session:hs_5",
+      kind: "session",
+      depth: 2,
+      parentID: "worker:worker-app",
+      node: model.domains[0].workers[0].sessions[4],
+      expandable: false,
+    },
   ])
 
   expect(dashboardVisibleRows(model, { ...state, unboundExpanded: true }).slice(-3)).toEqual([
     { id: "unbound", kind: "unbound", depth: 0, expandable: true, count: 2 },
-    { id: "upstream:upstream-unused", kind: "domain", depth: 1, parentID: "unbound", node: model.unboundUpstreams[0], expandable: false },
-    { id: "session:hs_orphan", kind: "session", depth: 1, parentID: "unbound", node: model.unboundSessions[0], expandable: false },
+    {
+      id: "upstream:upstream-unused",
+      kind: "domain",
+      depth: 1,
+      parentID: "unbound",
+      node: model.unboundUpstreams[0],
+      expandable: false,
+    },
+    {
+      id: "session:hs_orphan",
+      kind: "session",
+      depth: 1,
+      parentID: "unbound",
+      node: model.unboundSessions[0],
+      expandable: false,
+    },
   ])
 
-  expect(dashboardVisibleRows(model, {
-    ...state,
-    collapsedSessionGroups: new Set(["worker:worker-app"]),
-  })).toEqual([
-    { id: "upstream:upstream-openai", kind: "domain", depth: 0, node: model.domains[0].upstream, expandable: true },
-    { id: "worker:worker-app", kind: "worker", depth: 1, parentID: "upstream:upstream-openai", node: model.domains[0].workers[0].worker, expandable: true },
+  expect(
+    dashboardVisibleRows(model, {
+      ...state,
+      collapsedSessionGroups: new Set(["worker:worker-app"]),
+    }),
+  ).toEqual([
+    {
+      id: "upstream:upstream-openai",
+      kind: "domain",
+      depth: 0,
+      node: model.domains[0].kind === "upstream" ? model.domains[0].upstream : undefined,
+      expandable: true,
+    },
+    {
+      id: "worker:worker-app",
+      kind: "worker",
+      depth: 1,
+      parentID: "upstream:upstream-openai",
+      node: model.domains[0].workers[0].worker,
+      expandable: true,
+    },
     { id: "unbound", kind: "unbound", depth: 0, expandable: true, count: 2 },
   ])
 })
@@ -210,6 +514,7 @@ test("dashboard navigation wraps and applies parent, collapse, and expansion tra
   const model = buildDashboardModel([worker], [openai], [session])
   const state = {
     expandedDomains: new Set(["upstream:upstream-openai"]),
+    expandedUpstreams: new Set<string>(),
     expandedSessionGroups: new Set<string>(),
     collapsedSessionGroups: new Set<string>(),
     unboundExpanded: false,
@@ -222,23 +527,42 @@ test("dashboard navigation wraps and applies parent, collapse, and expansion tra
     downWrap: moveDashboardSelection(rows, rows.at(-1)!.id, 1),
     upWrap: moveDashboardSelection(rows, rows[0].id, -1),
     missing: moveDashboardSelection(rows, "worker:removed", 1),
-    childLeft: dashboardCollapse(rows, { ...state, selectedID: "session:hs_1" }),
+    childLeft: dashboardCollapse(rows, {
+      ...state,
+      selectedID: "session:hs_1",
+    }),
     workerLeft: dashboardCollapse(rows, state),
     workerRight: dashboardExpand(rows, state),
-    domainLeft: dashboardCollapse(rows, { ...state, selectedID: "upstream:upstream-openai" }),
-    domainRight: dashboardExpand(rows, { ...state, selectedID: "upstream:upstream-openai" }),
+    domainLeft: dashboardCollapse(rows, {
+      ...state,
+      selectedID: "upstream:upstream-openai",
+    }),
+    domainRight: dashboardExpand(rows, {
+      ...state,
+      selectedID: "upstream:upstream-openai",
+    }),
   }).toEqual({
     downWrap: "upstream:upstream-openai",
     upWrap: "session:hs_1",
     missing: "upstream:upstream-openai",
     childLeft: { selectedID: "worker:worker-app" },
-    workerLeft: { selectedID: "worker:worker-app", collapseSessionGroupID: "worker:worker-app" },
+    workerLeft: {
+      selectedID: "worker:worker-app",
+      collapseSessionGroupID: "worker:worker-app",
+    },
     workerRight: { selectedID: "session:hs_1" },
-    domainLeft: { selectedID: "upstream:upstream-openai", collapseID: "upstream:upstream-openai" },
+    domainLeft: {
+      selectedID: "upstream:upstream-openai",
+      collapseID: "upstream:upstream-openai",
+    },
     domainRight: { selectedID: "worker:worker-app" },
   })
 
-  const collapsedState = { ...state, expandedDomains: new Set<string>(), selectedID: "upstream:upstream-openai" }
+  const collapsedState = {
+    ...state,
+    expandedDomains: new Set<string>(),
+    selectedID: "upstream:upstream-openai",
+  }
   expect(dashboardExpand(dashboardVisibleRows(model, collapsedState), collapsedState)).toEqual({
     selectedID: "upstream:upstream-openai",
     expandID: "upstream:upstream-openai",
@@ -259,7 +583,9 @@ test("scrollDashboardRowIntoView moves only far enough to reveal the selected ro
   const scroll = {
     scrollTop: 2,
     viewport: { height: 4 },
-    scrollTo(value: number) { calls.push(value) },
+    scrollTo(value: number) {
+      calls.push(value)
+    },
   }
   scrollDashboardRowIntoView(scroll, 7)
   expect(calls).toEqual([4])
@@ -267,9 +593,14 @@ test("scrollDashboardRowIntoView moves only far enough to reveal the selected ro
 
 test("dashboard drag semantics preserve worker, upstream, and session constraints", () => {
   const readySession = { ...session, turn_state: "idle" as const }
-  const runningSession = { ...session, session_id: "hs_running", turn_state: "running" as const }
+  const runningSession = {
+    ...session,
+    session_id: "hs_running",
+    turn_state: "running" as const,
+  }
   const model = buildDashboardModel([worker], [openai], [readySession, runningSession])
-  const upstreamNode = model.domains[0].upstream
+  const upstreamNode = model.domains[0].kind === "upstream" ? model.domains[0].upstream : undefined
+  if (!upstreamNode) throw new Error("expected upstream domain")
   const workerNode = model.domains[0].workers[0].worker
   const readySessionNode = model.domains[0].workers[0].sessions[0]
   const runningSessionNode = model.domains[0].workers[0].sessions[1]
