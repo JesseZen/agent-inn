@@ -22,6 +22,7 @@ import {
   type UpstreamProbeResult,
   type WorkerSummary,
 } from "../src/proxy/backend"
+import type { ProxyLaunchOptions } from "../src/proxy/launch"
 
 type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal" | "metrics"> & {
   launch?: Partial<ProxySettings["launch"]>
@@ -60,12 +61,16 @@ type ProxyHarnessInput = {
   upstreams?: HarnessUpstream[]
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
+  batchSessionLauncher?: (opts: ProxyLaunchOptions) => Promise<boolean>
   hostedSessions?: HostedSessionSummary[]
+  hostedSessionsError?: string
   patchWorkerDelayMs?: number
   strictModuleWorkerIDs?: boolean
   metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
   probeResults?: UpstreamProbeResult[]
+  width?: number
+  height?: number
 }
 
 function createProxyHarness(input: ProxyHarnessInput = {}) {
@@ -141,6 +146,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       },
     ],
   ])
+  if (input.workers) workers.clear()
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions = [...(input.hostedSessions ?? [])]
   const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
@@ -291,12 +297,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
     if (url.pathname === "/api/upstreams")
       return json({
-        upstreams: Object.fromEntries(
-          [...providers.entries()].map(([id, provider]) => {
-            const { id: _id, ...profile } = provider
-            return [id, profile]
-          }),
-        ),
+        upstreams: Object.fromEntries(providers.entries()),
       })
     if (url.pathname === "/api/config" && url.search === "") {
       if (url.href.includes("&__method=PUT")) return undefined
@@ -321,6 +322,10 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
     if (url.pathname === "/api/hosted-sessions") {
       calls.listHostedSessions += 1
+      if (input.hostedSessionsError) {
+        await Bun.sleep(25)
+        return json({ error: input.hostedSessionsError }, { status: 500 })
+      }
       return json({ sessions: hostedSessions })
     }
     if (url.pathname.startsWith("/api/hosted-sessions/")) {
@@ -382,18 +387,17 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         proxy_url?: string
       }
       calls.patchWorkerBodies.push(body)
-      let call: (typeof calls.patchWorker)[number]
       if (body.name !== undefined && body.name !== current.name) {
-        call = { id: current.id, name: body.name }
+        calls.patchWorker.push({ id: current.id, name: body.name })
       } else {
-        call = {
+        calls.patchWorker.push({
           port: current.port,
-          upstream: body.upstream_id ?? body.upstream ?? current.upstream_id,
-          log_level: body.log_level ?? current.log_level,
+          upstream: body.upstream_id ?? body.upstream,
+          log_level: body.log_level,
           ...(body.port !== undefined && body.port !== current.port ? { next_port: body.port } : {}),
           ...(body.launcher ? { launcher: body.launcher } : {}),
           ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
-        }
+        })
       }
       const nextUpstreamID = body.upstream_id ?? body.upstream
       const nextUpstream = nextUpstreamID ? providers.get(nextUpstreamID) : undefined
@@ -419,10 +423,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       if (body.port !== undefined && body.port !== current.port) {
         const worker = { ...findWorker(current.id)!, port: body.port }
         setWorker(worker)
-        calls.patchWorker.push(call)
         return json(worker)
       }
-      calls.patchWorker.push(call)
       return json(findWorker(current.id)!)
     }
 
@@ -536,7 +538,6 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const body = JSON.parse(String(init?.body ?? "null")) as { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }
       calls.patchUpstream.push({ id, body })
       providers.set(id, {
-        ...providers.get(id),
         id,
         name: body.name ?? providers.get(id)?.name ?? id,
         base_url: body.base_url ?? providers.get(id)?.base_url ?? "",
@@ -686,6 +687,28 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     fetch: override,
     hostedSessions,
     metrics,
+    replaceDashboardData(next: {
+      workers: HarnessWorker[]
+      upstreams: HarnessUpstream[]
+      hostedSessions: HostedSessionSummary[]
+    }) {
+      providers.clear()
+      for (const upstream of next.upstreams) {
+        const id = upstream.id ?? upstream.name
+        providers.set(id, { ...upstream, id })
+      }
+      workers.clear()
+      for (const worker of next.workers) {
+        const upstreamID = worker.upstream_id ?? worker.upstream.id ?? worker.upstream.name
+        workers.set(worker.id ?? worker.name, {
+          ...worker,
+          id: worker.id ?? worker.name,
+          upstream_id: upstreamID,
+          upstream: { ...worker.upstream, id: worker.upstream.id ?? upstreamID },
+        })
+      }
+      hostedSessions.splice(0, hostedSessions.length, ...next.hostedSessions)
+    },
     emitManagerEvent(type: string, payload: Record<string, unknown> = {}) {
       if (!managerEvents) throw new Error("manager event source not ready")
       managerEvents.enqueue(managerEventEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`))
@@ -700,7 +723,7 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
   const data = path.join(home, ".local", "share", app)
   const cache = path.join(home, ".cache", app)
   const state = path.join(home, ".local", "state", app)
-  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const setup = await createTestRenderer({ width: input.width ?? 80, height: input.height ?? 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   await mkdir(state, { recursive: true })
@@ -729,9 +752,9 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
       events: events.source,
       args: {},
       pluginHost: {
-        async start(input) {
-          api = input.api
-          registerProxyCommands(api)
+        async start(plugin) {
+          api = plugin.api
+          registerProxyCommands(api, { batchSessionLauncher: input.batchSessionLauncher })
           started()
         },
         async dispose() {},
@@ -763,6 +786,10 @@ export async function mountProxyApp(input: ProxyHarnessInput & { stateFiles?: Re
     emitManagerEvent: proxy.emitManagerEvent,
     hostedSessions: proxy.hostedSessions,
     metrics: proxy.metrics,
+    replaceDashboardData(input: Parameters<typeof proxy.replaceDashboardData>[0]) {
+      proxy.replaceDashboardData(input)
+      proxy.emitManagerEvent("config.changed")
+    },
     setup,
     frame() {
       return setup.captureCharFrame()
