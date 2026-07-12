@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
 import { expect, test } from "bun:test"
-import { mkdir, readFile } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { onMount } from "solid-js"
 import { KVProvider } from "../../src/context/kv"
@@ -29,7 +29,6 @@ test("translation interpolates named values and falls back to English", () => {
   expect(interpolate("Hello {{name}}", { name: "Ada" })).toBe("Hello Ada")
   expect(interpolate("Count: {{count}}", { count: 3 })).toBe("Count: 3")
   expect(translate("zh-CN", "common.copied")).toBe("已复制到剪贴板")
-  expect(translate("zh-CN", "missing.key")).toBe("missing.key")
 })
 
 test("LanguageProvider switches reactively and persists the locale identifier", async () => {
@@ -38,7 +37,7 @@ test("LanguageProvider switches reactively and persists the locale identifier", 
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), JSON.stringify({ locale: "en" }))
 
-  let snapshot: { before: string; after: string } | undefined
+  let snapshot: { before: string; after: string; unknown: string } | undefined
   let ready = false
 
   function Probe() {
@@ -46,7 +45,9 @@ test("LanguageProvider switches reactively and persists the locale identifier", 
     onMount(async () => {
       const before = language.t("language.name")
       language.setLocale("zh-CN")
-      snapshot = { before, after: language.t("language.name") }
+      // @ts-expect-error Runtime plugin keys must be rejected by the typed boundary.
+      const unknown = language.t("missing.key")
+      snapshot = { before, after: language.t("language.name"), unknown }
       ready = true
     })
     return <box />
@@ -64,11 +65,48 @@ test("LanguageProvider switches reactively and persists the locale identifier", 
 
   try {
     while (!ready) await Bun.sleep(10)
-    expect(snapshot).toEqual({ before: "Language", after: "语言" })
+    expect(snapshot).toEqual({ before: "Language", after: "语言", unknown: "missing.key" })
   } finally {
     app.renderer.destroy()
   }
 
   while (JSON.parse(await Bun.file(path.join(state, "kv.json")).text()).locale !== "zh-CN") await Bun.sleep(10)
   expect(JSON.parse(await Bun.file(path.join(state, "kv.json")).text())).toEqual({ locale: "zh-CN" })
+})
+
+test("LanguageProvider keeps the in-memory locale when KV cannot write", async () => {
+  await using tmp = await tmpdir()
+  const state = path.join(tmp.path, "state-file")
+  await Bun.write(state, "state path is intentionally a file")
+
+  let locale: string | undefined
+  let ready = false
+
+  function Probe() {
+    const language = useLanguage()
+    onMount(() => {
+      language.setLocale("zh-CN")
+      locale = language.locale
+      ready = true
+    })
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts directory={tmp.path} paths={{ home: tmp.path, state, worktree: tmp.path }}>
+      <KVProvider>
+        <LanguageProvider>
+          <Probe />
+        </LanguageProvider>
+      </KVProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    while (!ready) await Bun.sleep(10)
+    await Bun.sleep(300)
+    expect(locale).toBe("zh-CN")
+  } finally {
+    app.renderer.destroy()
+  }
 })

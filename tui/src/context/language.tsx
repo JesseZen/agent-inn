@@ -47,9 +47,13 @@ function hasKey(dictionary: Record<string, string>, key: string): key is Transla
   return Object.hasOwn(dictionary, key)
 }
 
-export function translate(locale: Locale, key: string, params?: TranslationParams): string {
+function resolveTranslation(locale: Locale, key: string, params?: TranslationParams): string {
   const template = locale === "zh-CN" && hasKey(zhCN, key) ? zhCN[key] : hasKey(en, key) ? en[key] : key
   return interpolate(template, params)
+}
+
+export function translate(locale: Locale, key: TranslationKey, params?: TranslationParams): string {
+  return resolveTranslation(locale, key, params)
 }
 
 export const { use: useLanguage, provider: LanguageProvider } = createSimpleContext({
@@ -66,7 +70,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       locales,
       labels: localeLabels,
       t(key: TranslationKey, params?: TranslationParams) {
-        return translate(locale(), key, params)
+        return resolveTranslation(locale(), key, params)
       },
       setLocale(next: Locale) {
         setLocale(next)
