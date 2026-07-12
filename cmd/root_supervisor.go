@@ -142,7 +142,7 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 		waitResult <- cmd.Wait()
 	}()
 	stopSignals := make(chan os.Signal, 4)
-	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer signal.Stop(stopSignals)
 	forwardedSignal := ""
 	var waitErr error

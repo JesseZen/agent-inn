@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 
 const rootSupervisorHelperEnv = "AINN_TEST_ROOT_SUPERVISOR_HELPER"
 const rootSupervisorDescendantPIDEnv = "AINN_TEST_ROOT_SUPERVISOR_DESCENDANT_PID"
+const rootSupervisorReadyPIDEnv = "AINN_TEST_ROOT_SUPERVISOR_READY_PID"
 
 func TestRootSupervisorHelperProcess(t *testing.T) {
 	mode := os.Getenv(rootSupervisorHelperEnv)
@@ -33,6 +35,9 @@ func TestRootSupervisorHelperProcess(t *testing.T) {
 	fmtPID := strconv.Itoa(os.Getpid()) + "\n"
 	_, _ = os.Stdout.WriteString(fmtPID)
 	_, _ = os.Stderr.WriteString("Authorization: Bearer supervisor-secret\n")
+	if pidPath := os.Getenv(rootSupervisorReadyPIDEnv); pidPath != "" {
+		_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0600)
+	}
 	switch mode {
 	case "clean":
 		os.Exit(0)
@@ -52,6 +57,17 @@ func TestRootSupervisorHelperProcess(t *testing.T) {
 		if err := os.WriteFile(pidPath, []byte(strconv.Itoa(descendant.Process.Pid)), 0600); err != nil {
 			os.Exit(95)
 		}
+		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		select {}
+	case "hold":
+		for {
+			time.Sleep(time.Hour)
+		}
+	case "catch-quit":
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGQUIT)
+		<-quit
+		signal.Stop(quit)
 		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
 		select {}
 	default:
@@ -229,6 +245,67 @@ func TestRootSupervisorDoesNotWaitForDescendantStderr(t *testing.T) {
 	}
 	_ = syscall.Kill(descendantPID, syscall.SIGKILL)
 	t.Fatal("supervisor left the root descendant running")
+}
+
+func TestRootSupervisorForwardsSIGQUIT(t *testing.T) {
+	startedAt := time.Date(2026, 7, 12, 16, 30, 0, 0, time.UTC)
+	completedAt := startedAt.Add(3 * time.Second)
+	restoreClock := setRootSupervisorClockForTest(startedAt, completedAt)
+	defer restoreClock()
+	t.Setenv(rootSupervisorHelperEnv, "catch-quit")
+	readyPIDPath := filepath.Join(t.TempDir(), "ready.pid")
+	t.Setenv(rootSupervisorReadyPIDEnv, readyPIDPath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	opts := rootSupervisorTestOptions(t, &stdout, &stderr)
+	type result struct {
+		exit logging.RootRunExit
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		exit, err := runSupervisedRoot(opts)
+		resultCh <- result{exit: exit, err: err}
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(readyPIDPath)
+		if err == nil && len(data) > 0 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatal("helper did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGQUIT); err != nil {
+		t.Fatal(err)
+	}
+
+	got := <-resultCh
+	if got.err == nil {
+		t.Fatal("expected SIGQUIT child error")
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(stdout.String()))
+	if err != nil {
+		t.Fatalf("parse helper pid %q: %v", stdout.String(), err)
+	}
+	want := logging.RootRunExit{
+		ChildPID:             childPID,
+		ExitCode:             -1,
+		Reason:               logging.RootRunExitReasonSignal,
+		Error:                "signal: killed",
+		Signal:               "killed",
+		ForwardedSignal:      "quit",
+		DurationMilliseconds: 3000,
+		CompletedAt:          completedAt,
+	}
+	if !reflect.DeepEqual(got.exit, want) {
+		t.Fatalf("root exit mismatch:\n got %#v\nwant %#v", got.exit, want)
+	}
+	assertSupervisorEvidence(t, rootSupervisorLogDir(t), stderr.String(), "reason=signal", "signal=quit", "forwarded_signal=quit")
 }
 
 func rootSupervisorTestOptions(t *testing.T, stdout *bytes.Buffer, stderr *bytes.Buffer) RootOptions {

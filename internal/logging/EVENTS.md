@@ -73,6 +73,7 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 | crash artifact 有 `panic:` / `fatal error:`，但 `ainn.log` 没有 `root.panic` | 后台 goroutine panic 或 Go runtime fatal；以 artifact 的 all-goroutine stack 为准 |
 | `root.supervisor.exit reason=signal signal=killed` | root 子进程收到 `SIGKILL`；不是 TUI 正常退出 |
 | `root.signal` + `root.stop reason=signal` | root 收到并完成了 `SIGINT/SIGTERM/SIGHUP` 的有序关闭 |
+| `root.supervisor.exit ... signal=quit` | `SIGQUIT` 已转发给 root；crash artifact 应包含 Go runtime 的全 goroutine dump |
 | `tui.exit reason=tui_exit exit_code!=0` + `root.stop` | Bun/TUI 子进程失败，root 仍完成了清理；查看同一 artifact 中 TUI stderr |
 | `root.previous_unclean` | 上一次连 supervisor 都没能记录退出，常见于 supervisor 自身被 `SIGKILL`、tmux server 被杀或断电 |
 | `worker.exit exit_code!=0` 或 `signal` 非空 | worker 真实异常退出；用同一 `run` 和 `worker` 查看对应 `worker-<port>.log` |
@@ -100,10 +101,10 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 - **用途**：区分 supervisor PID 与实际 manager/TUI PID
 
 #### `root.supervisor.signal`
-- **触发**：supervisor 收到 `SIGINT/SIGTERM/SIGHUP` 并转发给 root 子进程
+- **触发**：supervisor 收到 `SIGINT/SIGTERM/SIGHUP/SIGQUIT` 并转发给 root 子进程
 - **字段**：`run`，`signal`，`child_pid`，转发失败时有 `err`
 - **LEVEL**：WARN；转发失败为 ERROR
-- **用途**：确认信号是否先到 supervisor，以及信号是否成功转发
+- **用途**：确认信号是否先到 supervisor，以及信号是否成功转发；`SIGQUIT` 会保留 Go runtime 的全 goroutine dump
 
 #### `root.supervisor.exit`
 - **触发**：supervisor 已 `Wait` 到 root 子进程的真实退出状态
