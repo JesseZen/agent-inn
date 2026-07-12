@@ -69,7 +69,7 @@ export function DialogSessionList() {
         if (!workspace) {
           toast.show({
             title: language.t("dialog.sessionList.createFailed"),
-            message: errorMessage(result?.error ?? "no response"),
+            message: errorMessage(result?.error ?? language.t("workspace.noResponse")),
             variant: "error",
           })
           return

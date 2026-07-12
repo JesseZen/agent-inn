@@ -1587,7 +1587,7 @@ export function Prompt(props: PromptProps) {
                         const r = retry()
                         if (!r) return
                         if (isTruncated()) {
-                          void DialogAlert.show(dialog, "Retry Error", r.message)
+                          void DialogAlert.show(dialog, language.t("session.retryError"), r.message)
                         }
                       }
 

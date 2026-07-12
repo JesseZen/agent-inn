@@ -128,7 +128,7 @@ export async function warpWorkspaceSession(input: {
 
     input.toast.show({
       title: input.language.t("dialog.workspaceCreate.warpFailed"),
-      message: errorMessage(result?.error ?? "no response"),
+      message: errorMessage(result?.error ?? input.language.t("workspace.noResponse")),
       variant: "error",
     })
     return false
