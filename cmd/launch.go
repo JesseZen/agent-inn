@@ -128,6 +128,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	launcher := "codex"
+	apiFormat := ""
 	grokHome := ""
 	grokExecutable := ""
 	var cfg config.Config
@@ -139,6 +140,10 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		if workerID, workerCfg, ok := workerConfigByPort(cfg, port); ok {
 			launcher = workerCfg.Launcher
 			*profile = workerID
+			apiFormat = cfg.Upstreams[workerCfg.Upstream].APIFormat
+			if *model == "" {
+				*model = cfg.Upstreams[workerCfg.Upstream].ProtocolProbe.Model
+			}
 			if launcher == "grok" {
 				stateDir := cfg.Settings.StateDir
 				if stateDir == "" {
@@ -170,6 +175,7 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		GrokHome:       grokHome,
 		GrokExecutable: grokExecutable,
 		Model:          *model,
+		APIFormat:      apiFormat,
 	}
 	if *mode == modeHostedTerminal {
 		if !configLoaded {

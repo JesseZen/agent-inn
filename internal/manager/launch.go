@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 const (
 	claudeCodeLauncherName = "claudecode"
 	grokLauncherName       = "grok"
+	openCodeLauncherName   = "opencode"
 )
 
 type CodexLaunchOptions struct {
@@ -38,8 +40,30 @@ type LaunchOptions struct {
 	GrokHome            string
 	GrokExecutable      string
 	Model               string
+	APIFormat           string
 	LauncherSessionID   string
 	LauncherSessionMode LauncherSessionMode
+}
+
+type openCodeConfig struct {
+	Provider map[string]openCodeProvider `json:"provider"`
+	Model    string                      `json:"model"`
+}
+
+type openCodeProvider struct {
+	NPM     string                       `json:"npm"`
+	Name    string                       `json:"name"`
+	Options openCodeProviderOptions      `json:"options"`
+	Models  map[string]openCodeModelInfo `json:"models"`
+}
+
+type openCodeProviderOptions struct {
+	BaseURL string `json:"baseURL"`
+	APIKey  string `json:"apiKey"`
+}
+
+type openCodeModelInfo struct {
+	Name string `json:"name"`
 }
 
 func buildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
@@ -75,6 +99,42 @@ func BuildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
 }
 
 func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
+	if opts.Launcher == openCodeLauncherName {
+		npm := "@ai-sdk/openai-compatible"
+		if opts.APIFormat == "" || opts.APIFormat == "responses" {
+			npm = "@ai-sdk/openai"
+		} else if opts.APIFormat == "anthropic" {
+			npm = "@ai-sdk/anthropic"
+		}
+		model := opts.Model
+		if model == "" {
+			model = opts.Profile
+		}
+		config := openCodeConfig{
+			Provider: map[string]openCodeProvider{
+				"ainn": {
+					NPM:  npm,
+					Name: "AINN",
+					Options: openCodeProviderOptions{
+						BaseURL: "http://" + constants.LocalhostAddr + ":" + strconv.Itoa(opts.WorkerPort) + "/v1",
+						APIKey:  "ainn",
+					},
+					Models: map[string]openCodeModelInfo{model: {Name: model}},
+				},
+			},
+			Model: "ainn/" + model,
+		}
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			return nil, err
+		}
+		cmd := []string{"env", "OPENCODE_CONFIG_CONTENT=" + string(encoded), "opencode"}
+		if opts.Workspace != "" {
+			cmd = append(cmd, opts.Workspace)
+		}
+		cmd = append(cmd, "--model", config.Model)
+		return cmd, nil
+	}
 	if opts.Launcher == grokLauncherName {
 		cmd := []string{"env"}
 		if opts.GrokHome != "" {

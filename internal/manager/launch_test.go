@@ -132,6 +132,73 @@ func TestBuildGrokLaunchCommandUsesWorkerProxy(t *testing.T) {
 	}
 }
 
+func TestBuildOpenCodeLaunchCommandInjectsWorkerProvider(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:   "opencode",
+		Workspace:  "/tmp/work",
+		WorkerPort: 11199,
+		Model:      "gpt-5.5",
+		APIFormat:  "responses",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		`OPENCODE_CONFIG_CONTENT={"provider":{"ainn":{"npm":"@ai-sdk/openai","name":"AINN","options":{"baseURL":"http://127.0.0.1:11199/v1","apiKey":"ainn"},"models":{"gpt-5.5":{"name":"gpt-5.5"}}}},"model":"ainn/gpt-5.5"}`,
+		"opencode",
+		"/tmp/work",
+		"--model",
+		"ainn/gpt-5.5",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected opencode launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
+
+func TestBuildOpenCodeLaunchCommandUsesChatCompletionsProvider(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:   "opencode",
+		WorkerPort: 11199,
+		Model:      "deepseek-chat",
+		APIFormat:  "chat_completions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		`OPENCODE_CONFIG_CONTENT={"provider":{"ainn":{"npm":"@ai-sdk/openai-compatible","name":"AINN","options":{"baseURL":"http://127.0.0.1:11199/v1","apiKey":"ainn"},"models":{"deepseek-chat":{"name":"deepseek-chat"}}}},"model":"ainn/deepseek-chat"}`,
+		"opencode",
+		"--model",
+		"ainn/deepseek-chat",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected opencode launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
+
+func TestBuildOpenCodeLaunchCommandUsesAnthropicProvider(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:   "opencode",
+		WorkerPort: 11199,
+		Model:      "claude-sonnet",
+		APIFormat:  "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		`OPENCODE_CONFIG_CONTENT={"provider":{"ainn":{"npm":"@ai-sdk/anthropic","name":"AINN","options":{"baseURL":"http://127.0.0.1:11199/v1","apiKey":"ainn"},"models":{"claude-sonnet":{"name":"claude-sonnet"}}}},"model":"ainn/claude-sonnet"}`,
+		"opencode",
+		"--model",
+		"ainn/claude-sonnet",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected opencode launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
 func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "codex",

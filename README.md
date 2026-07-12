@@ -215,6 +215,14 @@ configuration remain outside AINN. Basic launch, hosted terminal, rename,
 delete, and worker changes are supported; Grok-specific turn status and resume
 tracking are not.
 
+`launcher: opencode` starts OpenCode with an inline `ainn` provider whose URL
+points at the selected worker and whose API key is the placeholder `ainn`.
+AINN selects the OpenCode Responses or Chat Completions adapter from the
+upstream `api_format`; `protocol_probe.model` supplies the default model.
+OpenCode user configuration remains available and is not modified. Basic
+launch and hosted terminal operations are supported; OpenCode-specific turn
+status and resume tracking are not.
+
 `upstream_pool` is optional. A pool keeps its members in priority order: the Manager opens a member's circuit after qualified upstream failures, hot-switches the pool's workers to the next healthy member, and automatically returns to the preferred member after recovery. `stream_timeouts` can set the first SSE byte and SSE idle limits for an upstream. `protocol_probe.model` enables a low-output streaming request that verifies the upstream's configured API protocol; without it, AINN uses the lightweight base URL probe.
 
 `settings.state_dir` stores AINN runtime state such as hosted terminal sessions. `settings.log_dir` stores Worker logs.
