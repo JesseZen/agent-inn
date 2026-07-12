@@ -86,6 +86,10 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 	cmd.Stderr = stderrWrite
 	cmd.ExtraFiles = []*os.File{supervisorRead}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	restoreTerminal, terminalErr := configureRootChildTerminal(opts.Stdin, cmd.SysProcAttr)
+	if terminalErr != nil {
+		artifact.Logger().Warn(logging.EventRootSupervisorChild, "terminal", "configure", "err", terminalErr.Error())
+	}
 	cmd.Env = rootProcessEnvironment(os.Environ(), map[string]string{
 		rootProcessEnvVar:      "1",
 		rootRunIDEnvVar:        runID,
@@ -93,6 +97,9 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 		rootSupervisorFDEnvVar: strconv.Itoa(rootSupervisorFD),
 	})
 	if err := cmd.Start(); err != nil {
+		if restoreErr := restoreTerminal(); restoreErr != nil {
+			artifact.Logger().Warn(logging.EventRootSupervisorChild, "terminal", "restore_after_start_error", "err", restoreErr.Error())
+		}
 		_ = supervisorRead.Close()
 		completedAt := rootSupervisorNow()
 		exit := logging.RootRunExit{
@@ -163,6 +170,9 @@ waitForChild:
 		case waitErr = <-waitResult:
 			break waitForChild
 		}
+	}
+	if err := restoreTerminal(); err != nil {
+		artifact.Logger().Warn(logging.EventRootSupervisorChild, "terminal", "restore", "err", err.Error())
 	}
 	groupErr := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	if errors.Is(groupErr, syscall.ESRCH) {

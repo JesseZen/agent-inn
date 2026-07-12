@@ -75,6 +75,20 @@ func TestRootSupervisorHelperProcess(t *testing.T) {
 	}
 }
 
+func TestConfigureRootChildTerminalIgnoresNonFileInput(t *testing.T) {
+	attr := &syscall.SysProcAttr{Setpgid: true}
+	restore, err := configureRootChildTerminal(strings.NewReader(""), attr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attr.Foreground {
+		t.Fatal("non-terminal input configured a foreground process group")
+	}
+	if err := restore(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootSupervisorRecordsCleanChild(t *testing.T) {
 	startedAt := time.Date(2026, 7, 12, 13, 0, 0, 0, time.UTC)
 	completedAt := startedAt.Add(1500 * time.Millisecond)
