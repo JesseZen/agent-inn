@@ -1,39 +1,59 @@
+import type { Locale as LanguageLocale } from "../context/language"
+
+const THOUSAND = 1_000
+const MILLION = 1_000_000
+const ELLIPSIS = "…"
+const ELLIPSIS_WIDTH = Bun.stringWidth(ELLIPSIS)
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+
 export function titlecase(str: string) {
   return str.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export function time(input: number): string {
+export function time(input: number, locale?: LanguageLocale): string {
   const date = new Date(input)
-  return date.toLocaleTimeString(undefined, { timeStyle: "short" })
+  return date.toLocaleTimeString(locale, { timeStyle: "short" })
 }
 
-export function datetime(input: number): string {
+export function datetime(input: number, locale?: LanguageLocale): string {
   const date = new Date(input)
-  const localTime = time(input)
-  const localDate = date.toLocaleDateString()
+  const localTime = time(input, locale)
+  const localDate = date.toLocaleDateString(locale)
   return `${localTime} · ${localDate}`
 }
 
-export function todayTimeOrDateTime(input: number): string {
+export function todayTimeOrDateTime(input: number, locale?: LanguageLocale): string {
   const date = new Date(input)
   const now = new Date()
   const isToday =
     date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
 
   if (isToday) {
-    return time(input)
+    return time(input, locale)
   } else {
-    return datetime(input)
+    return datetime(input, locale)
   }
 }
 
-export function number(num: number): string {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + "M"
-  } else if (num >= 1000) {
-    return (num / 1000).toFixed(1) + "K"
+export function number(num: number, locale?: LanguageLocale): string {
+  if (!locale) {
+    if (num >= MILLION) return (num / MILLION).toFixed(1) + "M"
+    if (num >= THOUSAND) return (num / THOUSAND).toFixed(1) + "K"
+    return num.toString()
   }
-  return num.toString()
+
+  const formatter = new Intl.NumberFormat(locale, {
+    useGrouping: false,
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+  if (num >= MILLION) return formatter.format(num / MILLION) + "M"
+  if (num >= THOUSAND) return formatter.format(num / THOUSAND) + "K"
+  return new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 20 }).format(num)
+}
+
+export function currency(input: number, locale?: LanguageLocale): string {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(input)
 }
 
 export function duration(input: number) {
@@ -59,23 +79,64 @@ export function duration(input: number) {
 }
 
 export function truncate(str: string, len: number): string {
-  if (str.length <= len) return str
-  return str.slice(0, len - 1) + "…"
+  if (Bun.stringWidth(str) <= len) return str
+  if (len < ELLIPSIS_WIDTH) return ""
+
+  const widthLimit = len - ELLIPSIS_WIDTH
+  let width = 0
+  let result = ""
+  for (const part of graphemes.segment(str)) {
+    const nextWidth = width + Bun.stringWidth(part.segment)
+    if (nextWidth > widthLimit) break
+    result += part.segment
+    width = nextWidth
+  }
+  return result + ELLIPSIS
 }
 
 export function truncateLeft(str: string, len: number): string {
-  if (str.length <= len) return str
-  return "…" + str.slice(-(len - 1))
+  if (Bun.stringWidth(str) <= len) return str
+  if (len < ELLIPSIS_WIDTH) return ""
+
+  const widthLimit = len - ELLIPSIS_WIDTH
+  const parts = Array.from(graphemes.segment(str), (part) => part.segment)
+  let width = 0
+  let result = ""
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const nextWidth = width + Bun.stringWidth(parts[index])
+    if (nextWidth > widthLimit) break
+    result = parts[index] + result
+    width = nextWidth
+  }
+  return ELLIPSIS + result
 }
 
 export function truncateMiddle(str: string, maxLength: number = 35): string {
-  if (str.length <= maxLength) return str
+  if (Bun.stringWidth(str) <= maxLength) return str
+  if (maxLength < ELLIPSIS_WIDTH) return ""
 
-  const ellipsis = "…"
-  const keepStart = Math.ceil((maxLength - ellipsis.length) / 2)
-  const keepEnd = Math.floor((maxLength - ellipsis.length) / 2)
+  const availableWidth = maxLength - ELLIPSIS_WIDTH
+  const startWidthLimit = Math.ceil(availableWidth / 2)
+  const endWidthLimit = Math.floor(availableWidth / 2)
+  const parts = Array.from(graphemes.segment(str), (part) => part.segment)
+  let startWidth = 0
+  let start = ""
+  for (const part of parts) {
+    const nextWidth = startWidth + Bun.stringWidth(part)
+    if (nextWidth > startWidthLimit) break
+    start += part
+    startWidth = nextWidth
+  }
 
-  return str.slice(0, keepStart) + ellipsis + str.slice(-keepEnd)
+  let endWidth = 0
+  let end = ""
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const nextWidth = endWidth + Bun.stringWidth(parts[index])
+    if (nextWidth > endWidthLimit) break
+    end = parts[index] + end
+    endWidth = nextWidth
+  }
+  return start + ELLIPSIS + end
 }
 
 export function pluralize(count: number, singular: string, plural: string): string {
