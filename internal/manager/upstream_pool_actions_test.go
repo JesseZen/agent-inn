@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"reflect"
 	"testing"
@@ -187,6 +188,96 @@ func TestManagerPoolSwitchRollsBackPartialFailure(t *testing.T) {
 		map[int]string{6767: "primary", 6768: "primary"}, nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("partial switch did not fully roll back:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPoolActionsRejectInvalidPathsWithoutMutation(t *testing.T) {
+	paths := []string{
+		"/api/upstream-pools/coding-ha/",
+		"/api/upstream-pools/coding-ha/probe/extra",
+		"/api/upstream-pools/coding-ha/unknown",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			m := newPoolActionTestManager(t, config.UpstreamPoolModeActive, []string{"primary", "backup"}, map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			})
+			defer m.Close()
+
+			response := requestManager(t, m, http.MethodPost, path, `{"upstream":"backup","mode":"force"}`)
+			m.mu.RLock()
+			worker := cloneWorkerConfig(m.config.Workers["app"])
+			m.mu.RUnlock()
+			got := struct {
+				Status     int
+				Body       string
+				Active     string
+				Worker     config.WorkerConfig
+				Desired    map[probeExecutionKey]probeSpec
+				Manual     map[probeExecutionKey]probeSpec
+				Pending    map[probeExecutionKey]probeSpec
+				Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+				Readiness  map[string]readinessObservation
+				PoolEvents []map[string]any
+			}{response.Code, response.Body.String(), m.poolActiveUpstream("coding-ha"), worker,
+				maps.Clone(m.desiredProbes), maps.Clone(m.manualProbes), maps.Clone(m.pendingProbes),
+				maps.Clone(m.probeSchedules), maps.Clone(m.readiness), poolRoutingEvents(m, EventUpstreamPoolSwitched)}
+			want := struct {
+				Status     int
+				Body       string
+				Active     string
+				Worker     config.WorkerConfig
+				Desired    map[probeExecutionKey]probeSpec
+				Manual     map[probeExecutionKey]probeSpec
+				Pending    map[probeExecutionKey]probeSpec
+				Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+				Readiness  map[string]readinessObservation
+				PoolEvents []map[string]any
+			}{http.StatusNotFound, "404 page not found\n", "primary", config.WorkerConfig{
+				Name: "app", Role: "cli", Launcher: "codex", Port: 6767,
+				Upstream: "primary", UpstreamID: "primary", UpstreamPool: "coding-ha", LogLevel: "simple",
+				RequestModules: map[string]config.ModuleConfig{}, Hooks: map[string]config.ModuleConfig{},
+			}, map[probeExecutionKey]probeSpec{}, map[probeExecutionKey]probeSpec{}, map[probeExecutionKey]probeSpec{},
+				map[poolProbeScheduleKey]poolProbeSchedule{}, map[string]readinessObservation{}, nil}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("invalid action path mutated state:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestManagerPoolSwitchRejectsInvalidTargetRuntime(t *testing.T) {
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeActive, []string{"primary", "backup"}, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+	})
+	defer m.Close()
+	m.mu.Lock()
+	profile := m.config.Upstreams["backup"]
+	profile.BaseURL = ""
+	m.config.Upstreams["backup"] = profile
+	m.mu.Unlock()
+
+	response := requestManager(t, m, http.MethodPost, "/api/upstream-pools/coding-ha/switch", `{"upstream":"backup","mode":"force"}`)
+	got := struct {
+		Status int
+		Body   string
+		Active string
+		Worker config.WorkerConfig
+		Events []map[string]any
+	}{response.Code, response.Body.String(), m.poolActiveUpstream("coding-ha"), cloneWorkerConfig(m.config.Workers["app"]), poolRoutingEvents(m, EventUpstreamPoolSwitched)}
+	want := struct {
+		Status int
+		Body   string
+		Active string
+		Worker config.WorkerConfig
+		Events []map[string]any
+	}{http.StatusInternalServerError, "{\"error\":\"upstream base URL is required\"}\n", "primary", config.WorkerConfig{
+		Name: "app", Role: "cli", Launcher: "codex", Port: 6767,
+		Upstream: "primary", UpstreamID: "primary", UpstreamPool: "coding-ha", LogLevel: "simple",
+		RequestModules: map[string]config.ModuleConfig{}, Hooks: map[string]config.ModuleConfig{},
+	}, nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("invalid target runtime was not rejected:\n got %#v\nwant %#v", got, want)
 	}
 }
 

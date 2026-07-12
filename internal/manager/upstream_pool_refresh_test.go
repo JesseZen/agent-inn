@@ -218,6 +218,37 @@ func TestManagerPoolRefreshDisabledRecordsReadinessOnly(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("disabled refresh changed managed state:\n got %#v\nwant %#v", got, want)
 	}
+
+	eventsBeforeExpiry := len(poolRoutingEvents(m, EventUpstreamProbed))
+	m.failoverMu.Lock()
+	primaryObservation := m.readiness[poolCircuitKey("coding-ha", "primary")]
+	backupObservation := m.readiness[poolCircuitKey("coding-ha", "backup")]
+	m.readinessTimers[poolCircuitKey("coding-ha", "primary")].Stop()
+	m.readinessTimers[poolCircuitKey("coding-ha", "backup")].Stop()
+	m.failoverMu.Unlock()
+	now = wantExpiresAt
+	m.expirePoolReadiness("coding-ha", "primary", primaryObservation.Generation, primaryObservation.CheckedAt)
+	m.expirePoolReadiness("coding-ha", "backup", backupObservation.Generation, backupObservation.CheckedAt)
+	expiryEvents := poolRoutingEvents(m, EventUpstreamProbed)[eventsBeforeExpiry:]
+	gotExpired := struct {
+		Readiness []PoolReadiness
+		Events    []map[string]any
+	}{[]PoolReadiness{
+		m.poolReadiness("coding-ha", "primary"), m.poolReadiness("coding-ha", "backup"),
+	}, expiryEvents}
+	wantExpired := struct {
+		Readiness []PoolReadiness
+		Events    []map[string]any
+	}{[]PoolReadiness{
+		{Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true, Readiness: ReadinessStateUnknown, CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 4, Stale: true},
+		{Upstream: "backup", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true, Readiness: ReadinessStateUnknown, CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 4, Stale: true},
+	}, []map[string]any{
+		{"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateUnknown, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(4), "stale": true, "probe_state": PoolProbeStatePaused, "reason": ProbeScheduleManual},
+		{"upstream": "backup", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateUnknown, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(4), "stale": true, "probe_state": PoolProbeStatePaused, "reason": ProbeScheduleManual},
+	}}
+	if !reflect.DeepEqual(gotExpired, wantExpired) {
+		t.Fatalf("unexpected disabled refresh expiry:\n got %#v\nwant %#v", gotExpired, wantExpired)
+	}
 }
 
 func TestManagerPoolRefreshRejectsStaleIdentityResult(t *testing.T) {
@@ -265,6 +296,104 @@ func TestManagerPoolRefreshRejectsStaleIdentityResult(t *testing.T) {
 	}, map[poolProbeScheduleKey]poolProbeSchedule{}, nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("stale manual result changed readiness:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPoolRefreshActiveWithoutWorkersUsesIdleAuthority(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 10, 11, 12, 0, time.UTC)
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeActive, []string{"primary"}, nil)
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	calls := make(chan probeSpec, 1)
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		calls <- spec
+		return readinessTestSuccess(6)
+	}
+
+	response := requestManager(t, m, http.MethodPost, "/api/upstream-pools/coding-ha/probe", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected idle refresh status %d: %s", response.Code, response.Body.String())
+	}
+	m.probeWait.Wait()
+	execution := <-calls
+	checkedAt := now
+	expiresAt := now.Add(16 * time.Minute)
+	fresh := m.poolReadiness("coding-ha", "primary")
+	m.failoverMu.Lock()
+	observation := m.readiness[poolCircuitKey("coding-ha", "primary")]
+	m.readinessTimers[poolCircuitKey("coding-ha", "primary")].Stop()
+	m.failoverMu.Unlock()
+	now = expiresAt
+	m.expirePoolReadiness("coding-ha", "primary", observation.Generation, observation.CheckedAt)
+	got := struct {
+		Status     int
+		Execution  poolRefreshExecution
+		Fresh      PoolReadiness
+		Stale      PoolReadiness
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Manual     map[probeExecutionKey]probeSpec
+		ProbeState PoolProbeState
+		Events     []map[string]any
+	}{response.Code, poolRefreshExecutions([]probeSpec{execution})[0], fresh, m.poolReadiness("coding-ha", "primary"), maps.Clone(m.probeSchedules), maps.Clone(m.manualProbes), m.poolProbeStateLocked("coding-ha"), poolRoutingEvents(m, EventUpstreamProbed)}
+	want := struct {
+		Status     int
+		Execution  poolRefreshExecution
+		Fresh      PoolReadiness
+		Stale      PoolReadiness
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Manual     map[probeExecutionKey]probeSpec
+		ProbeState PoolProbeState
+		Events     []map[string]any
+	}{http.StatusOK, poolRefreshExecution{
+		Key: probeExecutionKey{Upstream: "primary"}, Upstream: "primary", Reason: ProbeScheduleManual,
+	}, PoolReadiness{
+		Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true,
+		Readiness: ReadinessStateReady, Eligible: true, CheckedAt: &checkedAt,
+		OK: true, StatusCode: http.StatusOK, LatencyMS: 6,
+	}, PoolReadiness{
+		Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true,
+		Readiness: ReadinessStateUnknown, CheckedAt: &checkedAt,
+		OK: true, StatusCode: http.StatusOK, LatencyMS: 6, Stale: true,
+	}, map[poolProbeScheduleKey]poolProbeSchedule{}, map[probeExecutionKey]probeSpec{}, PoolProbeStateIdle, []map[string]any{
+		{"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(6), "probe_state": PoolProbeStateIdle, "reason": ProbeScheduleManual},
+		{"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateUnknown, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(6), "stale": true, "probe_state": PoolProbeStateIdle, "reason": ProbeScheduleManual},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected idle manual refresh lifecycle:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerInvalidatePoolProbeIdentityClearsEveryAuthority(t *testing.T) {
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeDisabled, []string{"primary"}, nil)
+	defer m.Close()
+	key := probeExecutionKey{Upstream: "primary", ProxyURL: "http://proxy.example"}
+	scheduled := readinessTestProbeSpec("coding-ha", "primary", key.ProxyURL, 7, "model-primary")
+	manual := scheduled
+	manual.Pools = nil
+	manual.ManualPools = []string{"coding-ha"}
+	pending := scheduled
+	pending.ManualPools = []string{"coding-ha"}
+	m.failoverMu.Lock()
+	m.desiredProbes[key] = scheduled
+	m.manualProbes[key] = manual
+	m.pendingProbes[key] = pending
+	m.probeGenerations[key] = 7
+	m.invalidatePoolProbeIdentityLocked("coding-ha")
+	got := struct {
+		Generation int
+		Desired    map[probeExecutionKey]probeSpec
+		Manual     map[probeExecutionKey]probeSpec
+		Pending    map[probeExecutionKey]probeSpec
+	}{m.probeGenerations[key], maps.Clone(m.desiredProbes), maps.Clone(m.manualProbes), maps.Clone(m.pendingProbes)}
+	m.failoverMu.Unlock()
+	want := struct {
+		Generation int
+		Desired    map[probeExecutionKey]probeSpec
+		Manual     map[probeExecutionKey]probeSpec
+		Pending    map[probeExecutionKey]probeSpec
+	}{8, map[probeExecutionKey]probeSpec{}, map[probeExecutionKey]probeSpec{}, map[probeExecutionKey]probeSpec{}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("identity invalidation retained probe authority:\n got %#v\nwant %#v", got, want)
 	}
 }
 

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	appruntime "github.com/jesse/agent-inn/internal/runtime"
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
@@ -172,16 +174,36 @@ func TestManagerPooledWorkerPatchForceSwitchesWholePool(t *testing.T) {
 	})
 	defer m.Close()
 	response := patchPoolRouting(t, m, "/api/workers/app", `{"upstream_id":"backup","force":true}`)
+	var summary WorkerSummary
+	if err := json.Unmarshal(response.Body.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
 	got := struct {
 		Code    int
+		Summary WorkerSummary
 		Workers []string
 		Events  []map[string]any
-	}{response.Code, []string{workerUpstreamID(m.config.Workers["app"]), workerUpstreamID(m.config.Workers["cli"])}, poolRoutingEvents(m, EventUpstreamPoolSwitched)}
+	}{response.Code, summary, []string{workerUpstreamID(m.config.Workers["app"]), workerUpstreamID(m.config.Workers["cli"])}, poolRoutingEvents(m, EventUpstreamPoolSwitched)}
 	want := struct {
 		Code    int
+		Summary WorkerSummary
 		Workers []string
 		Events  []map[string]any
-	}{http.StatusOK, []string{"backup", "backup"}, []map[string]any{{"pool": "coding-ha", "previous_upstream": "primary", "upstream": "backup", "forced": true}}}
+	}{http.StatusOK, WorkerSummary{
+		ID: "app", Name: "app", Port: 6767, Role: "cli", Launcher: "codex",
+		UpstreamID: "backup", UpstreamPool: "coding-ha",
+		Upstream: upstream.RedactedUpstream{ID: "backup", Name: "backup", BaseURL: "https://backup.example/v1"},
+		Protocol: appruntime.ProtocolResponses,
+		ModuleSupport: map[string]appruntime.ModuleProtocolSupport{
+			"tool_filter":    {Protocols: []appruntime.ProtocolKind{appruntime.ProtocolResponses}, Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityToolCalls}},
+			"debug_sse":      {Protocols: []appruntime.ProtocolKind{appruntime.ProtocolResponses}, Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityStreamEvents}},
+			"api_translate":  {Protocols: []appruntime.ProtocolKind{appruntime.ProtocolResponses, appruntime.ProtocolChatCompletions}, Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText, appruntime.ProtocolCapabilityToolCalls, appruntime.ProtocolCapabilityStreamEvents}},
+			"config_patch":   {Protocols: []appruntime.ProtocolKind{appruntime.ProtocolResponses, appruntime.ProtocolChatCompletions}},
+			"model_override": {Protocols: []appruntime.ProtocolKind{appruntime.ProtocolResponses, appruntime.ProtocolChatCompletions, appruntime.ProtocolAnthropic}, Capabilities: []appruntime.ProtocolCapability{appruntime.ProtocolCapabilityInputText}},
+			"request_log":    {},
+		},
+		Status: "configured", SnapshotGeneration: 1, LogLevel: "simple",
+	}, []string{"backup", "backup"}, []map[string]any{{"pool": "coding-ha", "previous_upstream": "primary", "upstream": "backup", "forced": true}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected forced switch:\n got %#v\nwant %#v", got, want)
 	}
