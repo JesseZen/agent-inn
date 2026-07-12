@@ -816,7 +816,17 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
 		return err
 	}
-	spawn.LogWriter = m.LogSink(name)
+	sink, err := m.LogSink(name)
+	if err != nil {
+		m.mu.Lock()
+		m.supervisorFor(name).setStatus(WorkerStateFailed)
+		m.statuses[name] = WorkerStateFailed
+		m.mu.Unlock()
+		m.logger.Error(logging.EventWorkerSpawn, "worker", name, "err", err.Error())
+		m.publishEvent(EventWorkerHealthChanged, map[string]any{"worker": name, "status": string(WorkerStateFailed), "error": redactedErrorMessage(err)})
+		return err
+	}
+	spawn.LogWriter = sink
 	metricSource := workerMetricSource{name: name, port: spawn.Port}
 	spawn.MetricsHandler = func(r io.Reader) {
 		m.readWorkerMetricsFrom(metricSource, r)
@@ -854,12 +864,12 @@ func (m *Manager) startWorker(name string, resetRetries bool) error {
 	return nil
 }
 
-func (m *Manager) LogSink(name string) *logging.WorkerLogSink {
+func (m *Manager) LogSink(name string) (*logging.WorkerLogSink, error) {
 	m.mu.RLock()
 	if sink := m.logs[name]; sink != nil {
 		sink.SetLevel(workerLogLevel(m.config.Workers[name]))
 		m.mu.RUnlock()
-		return sink
+		return sink, nil
 	}
 	worker := m.config.Workers[name]
 	logDir := m.config.Settings.LogDir
@@ -871,23 +881,19 @@ func (m *Manager) LogSink(name string) *logging.WorkerLogSink {
 	logDir = expandHomePath(logDir)
 	sink, err := logging.NewWorkerLogSink(filepath.Join(logDir, fmt.Sprintf("worker-%d.log", worker.Port)), 1000)
 	if err != nil {
-		sink, _ = logging.NewWorkerLogSink(filepath.Join(os.TempDir(), fmt.Sprintf("ainn-worker-%d.log", worker.Port)), 1000)
+		return nil, fmt.Errorf("open worker log %s: %w", filepath.Join(logDir, fmt.Sprintf("worker-%d.log", worker.Port)), err)
 	}
-	if sink != nil {
-		sink.SetLevel(workerLogLevel(worker))
-	}
+	sink.SetLevel(workerLogLevel(worker))
 
 	m.mu.Lock()
 	if existing := m.logs[name]; existing != nil {
 		m.mu.Unlock()
-		if sink != nil {
-			_ = sink.Close()
-		}
-		return existing
+		_ = sink.Close()
+		return existing, nil
 	}
 	m.logs[name] = sink
 	m.mu.Unlock()
-	return sink
+	return sink, nil
 }
 
 func (m *Manager) StopWorker(name string) error {
@@ -944,9 +950,11 @@ func (m *Manager) UpdateWorker(name string, current config.WorkerConfig, next co
 	if next.LogLevel == "" {
 		next.LogLevel = "simple"
 	}
-	if sink := m.LogSink(name); sink != nil {
-		sink.SetLevel(next.LogLevel)
+	sink, err := m.LogSink(name)
+	if err != nil {
+		return err
 	}
+	sink.SetLevel(next.LogLevel)
 	wasRunning := m.workerStatus(name) == WorkerStateRunning
 	if next.Port == current.Port {
 		m.updateConfig(func(cfgRoot *config.Config) {

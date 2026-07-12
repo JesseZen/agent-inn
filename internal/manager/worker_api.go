@@ -306,7 +306,12 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			http.NotFound(rw, r)
 			return
 		}
-		writeJSON(rw, http.StatusOK, map[string]any{"lines": m.LogSink(workerName).Lines()})
+		sink, err := m.LogSink(workerName)
+		if err != nil {
+			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+			return
+		}
+		writeJSON(rw, http.StatusOK, map[string]any{"lines": sink.Lines()})
 		return
 	}
 	if len(parts) == 3 && parts[1] == "modules" && r.Method == http.MethodPatch {

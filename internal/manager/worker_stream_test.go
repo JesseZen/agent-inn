@@ -24,7 +24,7 @@ func TestWorkerStreamEndpointReplaysExistingLines(t *testing.T) {
 		},
 	})
 
-	if _, err := m.LogSink("app").Write([]byte("INFO POST /v1/responses\n")); err != nil {
+	if _, err := mustLogSink(t, m, "app").Write([]byte("INFO POST /v1/responses\n")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,7 +76,7 @@ func TestWorkerStreamEndpointStreamsLiveSubscribedLines(t *testing.T) {
 		close(done)
 	}()
 
-	if _, err := m.LogSink("app").Write([]byte("INFO POST /v1/responses\n")); err != nil {
+	if _, err := mustLogSink(t, m, "app").Write([]byte("INFO POST /v1/responses\n")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -115,7 +115,7 @@ func TestWorkerStreamEndpointStopsWhenSinkCloses(t *testing.T) {
 		close(done)
 	}()
 
-	if err := m.LogSink("app").Close(); err != nil {
+	if err := mustLogSink(t, m, "app").Close(); err != nil {
 		t.Fatal(err)
 	}
 

@@ -68,7 +68,11 @@ func (m *Manager) handleWorkerStream(rw http.ResponseWriter, r *http.Request, wo
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
 
-	sink := m.LogSink(workerName)
+	sink, err := m.LogSink(workerName)
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+		return
+	}
 	lines, sub, cancel := sink.SnapshotAndSubscribe()
 	defer cancel()
 	for _, line := range lines {

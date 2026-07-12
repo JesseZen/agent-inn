@@ -2410,7 +2410,7 @@ func TestManagerLogSinkWritesToDefaultHomeLogDir(t *testing.T) {
 		},
 	})
 
-	sink := m.LogSink("app")
+	sink := mustLogSink(t, m, "app")
 	if sink == nil {
 		t.Fatal("expected log sink")
 	}
@@ -2446,7 +2446,7 @@ func TestManagerLogSinkWritesToSettingsLogDir(t *testing.T) {
 		},
 	})
 
-	sink := m.LogSink("app")
+	sink := mustLogSink(t, m, "app")
 	if sink == nil {
 		t.Fatal("expected log sink")
 	}
@@ -4336,6 +4336,34 @@ func TestManagerWorkerExitLogsProcessStatus(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsUnavailableWorkerLogPath(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "not-a-directory")
+	port := 47000 + os.Getpid()%1000
+	fallbackPath := filepath.Join(os.TempDir(), fmt.Sprintf("ainn-worker-%d.log", port))
+	_ = os.Remove(fallbackPath)
+	if err := os.WriteFile(logPath, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{
+		Config: config.Config{
+			Settings: config.Settings{LogDir: logPath},
+			Plugins:  testPluginDefinitions(),
+			Workers:  map[string]config.WorkerConfig{"app": {Port: port, Upstream: "openai"}},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		Starter: fakeStarter{},
+	})
+	err := m.StartWorker("app")
+	if err == nil || !strings.Contains(err.Error(), logPath) {
+		t.Fatalf("expected configured log path error, got %v", err)
+	}
+	if _, statErr := os.Stat(fallbackPath); !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected /tmp worker fallback: %v", statErr)
+	}
+}
+
 func TestManagerAPIDeleteWorkerConfigStopsAndRemovesWorker(t *testing.T) {
 	process := &recordingManagedProcess{}
 	m := New(Config{
@@ -5467,7 +5495,7 @@ func TestManagerWorkerLogsAreRedactedAndExposed(t *testing.T) {
 			},
 		},
 	})
-	if _, err := m.LogSink("app").Write([]byte("Authorization: Bearer sk-secret\n")); err != nil {
+	if _, err := mustLogSink(t, m, "app").Write([]byte("Authorization: Bearer sk-secret\n")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -5495,14 +5523,14 @@ func TestManagerLogSinkHonorsWorkerLogLevel(t *testing.T) {
 		},
 	})
 
-	if _, err := m.LogSink("app").Write([]byte("INFO request started\nWARN upstream retrying\n")); err != nil {
+	if _, err := mustLogSink(t, m, "app").Write([]byte("INFO request started\nWARN upstream retrying\n")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.LogSink("cli").Write([]byte("INFO request started\nWARN upstream retrying\n")); err != nil {
+	if _, err := mustLogSink(t, m, "cli").Write([]byte("INFO request started\nWARN upstream retrying\n")); err != nil {
 		t.Fatal(err)
 	}
 
-	appLines := m.LogSink("app").Lines()
+	appLines := mustLogSink(t, m, "app").Lines()
 	if len(appLines) != 1 || !strings.Contains(appLines[0], "WARN upstream retrying") {
 		t.Fatalf("simple worker should keep warn only, got %#v", appLines)
 	}
@@ -5510,7 +5538,7 @@ func TestManagerLogSinkHonorsWorkerLogLevel(t *testing.T) {
 		t.Fatalf("simple worker kept info line: %#v", appLines)
 	}
 
-	cliLines := m.LogSink("cli").Lines()
+	cliLines := mustLogSink(t, m, "cli").Lines()
 	if len(cliLines) != 2 {
 		t.Fatalf("detail worker should keep both lines, got %#v", cliLines)
 	}
@@ -5608,6 +5636,15 @@ type recordingWorkerClient struct {
 	applyErrByPort   map[int]error
 	statusBody       string
 	statusCalls      atomic.Int32
+}
+
+func mustLogSink(t *testing.T, m *Manager, name string) *logging.WorkerLogSink {
+	t.Helper()
+	sink, err := m.LogSink(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sink
 }
 
 func (c *recordingWorkerClient) ToggleModule(port int, moduleName string) error {

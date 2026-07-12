@@ -173,6 +173,23 @@ func TestRootRuntimeDumpsAllStacksForHangup(t *testing.T) {
 	}
 }
 
+func TestRootRuntimeRejectsUnavailableLogPath(t *testing.T) {
+	logPath := t.TempDir() + "/not-a-directory"
+	if err := os.WriteFile(logPath, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := runRootRuntime(RootOptions{
+		ConfigDir:   "/tmp/runtime-config",
+		ManagerPort: 19090,
+		Config:      config.Config{Settings: config.Settings{LogDir: logPath}},
+		Stdout:      io.Discard,
+		Stderr:      io.Discard,
+	}, make(chan rootShutdown))
+	if err == nil || !strings.Contains(err.Error(), logPath) {
+		t.Fatalf("expected configured log path error, got %v", err)
+	}
+}
+
 type blockingRuntimeProgram struct {
 	started chan struct{}
 }
