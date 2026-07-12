@@ -305,7 +305,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		reopenOpts.AddDirs = append([]string{}, session.AddDirs...)
 		reopenOpts.Model = session.Model
 		if session.LauncherSessionID == "" {
-			if session.TurnGeneration > 0 {
+			if session.TurnGeneration > 0 && workerCfg.Launcher != "claudecode" {
 				fmt.Fprintf(stderr, "hosted session %q is stale and has no launcher session id\n", sessionID)
 				return 1
 			}

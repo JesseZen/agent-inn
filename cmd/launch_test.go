@@ -2462,6 +2462,75 @@ func TestRunLaunchHostedTerminalRejectsStartedStaleSessionWithoutLauncherID(t *t
 	}
 }
 
+func TestRunLaunchHostedTerminalReopensStaleClaudeSessionWithoutLauncherID(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
+	configPath := filepath.Join(configDir, config.ConfigFileName)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "    port: 11199\n", "    port: 11199\n    launcher: claudecode\n", 1))
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]string
+	restore := func() func() {
+		previous := launchRunnerFactory
+		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+			return launchRunnerFunc(func(args []string) (string, error) {
+				got = append(got, append([]string{}, args...))
+				if len(args) > 3 && args[3] == "show" {
+					return "on\n", nil
+				}
+				if strings.Join(args, " ") == strings.Join(manager.TmuxListWindowDetailsCommandForSettings(config.Settings{}), " ") {
+					return "@12\tother session\n", nil
+				}
+				if len(args) > 3 && args[3] == "new-window" {
+					return "@77\n", nil
+				}
+				return "", nil
+			})
+		}
+		return func() { launchRunnerFactory = previous }
+	}()
+	defer restore()
+
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.MarkTurnState(created.SessionID, manager.HostedTurnStateRunning, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.UpdateWindowID(created.SessionID, "@12"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected Claude stale session to start a fresh pane, got %d: %s", code, stderr.String())
+	}
+	var claudeLaunch []string
+	for _, command := range got {
+		if len(command) > 0 && command[0] == "tmux" && len(command) > 3 && command[3] == "new-window" {
+			claudeLaunch = command
+		}
+	}
+	if len(claudeLaunch) == 0 || strings.Contains(strings.Join(claudeLaunch, " "), "--resume") {
+		t.Fatalf("expected fresh Claude launch, got %#v", claudeLaunch)
+	}
+}
+
 func TestRunLaunchHostedTerminalReopensStaleClaudeCodeSession(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
