@@ -515,6 +515,41 @@ func TestPoolMemberRequiresProtocolProbeModel(t *testing.T) {
 	}
 }
 
+func TestPoolReferencesAreUniqueAndExist(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "worker pool exists",
+			cfg: Config{Workers: map[string]WorkerConfig{
+				"app": {Upstream: "primary", UpstreamPool: "missing"},
+			}},
+			want: `worker "app" upstream pool "missing" does not exist`,
+		},
+		{
+			name: "pool members are unique",
+			cfg: Config{
+				Upstreams: map[string]UpstreamProfile{"primary": {ProtocolProbe: ProtocolProbeConfig{Model: "probe"}}},
+				UpstreamPools: map[string]UpstreamPool{
+					"coding-ha": {Upstreams: []string{"primary", "primary"}},
+				},
+			},
+			want: `upstream pool "coding-ha" contains duplicate member "primary"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.cfg.ApplyDefaults()
+			got := test.cfg.Validate()
+			if got == nil || got.Error() != test.want {
+				t.Fatalf("unexpected validation error: got %v want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestPoolWorkersRequireCommonProxyURL(t *testing.T) {
 	cfg := Config{
 		Workers: map[string]WorkerConfig{

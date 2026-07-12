@@ -217,6 +217,20 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
+	workerNames := make([]string, 0, len(c.Workers))
+	for name := range c.Workers {
+		workerNames = append(workerNames, name)
+	}
+	sort.Strings(workerNames)
+	for _, name := range workerNames {
+		poolName := strings.TrimSpace(c.Workers[name].UpstreamPool)
+		if poolName == "" {
+			continue
+		}
+		if _, exists := c.UpstreamPools[poolName]; !exists {
+			return fmt.Errorf("worker %q upstream pool %q does not exist", name, poolName)
+		}
+	}
 	poolNames := make([]string, 0, len(c.UpstreamPools))
 	for name := range c.UpstreamPools {
 		poolNames = append(poolNames, name)
@@ -238,6 +252,9 @@ func (c Config) Validate() error {
 		}
 		members := make(map[string]struct{}, len(pool.Upstreams))
 		for _, member := range pool.Upstreams {
+			if _, exists := members[member]; exists {
+				return fmt.Errorf("upstream pool %q contains duplicate member %q", name, member)
+			}
 			profile, exists := c.Upstreams[member]
 			if !exists {
 				return fmt.Errorf("upstream pool %q member %q does not exist", name, member)

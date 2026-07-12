@@ -66,8 +66,18 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method == http.MethodDelete {
-		if _, ok := m.upstreamProfileSnapshot()[name]; !ok {
+		m.mu.RLock()
+		_, exists := m.config.Upstreams[name]
+		candidate := cloneConfig(m.config)
+		m.mu.RUnlock()
+		if !exists {
 			http.NotFound(rw, r)
+			return
+		}
+		delete(candidate.Upstreams, name)
+		candidate.ApplyDefaults()
+		if err := candidate.Validate(); err != nil {
+			writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
 		for workerName, worker := range m.workerConfigSnapshot() {

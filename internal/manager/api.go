@@ -25,6 +25,8 @@ func (m *Manager) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/batches/", m.handleBatchByID)
 	mux.HandleFunc("/api/upstreams", m.handleUpstreams)
 	mux.HandleFunc("/api/upstreams/", m.handleUpstreamByName)
+	mux.HandleFunc("/api/upstream-pools", m.handleUpstreamPools)
+	mux.HandleFunc("/api/upstream-pools/", m.handleUpstreamPoolByName)
 	mux.HandleFunc("/api/settings", m.handleSettings)
 	mux.HandleFunc("/api/config", m.handleConfig)
 }
