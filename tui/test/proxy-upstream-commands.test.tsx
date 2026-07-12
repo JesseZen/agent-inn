@@ -202,6 +202,32 @@ test("proxy upstream editor renames upstream display name", async () => {
   }
 })
 
+test("proxy upstream rename failure stays in the editor", async () => {
+  const app = await mountProxyApp({ patchUpstreamError: "rename rejected" })
+
+  try {
+    await openUpstreamEditor(app, "openai")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable
+    })
+    const editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected focused upstream name prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("OpenAI Main")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.patchUpstream.length === 1)
+    await Bun.sleep(50)
+    await app.render()
+
+    expect(app.frame()).toContain("Edit Upstream: openai")
+    expect(app.calls.patchUpstream).toEqual([{ id: "openai", body: { name: "OpenAI Main" } }])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy upstream creates a new upstream", async () => {
   const app = await mountProxyApp()
 

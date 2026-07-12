@@ -47,9 +47,10 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     value: "rename",
     description: props.worker.id,
     onSelect: async () => {
-      const value = await DialogPrompt.show(dialog, `Rename: ${props.worker.name}`, {
+      const worker = currentWorker()
+      const value = await DialogPrompt.show(dialog, `Rename: ${worker.name}`, {
         placeholder: "Worker display name",
-        value: props.worker.name,
+        value: worker.name,
       })
       if (value === null) return
       const name = value.trim()
@@ -57,7 +58,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.show({ message: "Worker name is required", variant: "error" })
         return
       }
-      if (name === props.worker.name) return
+      if (name === worker.name) return
       try {
         await sdk.client.patchWorker(props.worker.id, { name })
         await sync.bootstrap({ fatal: false })
@@ -289,7 +290,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
 
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [renameAction, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, { ...poolAction, description: currentWorker().upstream_pool || "none" }, restartAction, stopAction, deleteAction]
+      ? [{ ...renameAction, description: currentWorker().name }, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, { ...poolAction, description: currentWorker().upstream_pool || "none" }, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 

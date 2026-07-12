@@ -516,6 +516,33 @@ test("proxy workers detail renames worker display name", async () => {
   }
 })
 
+test("proxy workers rename action follows the live display name", async () => {
+  const app = await mountProxyApp({
+    workers: [
+      {
+        id: "grok",
+        name: "luna",
+        upstream_id: "openai",
+        port: 54479,
+        role: "cli",
+        upstream: { id: "openai", name: "openai", has_api_key: true },
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+    ],
+  })
+
+  try {
+    await openWorkerDetail(app)
+    expect(app.frame()).toContain("luna (:54479)")
+    expect(app.frame()).toContain("Rename Worker luna")
+    expect(app.frame()).not.toContain("Rename Worker grok")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy workers detail escape returns to manage workers", async () => {
   const app = await mountProxyApp()
 

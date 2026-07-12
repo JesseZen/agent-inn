@@ -58,3 +58,4 @@
 30. `ainn` root 同时运行 manager 和 TUI；另启 dev TUI 时，必须把 root 放进独立 detached PTY，禁止两个 TUI 共享 stdin。
 31. dev TUI 必须显式传 `AINN_EXECUTABLE` 指向 worktree build 的绝对路径，禁止依赖 `PATH` 命中其他 `ainn`。
 32. 脚本必须动态选择空闲 manager/worker 端口；ready 检查还要核对返回的 `state_dir` 属于本次临时配置，防止误连旧实例。
+33. 验证脚本不得依赖当前 cwd；构建应在 worktree 内执行，ready 检查按实际 JSON 字段解析，临时 tmux 名称避开 `.` 等特殊字符。

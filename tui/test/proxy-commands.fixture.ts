@@ -73,6 +73,7 @@ type ProxyHarnessInput = {
   hostedSessions?: HostedSessionSummary[]
   hostedSessionsError?: string
   patchWorkerDelayMs?: number
+  patchUpstreamError?: string
   strictModuleWorkerIDs?: boolean
   metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
@@ -600,6 +601,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const id = url.pathname.slice("/api/upstreams/".length)
       const body = JSON.parse(String(init?.body ?? "null")) as { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }
       calls.patchUpstream.push({ id, body })
+      if (input.patchUpstreamError) return json({ error: input.patchUpstreamError }, { status: 409 })
       providers.set(id, {
         id,
         name: body.name ?? providers.get(id)?.name ?? id,

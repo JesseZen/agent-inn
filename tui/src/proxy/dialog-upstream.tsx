@@ -151,9 +151,13 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
       onSelect: async () => {
         const patch = await editField(dialog, field, draft())
         if (!patch) return
-        await sdk.client.patchUpstream(props.id, patch)
-        await sync.bootstrap({ fatal: false })
-        toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${"name" in patch ? patch.name ?? draft().name : draft().name}`, variant: "success" })
+        try {
+          await sdk.client.patchUpstream(props.id, patch)
+          await sync.bootstrap({ fatal: false })
+          toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${"name" in patch ? patch.name ?? draft().name : draft().name}`, variant: "success" })
+        } catch (err) {
+          toast.error(err)
+        }
       },
     })),
   )
