@@ -18,7 +18,7 @@ const (
 	protocolProbeMaximumTokens    = 16
 	protocolProbeFirstByteTimeout = 15 * time.Second
 	protocolProbeTotalTimeout     = 30 * time.Second
-	protocolProbeMaximumBytes     = 64 * 1024
+	protocolProbeMaximumBytes     = 128 * 1024
 	anthropicVersion              = "2023-06-01"
 )
 

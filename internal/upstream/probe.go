@@ -67,11 +67,10 @@ func classifyProbeStatus(statusCode int, latency time.Duration) ProbeResult {
 	result := ProbeResult{StatusCode: statusCode, LatencyMS: latency.Milliseconds()}
 	switch {
 	case statusCode >= 200 && statusCode < 300:
+		result.OK = true
 		if latency >= degradedLatencyThreshold {
 			result.Degraded = true
 			result.Error = "slow"
-		} else {
-			result.OK = true
 		}
 	case statusCode == 401 || statusCode == 403:
 		result.Error = "auth_error"

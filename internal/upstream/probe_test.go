@@ -111,7 +111,7 @@ func TestProbeDegradedSlowLatency(t *testing.T) {
 	got := probeWithClient(context.Background(), compiled, &http.Client{Timeout: 3 * time.Second})
 
 	got.LatencyMS = 0
-	want := ProbeResult{OK: false, Degraded: true, StatusCode: http.StatusOK, Error: "slow", Mode: ProbeModeReachability}
+	want := ProbeResult{OK: true, Degraded: true, StatusCode: http.StatusOK, Error: "slow", Mode: ProbeModeReachability}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

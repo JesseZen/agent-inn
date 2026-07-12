@@ -14,7 +14,10 @@ import (
 	appruntime "github.com/jesse/agent-inn/internal/runtime"
 )
 
-const protocolProbeTestModel = "probe-model"
+const (
+	protocolProbeTestModel       = "probe-model"
+	protocolProbeLargeEventBytes = 72 * 1024
+)
 
 func TestProbeProtocolValidatesSuccessfulTerminalEvent(t *testing.T) {
 	tests := []struct {
@@ -140,6 +143,28 @@ func TestProbeProtocolValidatesSuccessfulTerminalEvent(t *testing.T) {
 	}
 }
 
+func TestProbeProtocolAcceptsLargeValidStream(t *testing.T) {
+	stream := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"instructions\":\"" +
+		strings.Repeat("x", protocolProbeLargeEventBytes) +
+		"\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer server.Close()
+
+	compiled, err := Compile(appruntime.UpstreamRuntime{BaseURL: server.URL, APIFormat: appruntime.APIFormatResponses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ProbeProtocolWithClient(t.Context(), compiled, protocolProbeTestModel, server.Client())
+	got.LatencyMS = 0
+	want := ProbeResult{OK: true, StatusCode: http.StatusOK, Mode: ProbeModeProtocol, Authoritative: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected large stream result:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestProbeProtocolRejectsInvalidStreams(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -191,9 +216,11 @@ func TestProbeProtocolRejectsInvalidStreams(t *testing.T) {
 			want:    ProbeResult{Error: "timeout", Mode: ProbeModeProtocol, Authoritative: true},
 		},
 		{
-			name:   "oversized response",
-			stream: "data: " + strings.Repeat("x", 64*1024) + "\n\n",
-			want:   ProbeResult{StatusCode: http.StatusOK, Error: "protocol_error", Mode: ProbeModeProtocol, Authoritative: true},
+			name: "oversized response",
+			stream: "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"instructions\":\"" +
+				strings.Repeat("x", protocolProbeMaximumBytes) +
+				"\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+			want: ProbeResult{StatusCode: http.StatusOK, Error: "protocol_error", Mode: ProbeModeProtocol, Authoritative: true},
 		},
 	}
 
