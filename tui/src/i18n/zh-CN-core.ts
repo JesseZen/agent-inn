@@ -1,4 +1,6 @@
 export const coreZhCN = {
+  "category.dialog": "对话框",
+
   "session.notFound": "未找到会话：{{sessionID}}",
   "session.retryError": "重试错误",
   "session.copyShareLink": "复制共享链接",
@@ -99,6 +101,18 @@ export const coreZhCN = {
   "prompt.creatingWorkspace": "正在创建 {{workspaceType}}",
   "prompt.selection": "选择 {{index}}： ",
   "prompt.note": "注意：用户从“{{filePath}}”中选择了 {{selection}}。```{{text}}```",
+  "prompt.createCopy": "正在创建副本",
+  "prompt.createSession": "正在创建会话",
+  "prompt.moveSessionProgress": "正在移动会话",
+  "prompt.submitProgress": "正在提交提示词",
+  "prompt.workspaceLabel": "工作区",
+  "prompt.newWorkspace": "（新 {{workspaceType}}）",
+  "prompt.warped": "已切换到 {{name}}",
+  "prompt.autocomplete.previous": "上一个自动补全项目",
+  "prompt.autocomplete.next": "下一个自动补全项目",
+  "prompt.autocomplete.hide": "隐藏自动补全",
+  "prompt.autocomplete.select": "选择自动补全项目",
+  "prompt.autocomplete.complete": "完成自动补全项目",
 
   "dialog.search": "搜索",
   "dialog.noResults": "未找到结果",
@@ -126,6 +140,8 @@ export const coreZhCN = {
   "dialog.noMatchingItems": "没有匹配的项目",
   "dialog.alertConfirm": "确认提醒",
   "dialog.helpConfirm": "确定",
+  "dialog.help.close": "关闭帮助",
+  "dialog.help.description": "按 {{shortcut}} 可在任何上下文中查看所有可用操作和命令。",
 
   "permission.noDiff": "未提供差异",
   "permission.allowPatterns": "AINN 重启前将允许以下模式",
@@ -199,6 +215,11 @@ export const coreZhCN = {
   "export.openWithoutSaving": "打开但不保存",
   "export.pressToToggle": "按 {{key}} 切换",
   "export.pressToConfirm": "按 {{key}} 确认",
+  "export.title": "导出选项",
+  "export.nextOption": "下一个导出选项",
+  "export.toggleOption": "切换导出选项",
+  "export.toggleHint": "按 {{toggleKey}} 切换，按 {{confirmKey}} 确认",
+  "export.optionsHint": "按 {{confirmKey}} 确认，按 {{optionsKey}} 查看选项",
 
   "question.clearAnswer": "清除回答编辑",
   "question.reject": "拒绝问题",

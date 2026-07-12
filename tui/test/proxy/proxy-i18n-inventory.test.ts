@@ -272,13 +272,14 @@ function placeholders(value: string) {
   return [...value.matchAll(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g)].map((match) => match[1]).sort()
 }
 
+function placeholderMap(values: Record<string, string>) {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, placeholders(value)]))
+}
+
 test("Proxy dictionaries match the frozen static inventory", () => {
   expect(Object.keys(proxyEn)).toHaveLength(263)
   expect(Object.keys(proxyEn).sort()).toEqual(Object.keys(expectedProxyEn).sort())
   expect(proxyEn).toEqual(expectedProxyEn)
   expect(Object.keys(proxyZhCN).sort()).toEqual(Object.keys(expectedProxyEn).sort())
-  for (const key of Object.keys(expectedProxyEn) as Array<keyof typeof expectedProxyEn>) {
-    expect(placeholders(proxyZhCN[key])).toEqual(placeholders(proxyEn[key]))
-  }
+  expect(placeholderMap(proxyZhCN)).toEqual(placeholderMap(expectedProxyEn))
 })
-

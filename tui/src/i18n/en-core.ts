@@ -1,4 +1,6 @@
 export const coreEn = {
+  "category.dialog": "Dialog",
+
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
   "session.copyShareLink": "Copy share link",
@@ -99,6 +101,18 @@ export const coreEn = {
   "prompt.creatingWorkspace": "Creating {{workspaceType}}",
   "prompt.selection": "Selection {{index}}: ",
   "prompt.note": "Note: The user selected {{selection}} from \"{{filePath}}\". ```{{text}}```",
+  "prompt.createCopy": "Creating copy",
+  "prompt.createSession": "Creating session",
+  "prompt.moveSessionProgress": "Moving session",
+  "prompt.submitProgress": "Submitting prompt",
+  "prompt.workspaceLabel": "Workspace",
+  "prompt.newWorkspace": "(new {{workspaceType}})",
+  "prompt.warped": "Warped to {{name}}",
+  "prompt.autocomplete.previous": "Previous autocomplete item",
+  "prompt.autocomplete.next": "Next autocomplete item",
+  "prompt.autocomplete.hide": "Hide autocomplete",
+  "prompt.autocomplete.select": "Select autocomplete item",
+  "prompt.autocomplete.complete": "Complete autocomplete item",
 
   "dialog.search": "Search",
   "dialog.noResults": "No results found",
@@ -126,6 +140,8 @@ export const coreEn = {
   "dialog.noMatchingItems": "No matching items",
   "dialog.alertConfirm": "Confirm alert",
   "dialog.helpConfirm": "ok",
+  "dialog.help.close": "Close help",
+  "dialog.help.description": "Press {{shortcut}} to see all available actions and commands in any context.",
 
   "permission.noDiff": "No diff provided",
   "permission.allowPatterns": "This will allow the following patterns until Ainn is restarted",
@@ -199,6 +215,11 @@ export const coreEn = {
   "export.openWithoutSaving": "Open without saving",
   "export.pressToToggle": "Press {{key}} to toggle",
   "export.pressToConfirm": "Press {{key}} to confirm",
+  "export.title": "Export Options",
+  "export.nextOption": "Next export option",
+  "export.toggleOption": "Toggle export option",
+  "export.toggleHint": "Press {{toggleKey}} to toggle, {{confirmKey}} to confirm",
+  "export.optionsHint": "Press {{confirmKey}} to confirm, {{optionsKey}} for options",
 
   "question.clearAnswer": "Clear answer edit",
   "question.reject": "Reject question",
