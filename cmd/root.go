@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -8,14 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
-	"github.com/jesse/agent-inn/internal/constants"
-	"github.com/jesse/agent-inn/internal/logging"
 	"github.com/jesse/agent-inn/internal/manager"
 )
 
@@ -34,7 +31,7 @@ type rootServer interface {
 }
 
 type rootProgram interface {
-	Run() error
+	Run(context.Context) error
 	CommandLine() []string
 	WorkingDir() string
 	Env() map[string]string
@@ -153,65 +150,7 @@ func setRootLockerFactoryForTest(locker rootLocker) func() {
 // errAlreadyLocked 是抢锁失败的哨兵错误，runRoot 据此输出友好提示。
 var errAlreadyLocked = fmt.Errorf("another instance is already running")
 
-var rootRunner = func(opts RootOptions) error {
-	logDir := opts.Config.Settings.LogDir
-	if logDir == "" {
-		logDir = "~/.ainn/logs"
-	}
-	logDir = expandHome(logDir)
-	logPath := filepath.Join(logDir, "ainn.log")
-	logWriter, err := logging.NewRotatingWriter(logPath, logging.DefaultRotateMaxBytes, logging.DefaultRotateKeep)
-	if err != nil {
-		logWriter, err = logging.NewRotatingWriter(filepath.Join(os.TempDir(), "ainn.log"), logging.DefaultRotateMaxBytes, logging.DefaultRotateKeep)
-	}
-	if err != nil {
-		return fmt.Errorf("open root log: %w", err)
-	}
-	defer logWriter.Close()
-	level := opts.Config.Settings.LogLevel
-	if level == "" {
-		level = "simple"
-	}
-	rootLogger := logging.New(logWriter, level, logging.ComponentRoot)
-	opts.ManagerLogger = logging.New(logWriter, level, logging.ComponentManagerSuper)
-	opts.ManagerHealthLogger = logging.New(logWriter, level, logging.ComponentManagerHealth)
-	rootLogger.Info(logging.EventRootStart, "port", opts.ManagerPort)
-	defer rootLogger.Info(logging.EventRootStop)
-
-	mgr := rootManagerFactory(opts)
-	defer mgr.Close()
-	startupStatus := ""
-	if err := mgr.StartConfiguredWorkers(); err != nil {
-		startupStatus = err.Error()
-	}
-	stopHealthMonitor := mgr.StartHealthMonitor(0)
-	defer stopHealthMonitor()
-	stopUpstreamProber := mgr.StartUpstreamProber(0)
-	defer stopUpstreamProber()
-	stopHostedTurnWatcher := mgr.StartHostedTurnWatcher(0)
-	defer stopHostedTurnWatcher()
-	addr := constants.LocalhostAddr + ":" + strconv.Itoa(opts.ManagerPort)
-	server := rootServerFactory(addr, mgr)
-	errCh := make(chan error, 1)
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-	}()
-
-	program := rootProgramFactory(addr, startupStatus, opts.ConfigDir)
-	if err := program.Run(); err != nil {
-		_ = server.Close()
-		return err
-	}
-	_ = server.Close()
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
-}
+var rootRunner = runRootProcess
 
 func SetRootRunnerForTest(runner func(RootOptions) error) func() {
 	previous := rootRunner
@@ -292,20 +231,6 @@ func (p *tuiProgram) Env() map[string]string {
 		env["AINN_STARTUP_STATUS"] = p.startupStatus
 	}
 	return env
-}
-
-func (p *tuiProgram) Run() error {
-	line := p.CommandLine()
-	cmd := exec.Command(line[0], line[1:]...)
-	cmd.Dir = p.WorkingDir()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Env = os.Environ()
-	for key, value := range p.Env() {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-	return cmd.Run()
 }
 
 func setRootLogWriterForTest(writer io.Writer) func() {

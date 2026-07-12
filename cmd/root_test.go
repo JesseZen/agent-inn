@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -3330,7 +3331,7 @@ type fakeRootProgram struct {
 	configDir     string
 }
 
-func (p *fakeRootProgram) Run() error {
+func (p *fakeRootProgram) Run(context.Context) error {
 	p.runCalled = true
 	if p.waitForListen != nil {
 		select {
