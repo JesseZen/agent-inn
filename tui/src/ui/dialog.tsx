@@ -1,5 +1,5 @@
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
+import { createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
 import { useTheme } from "../context/theme"
 import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
@@ -10,10 +10,11 @@ import { useClipboard } from "../context/clipboard"
 
 export const DIALOG_XLARGE_WIDTH = 116
 const DIALOG_MEDIUM_TOP_OFFSET_RATIO = 4
+type DialogSize = "medium" | "large" | "xlarge"
 
 export function Dialog(
   props: ParentProps<{
-    size?: "medium" | "large" | "xlarge"
+    size?: DialogSize
     onClose: () => void
   }>,
 ) {
@@ -73,8 +74,8 @@ function init() {
     stack: [] as {
       element: JSX.Element
       onClose?: () => void
+      size: DialogSize
     }[],
-    size: "medium" as "medium" | "large" | "xlarge",
   })
 
   const renderer = useRenderer()
@@ -104,6 +105,14 @@ function init() {
     }, 1)
   }
 
+  function popFrame() {
+    const current = store.stack.at(-1)
+    current?.onClose?.()
+    const next = store.stack.slice(0, -1)
+    setStore("stack", next)
+    if (next.length === 0) refocus()
+  }
+
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
     bindings: [
@@ -115,10 +124,7 @@ function init() {
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
+          popFrame()
         },
       },
       {
@@ -129,10 +135,7 @@ function init() {
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
+          popFrame()
         },
       },
     ],
@@ -143,21 +146,11 @@ function init() {
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
-      batch(() => {
-        setStore("size", "medium")
-        setStore("stack", [])
-      })
+      setStore("stack", [])
       refocus()
     },
     pop() {
-      const current = store.stack.at(-1)
-      current?.onClose?.()
-      const next = store.stack.slice(0, -1)
-      setStore("stack", next)
-      if (next.length <= 1) {
-        setStore("size", "medium")
-      }
-      if (next.length === 0) refocus()
+      popFrame()
     },
     replace(input: any, onClose?: () => void) {
       if (store.stack.length === 0) {
@@ -169,13 +162,7 @@ function init() {
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
-      setStore("size", "medium")
-      setStore("stack", [
-        {
-          element: input,
-          onClose,
-        },
-      ])
+      setStore("stack", [{ element: input, onClose, size: "medium" }])
     },
     push(input: any, onClose?: () => void) {
       if (store.stack.length === 0) {
@@ -184,23 +171,17 @@ function init() {
       } else {
         renderer.currentFocusedRenderable?.blur()
       }
-      setStore("size", "medium")
-      setStore("stack", [
-        ...store.stack,
-        {
-          element: input,
-          onClose,
-        },
-      ])
+      setStore("stack", [...store.stack, { element: input, onClose, size: "medium" }])
     },
     get stack() {
       return store.stack
     },
     get size() {
-      return store.size
+      return store.stack.at(-1)?.size ?? "medium"
     },
-    setSize(size: "medium" | "large" | "xlarge") {
-      setStore("size", size)
+    setSize(size: DialogSize) {
+      if (store.stack.length === 0) return
+      setStore("stack", store.stack.length - 1, "size", size)
     },
   }
 }

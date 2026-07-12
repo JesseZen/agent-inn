@@ -2510,6 +2510,41 @@ func TestManagerWorkerSummaryUsesStableIDsAndDisplayNames(t *testing.T) {
 	}
 }
 
+func TestManagerUpstreamSummariesUseStableIDsAndDisplayNames(t *testing.T) {
+	cfg := testManagerConfig()
+	profile := cfg.Upstreams["openai"]
+	profile.Name = "OpenAI Display"
+	cfg.Upstreams["openai"] = profile
+
+	m := New(Config{Config: cfg})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/upstreams", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got struct {
+		Upstreams map[string]upstream.RedactedUpstream `json:"upstreams"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := struct {
+		Upstreams map[string]upstream.RedactedUpstream `json:"upstreams"`
+	}{
+		Upstreams: map[string]upstream.RedactedUpstream{
+			"openai": {
+				ID:        "openai",
+				Name:      "OpenAI Display",
+				BaseURL:   "https://api.openai.com/v1",
+				HasAPIKey: true,
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bad upstream summaries:\nwant %#v\ngot  %#v", want, got)
+	}
+}
+
 func TestManagerWorkerSummaryReportsMissingUpstream(t *testing.T) {
 	cfg := testManagerConfig()
 	worker := cfg.Workers["app"]

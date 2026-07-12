@@ -1,6 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { Global } from "@agent-inn/core/global"
 import { TextareaRenderable } from "@opentui/core"
+import type { HostedSessionSummary } from "../src/proxy/backend"
 import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalPopupApp, wait } from "./proxy-hosted-terminal.fixture"
 
 afterEach(() => {
@@ -190,7 +191,7 @@ test("popup mode nested escape returns to the visible right-rail root", async ()
 test("popup mode direct-root rename persists the refreshed list without replacing the right rail", async () => {
   const patches: Array<{ session_id: string; session_label: string }> = []
   let listCalls = 0
-  let sessions = [{ ...activeHostedSession }]
+  let sessions: HostedSessionSummary[] = [{ ...activeHostedSession }]
   const app = await mountHostedTerminalPopupApp((url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
