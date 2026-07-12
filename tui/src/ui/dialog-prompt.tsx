@@ -5,6 +5,7 @@ import { Show, createEffect, createResource, createSignal, Index, onMount, type 
 import { Spinner } from "../component/spinner"
 import { useTuiConfig } from "../config"
 import { useBindings, useCommandShortcut } from "../keymap"
+import { useLanguage } from "../context/language"
 import { getDirectoryCompletions } from "../util/directory-completion"
 
 export type DialogPromptProps = {
@@ -29,6 +30,7 @@ export function DialogPrompt(props: DialogPromptProps) {
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
   const submitShortcut = useCommandShortcut("dialog.prompt.submit")
+  const { t } = useLanguage()
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   let textarea: TextareaRenderable
 
@@ -53,32 +55,32 @@ export function DialogPrompt(props: DialogPromptProps) {
     commands: [
       {
         name: "dialog.prompt.submit",
-        title: "Submit dialog prompt",
-        category: "Dialog",
+        title: t("dialog.submitPrompt"),
+        category: t("category.dialog"),
         run: confirm,
       },
       ...(props.directoryCompletion
         ? [
             {
               name: "dialog.select.prev",
-              title: "Previous dialog item",
-              category: "Dialog",
+              title: t("dialog.previousDialogItem"),
+              category: t("category.dialog"),
               run() {
                 if (suggestions().length) setSelected((value) => value > 0 ? value - 1 : suggestions().length - 1)
               },
             },
             {
               name: "dialog.select.next",
-              title: "Next dialog item",
-              category: "Dialog",
+              title: t("dialog.nextDialogItem"),
+              category: t("category.dialog"),
               run() {
                 if (suggestions().length) setSelected((value) => value + 1 < suggestions().length ? value + 1 : 0)
               },
             },
             {
               name: "prompt.autocomplete.complete",
-              title: "Complete dialog directory",
-              category: "Dialog",
+              title: t("dialog.completeDirectory"),
+              category: t("category.dialog"),
               run() {
                 const next = suggestions()[selected()] ?? suggestions()[0]
                 if (!next) return
@@ -155,7 +157,7 @@ export function DialogPrompt(props: DialogPromptProps) {
             setTextareaTarget(val)
           }}
           initialValue={props.value}
-          placeholder={props.placeholder ?? "Enter text"}
+          placeholder={props.placeholder ?? t("dialog.enterText")}
           placeholderColor={theme.textMuted}
           textColor={props.busy ? theme.textMuted : theme.text}
           focusedTextColor={props.busy ? theme.textMuted : theme.text}
@@ -170,7 +172,7 @@ export function DialogPrompt(props: DialogPromptProps) {
         </Show>
         <Show when={props.directoryCompletion}>
           <box flexDirection="column">
-            <Index each={suggestions()} fallback={<text fg={theme.textMuted}>No matching directories</text>}>
+            <Index each={suggestions()} fallback={<text fg={theme.textMuted}>{t("dialog.noMatchingDirectories")}</text>}>
               {(item, index) => (
                 <box backgroundColor={index === selected() ? theme.primary : undefined}>
                   <text fg={index === selected() ? theme.backgroundPanel : theme.text}>{item().display}</text>
@@ -181,11 +183,11 @@ export function DialogPrompt(props: DialogPromptProps) {
         </Show>
       </box>
       <box paddingBottom={1} gap={1} flexDirection="row">
-        <Show when={!props.busy} fallback={<text fg={theme.textMuted}>processing...</text>}>
+        <Show when={!props.busy} fallback={<text fg={theme.textMuted}>{t("dialog.processing")}</text>}>
           <Show when={submitShortcut()}>
             <box onMouseUp={() => confirm()}>
               <text fg={theme.text}>
-                {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
+                {submitShortcut()} <span style={{ fg: theme.textMuted }}>{t("dialog.submit")}</span>
               </text>
             </box>
           </Show>

@@ -232,5 +232,50 @@ describe("transcript message formatting", () => {
       expect(result).toContain("## Assistant (Build · Claude Sonnet 4 · 5.4s)")
       expect(result).toContain("Hi there")
     })
+
+    test("localizes owned labels while preserving dynamic transcript content", () => {
+      const msg: AssistantMessage = {
+        id: "msg_zh",
+        sessionID: "ses_zh",
+        role: "assistant",
+        agent: "custom-agent",
+        modelID: "模型-x/alpha",
+        providerID: "upstream-保留",
+        mode: "",
+        parentID: "msg_parent",
+        path: { cwd: "/tmp/项目/a.ts", root: "/tmp/项目" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1000, completed: 2000 },
+      }
+      const parts: Part[] = [
+        {
+          id: "part_zh",
+          sessionID: "ses_zh",
+          messageID: "msg_zh",
+          type: "tool",
+          callID: "call_zh",
+          tool: "插件工具",
+          state: {
+            status: "error",
+            input: { filePath: "/tmp/项目/a.ts" },
+            error: "上游原始错误: keep-exact",
+            time: { start: 1000, end: 2000 },
+          },
+        },
+      ]
+
+      const result = formatMessage(msg, parts, {
+        thinking: true,
+        toolDetails: true,
+        assistantMetadata: true,
+        locale: "zh-CN",
+      })
+
+      expect(result).toContain("## 助手 (Custom-Agent · 模型-x/alpha · 1.0s)")
+      expect(result).toContain("**工具： 插件工具**")
+      expect(result).toContain('"filePath": "/tmp/项目/a.ts"')
+      expect(result).toContain("上游原始错误: keep-exact")
+    })
   })
 })

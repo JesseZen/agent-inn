@@ -3,8 +3,8 @@ import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
 import { createStore } from "solid-js/store"
 import { For } from "solid-js"
-import { Locale } from "../util/locale"
 import { useBindings } from "../keymap"
+import { useLanguage } from "../context/language"
 
 export type DialogConfirmProps = {
   title: string
@@ -19,6 +19,7 @@ export type DialogConfirmResult = boolean | undefined
 export function DialogConfirm(props: DialogConfirmProps) {
   const dialog = useDialog()
   const { theme } = useTheme()
+  const { t } = useLanguage()
   const [store, setStore] = createStore({
     active: "confirm" as "confirm" | "cancel",
   })
@@ -27,8 +28,8 @@ export function DialogConfirm(props: DialogConfirmProps) {
     bindings: [
       {
         key: "return",
-        desc: "Confirm dialog selection",
-        group: "Dialog",
+        desc: t("dialog.confirmSelection"),
+        group: t("category.dialog"),
         cmd: () => {
           if (store.active === "confirm") props.onConfirm?.()
           if (store.active === "cancel") props.onCancel?.()
@@ -37,16 +38,16 @@ export function DialogConfirm(props: DialogConfirmProps) {
       },
       {
         key: "left",
-        desc: "Previous dialog option",
-        group: "Dialog",
+        desc: t("dialog.previousOption"),
+        group: t("category.dialog"),
         cmd: () => {
           setStore("active", store.active === "confirm" ? "cancel" : "confirm")
         },
       },
       {
         key: "right",
-        desc: "Next dialog option",
-        group: "Dialog",
+        desc: t("dialog.nextOption"),
+        group: t("category.dialog"),
         cmd: () => {
           setStore("active", store.active === "confirm" ? "cancel" : "confirm")
         },
@@ -80,7 +81,7 @@ export function DialogConfirm(props: DialogConfirmProps) {
               }}
             >
               <text fg={key === store.active ? theme.selectedListItemText : theme.textMuted}>
-                {Locale.titlecase(key === "cancel" ? (props.label ?? key) : key)}
+                {key === "cancel" ? (props.label ?? t("dialog.cancelLabel")) : t("dialog.confirmLabel")}
               </text>
             </box>
           )}

@@ -13,6 +13,7 @@ import { useData } from "../../context/data"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiPaths } from "../../context/runtime"
 import { useTuiConfig } from "../../config"
+import { useLanguage } from "../../context/language"
 import { useTheme, selectedForeground } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { useTerminalDimensions } from "@opentui/solid"
@@ -93,6 +94,7 @@ export function Autocomplete(props: {
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
   const tuiConfig = useTuiConfig()
+  const { t } = useLanguage()
   const paths = useTuiPaths()
   const [store, setStore] = createStore({
     index: 0,
@@ -573,7 +575,7 @@ export function Autocomplete(props: {
     commands: [
       {
         name: "prompt.autocomplete.prev",
-        title: "Previous autocomplete item",
+        title: t("prompt.autocomplete.previous"),
         category: "Autocomplete",
         run() {
           setStore("input", "keyboard")
@@ -582,7 +584,7 @@ export function Autocomplete(props: {
       },
       {
         name: "prompt.autocomplete.next",
-        title: "Next autocomplete item",
+        title: t("prompt.autocomplete.next"),
         category: "Autocomplete",
         run() {
           setStore("input", "keyboard")
@@ -591,7 +593,7 @@ export function Autocomplete(props: {
       },
       {
         name: "prompt.autocomplete.hide",
-        title: "Hide autocomplete",
+        title: t("prompt.autocomplete.hide"),
         category: "Autocomplete",
         run() {
           hide()
@@ -599,7 +601,7 @@ export function Autocomplete(props: {
       },
       {
         name: "prompt.autocomplete.select",
-        title: "Select autocomplete item",
+        title: t("prompt.autocomplete.select"),
         category: "Autocomplete",
         run() {
           select()
@@ -607,7 +609,7 @@ export function Autocomplete(props: {
       },
       {
         name: "prompt.autocomplete.complete",
-        title: "Complete autocomplete item",
+        title: t("prompt.autocomplete.complete"),
         category: "Autocomplete",
         run() {
           const selected = options()[store.selected]
@@ -730,7 +732,7 @@ export function Autocomplete(props: {
           each={options()}
           fallback={
             <box paddingLeft={1} paddingRight={1}>
-              <text fg={theme.textMuted}>No matching items</text>
+            <text fg={theme.textMuted}>{t("dialog.noMatchingItems")}</text>
             </box>
           }
         >

@@ -7,6 +7,7 @@ import { useToast } from "./toast"
 import { Flag } from "@agent-inn/core/flag/flag"
 import { AINN_MODAL_MODE, useBindings, useAinnModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
+import { useLanguage } from "../context/language"
 
 export const DIALOG_XLARGE_WIDTH = 116
 const DIALOG_MEDIUM_TOP_OFFSET_RATIO = 4
@@ -80,6 +81,7 @@ function init() {
 
   const renderer = useRenderer()
   const modeStack = useAinnModeStack()
+  const { t } = useLanguage()
 
   createEffect(() => {
     if (store.stack.length === 0) return
@@ -118,8 +120,8 @@ function init() {
     bindings: [
       {
         key: "escape",
-        desc: "Close dialog",
-        group: "Dialog",
+        desc: t("dialog.close"),
+        group: t("category.dialog"),
         cmd: () => {
           if (renderer.getSelection()) {
             renderer.clearSelection()
@@ -129,8 +131,8 @@ function init() {
       },
       {
         key: "ctrl+c",
-        desc: "Close dialog",
-        group: "Dialog",
+        desc: t("dialog.close"),
+        group: t("category.dialog"),
         cmd: () => {
           if (renderer.getSelection()) {
             renderer.clearSelection()
@@ -195,12 +197,13 @@ export function DialogProvider(props: ParentProps) {
   const renderer = useRenderer()
   const toast = useToast()
   const clipboard = useClipboard()
+  const { t } = useLanguage()
 
   function copySelection() {
     const text = renderer.getSelection()?.getSelectedText()
     if (!text || !clipboard.write) return false
     void clipboard.write(text).then(
-      () => toast.show({ message: "Copied to clipboard", variant: "info" }),
+      () => toast.show({ message: t("common.copied"), variant: "info" }),
       (error) => toast.error(error),
     )
     renderer.clearSelection()

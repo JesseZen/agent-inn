@@ -6,6 +6,7 @@ import { Locale } from "../../util/locale"
 import { DialogMessage } from "./dialog-message"
 import { useDialog } from "../../ui/dialog"
 import type { PromptInfo } from "../../component/prompt/history"
+import { useLanguage } from "../../context/language"
 
 export function DialogTimeline(props: {
   sessionID: string
@@ -14,6 +15,7 @@ export function DialogTimeline(props: {
 }) {
   const sync = useSync()
   const dialog = useDialog()
+  const { t } = useLanguage()
 
   onMount(() => {
     dialog.setSize("large")
@@ -43,5 +45,5 @@ export function DialogTimeline(props: {
     return result
   })
 
-  return <DialogSelect onMove={(option) => props.onMove(option.value)} title="Timeline" options={options()} />
+  return <DialogSelect onMove={(option) => props.onMove(option.value)} title={t("session.timeline")} options={options()} />
 }

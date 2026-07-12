@@ -8,6 +8,7 @@ import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useTuiConfig } from "../../config"
 import { useBindings, useAinnModeStack } from "../../keymap"
+import { useLanguage } from "../../context/language"
 
 const QUESTION_MODE = "question"
 
@@ -17,6 +18,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
   const renderer = useRenderer()
   const tuiConfig = useTuiConfig()
   const modeStack = useAinnModeStack()
+  const { t } = useLanguage()
 
   const questions = createMemo(() => props.request.questions)
   const single = createMemo(() => questions().length === 1 && questions()[0]?.multiple !== true)
@@ -136,8 +138,8 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     commands: [
       {
         name: "prompt.clear",
-        title: "Clear answer edit",
-        category: "Question",
+        title: t("question.clearAnswer"),
+        category: t("category.question"),
         run() {
           const text = textarea?.plainText ?? ""
           if (!text) {
@@ -151,8 +153,8 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     bindings: [
       {
         key: "escape",
-        desc: "Cancel answer edit",
-        group: "Question",
+        desc: t("question.cancelEdit"),
+        group: t("category.question"),
         cmd: () => {
           setStore("editing", false)
         },
@@ -160,8 +162,8 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       ...tuiConfig.keybinds.get("prompt.clear"),
       {
         key: "return",
-        desc: "Submit answer edit",
-        group: "Question",
+        desc: t("question.submitEdit"),
+        group: t("category.question"),
         cmd: () => {
           const text = textarea?.plainText?.trim() ?? ""
           const prev = store.custom[store.tab]
@@ -217,8 +219,8 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       commands: [
         {
           name: "app.exit",
-          title: "Reject question",
-          category: "Question",
+          title: t("question.reject"),
+          category: t("category.question"),
           run() {
             reject()
           },
@@ -227,37 +229,47 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       bindings: [
         {
           key: "left",
-          desc: "Previous question",
-          group: "Question",
+          desc: t("question.previousQuestion"),
+          group: t("category.question"),
           cmd: () => selectTab((store.tab - 1 + tabs()) % tabs()),
         },
         {
           key: "h",
-          desc: "Previous question",
-          group: "Question",
+          desc: t("question.previousQuestion"),
+          group: t("category.question"),
           cmd: () => selectTab((store.tab - 1 + tabs()) % tabs()),
         },
-        { key: "right", desc: "Next question", group: "Question", cmd: () => selectTab((store.tab + 1) % tabs()) },
-        { key: "l", desc: "Next question", group: "Question", cmd: () => selectTab((store.tab + 1) % tabs()) },
+        {
+          key: "right",
+          desc: t("question.nextQuestion"),
+          group: t("category.question"),
+          cmd: () => selectTab((store.tab + 1) % tabs()),
+        },
+        {
+          key: "l",
+          desc: t("question.nextQuestion"),
+          group: t("category.question"),
+          cmd: () => selectTab((store.tab + 1) % tabs()),
+        },
         {
           key: "tab",
-          desc: "Next question",
-          group: "Question",
+          desc: t("question.nextQuestion"),
+          group: t("category.question"),
           cmd: ({ event }: { event: { shift: boolean } }) => {
             selectTab((store.tab + (event.shift ? -1 : 1) + tabs()) % tabs())
           },
         },
         ...(confirm()
           ? [
-              { key: "return", desc: "Submit answer", group: "Question", cmd: () => submit() },
-              { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              { key: "return", desc: t("question.submitAnswer"), group: t("category.question"), cmd: () => submit() },
+              { key: "escape", desc: t("question.reject"), group: t("category.question"), cmd: () => reject() },
               ...tuiConfig.keybinds.get("app.exit"),
             ]
           : [
               ...Array.from({ length: max }, (_, index) => ({
                 key: String(index + 1),
                 desc: `Select answer ${index + 1}`,
-                group: "Question",
+                group: t("category.question"),
                 cmd: () => {
                   moveTo(index)
                   selectOption()
@@ -265,20 +277,35 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
               })),
               {
                 key: "up",
-                desc: "Previous answer",
-                group: "Question",
+                desc: t("question.previousAnswer"),
+                group: t("category.question"),
                 cmd: () => moveTo((store.selected - 1 + total) % total),
               },
               {
                 key: "k",
-                desc: "Previous answer",
-                group: "Question",
+                desc: t("question.previousAnswer"),
+                group: t("category.question"),
                 cmd: () => moveTo((store.selected - 1 + total) % total),
               },
-              { key: "down", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
-              { key: "j", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
-              { key: "return", desc: "Select answer", group: "Question", cmd: () => selectOption() },
-              { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              {
+                key: "down",
+                desc: t("question.nextAnswer"),
+                group: t("category.question"),
+                cmd: () => moveTo((store.selected + 1) % total),
+              },
+              {
+                key: "j",
+                desc: t("question.nextAnswer"),
+                group: t("category.question"),
+                cmd: () => moveTo((store.selected + 1) % total),
+              },
+              {
+                key: "return",
+                desc: t("question.selectAnswer"),
+                group: t("category.question"),
+                cmd: () => selectOption(),
+              },
+              { key: "escape", desc: t("question.reject"), group: t("category.question"), cmd: () => reject() },
               ...tuiConfig.keybinds.get("app.exit"),
             ]),
       ],
@@ -347,7 +374,9 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                 selectTab(questions().length)
               }}
             >
-              <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>Confirm</text>
+              <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>
+                {t("question.confirm")}
+              </text>
             </box>
           </box>
         </Show>
@@ -357,7 +386,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
             <box>
               <text fg={theme.text}>
                 {question()?.question}
-                {multi() ? " (select all that apply)" : ""}
+                {multi() ? ` (${t("question.selectAll")})` : ""}
               </text>
             </box>
             <box>
@@ -414,7 +443,9 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                     </box>
                     <box backgroundColor={other() ? theme.backgroundElement : undefined}>
                       <text fg={other() ? theme.secondary : customPicked() ? theme.success : theme.text}>
-                        {multi() ? `[${customPicked() ? "✓" : " "}] Type your own answer` : "Type your own answer"}
+                        {multi()
+                          ? `[${customPicked() ? "✓" : " "}] ${t("dialog.question.custom")}`
+                          : t("dialog.question.custom")}
                       </text>
                     </box>
 
@@ -434,7 +465,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                           })
                         }}
                         initialValue={input()}
-                        placeholder="Type your own answer"
+                        placeholder={t("dialog.question.custom")}
                         placeholderColor={theme.textMuted}
                         minHeight={1}
                         maxHeight={6}
@@ -457,7 +488,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
         <Show when={confirm() && !single()}>
           <box paddingLeft={1}>
-            <text fg={theme.text}>Review</text>
+            <text fg={theme.text}>{t("question.review")}</text>
           </box>
           <For each={questions()}>
             {(q, index) => {
@@ -468,7 +499,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                   <text>
                     <span style={{ fg: theme.textMuted }}>{q.header}:</span>{" "}
                     <span style={{ fg: answered() ? theme.text : theme.error }}>
-                      {answered() ? value() : "(not answered)"}
+                      {answered() ? value() : t("question.notAnswered")}
                     </span>
                   </text>
                 </box>
@@ -494,18 +525,24 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
           </Show>
           <Show when={!confirm()}>
             <text fg={theme.text}>
-              {"↑↓"} <span style={{ fg: theme.textMuted }}>select</span>
+              {"↑↓"} <span style={{ fg: theme.textMuted }}>{t("question.select")}</span>
             </text>
           </Show>
           <text fg={theme.text}>
             enter{" "}
             <span style={{ fg: theme.textMuted }}>
-              {confirm() ? "submit" : multi() ? "toggle" : single() ? "submit" : "confirm"}
+              {confirm()
+                ? t("question.submit")
+                : multi()
+                  ? t("question.toggle")
+                  : single()
+                    ? t("question.submit")
+                    : t("question.confirm")}
             </span>
           </text>
 
           <text fg={theme.text}>
-            esc <span style={{ fg: theme.textMuted }}>dismiss</span>
+            esc <span style={{ fg: theme.textMuted }}>{t("question.dismiss")}</span>
           </text>
         </box>
       </box>

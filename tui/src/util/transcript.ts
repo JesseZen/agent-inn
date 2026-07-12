@@ -1,12 +1,14 @@
 import type { AssistantMessage, Part, Provider, UserMessage } from "@agent-inn/sdk/v2"
 import { Locale } from "./locale"
 import * as Model from "./model"
+import { translate, type Locale as LanguageLocale } from "../context/language"
 
 export type TranscriptOptions = {
   thinking: boolean
   toolDetails: boolean
   assistantMetadata: boolean
   providers?: Provider[]
+  locale?: LanguageLocale
 }
 
 export type SessionInfo = {
@@ -29,10 +31,13 @@ export function formatTranscript(
   options: TranscriptOptions,
 ): string {
   const providers = Model.index(options.providers)
+  const locale = options.locale ?? "en"
+  const t = (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) =>
+    translate(locale, key, params)
   let transcript = `# ${session.title}\n\n`
-  transcript += `**Session ID:** ${session.id}\n`
-  transcript += `**Created:** ${new Date(session.time.created).toLocaleString()}\n`
-  transcript += `**Updated:** ${new Date(session.time.updated).toLocaleString()}\n\n`
+  transcript += `**${t("transcript.sessionId")}** ${session.id}\n`
+  transcript += `**${t("transcript.created")}** ${new Date(session.time.created).toLocaleString(locale)}\n`
+  transcript += `**${t("transcript.updated")}** ${new Date(session.time.updated).toLocaleString(locale)}\n\n`
   transcript += `---\n\n`
 
   for (const msg of messages) {
@@ -52,9 +57,9 @@ export function formatMessage(
   let result = ""
 
   if (msg.role === "user") {
-    result += `## User\n\n`
+    result += `## ${translate(options.locale ?? "en", "transcript.user")}\n\n`
   } else {
-    result += formatAssistantHeader(msg, options.assistantMetadata, providers ?? options.providers)
+    result += formatAssistantHeader(msg, options.assistantMetadata, providers ?? options.providers, options.locale)
   }
 
   for (const part of parts) {
@@ -68,9 +73,10 @@ export function formatAssistantHeader(
   msg: AssistantMessage,
   includeMetadata: boolean,
   providers?: Provider[] | ReadonlyMap<string, Provider>,
+  locale: LanguageLocale = "en",
 ): string {
   if (!includeMetadata) {
-    return `## Assistant\n\n`
+    return `## ${translate(locale, "transcript.assistant")}\n\n`
   }
 
   const duration =
@@ -78,7 +84,7 @@ export function formatAssistantHeader(
 
   const modelName = Model.name(providers, msg.providerID, msg.modelID)
 
-  return `## Assistant (${Locale.titlecase(msg.agent)} · ${modelName}${duration ? ` · ${duration}` : ""})\n\n`
+  return `## ${translate(locale, "transcript.assistant")} (${Locale.titlecase(msg.agent)} · ${modelName}${duration ? ` · ${duration}` : ""})\n\n`
 }
 
 export function formatPart(part: Part, options: TranscriptOptions): string {
@@ -88,21 +94,22 @@ export function formatPart(part: Part, options: TranscriptOptions): string {
 
   if (part.type === "reasoning") {
     if (options.thinking) {
-      return `_Thinking:_\n\n${part.text}\n\n`
+      return `_${translate(options.locale ?? "en", "transcript.thinking")}_\n\n${part.text}\n\n`
     }
     return ""
   }
 
   if (part.type === "tool") {
-    let result = `**Tool: ${part.tool}**\n`
+    const locale = options.locale ?? "en"
+    let result = `**${translate(locale, "transcript.tool")} ${part.tool}**\n`
     if (options.toolDetails && part.state.input) {
-      result += `\n**Input:**\n\`\`\`json\n${JSON.stringify(part.state.input, null, 2)}\n\`\`\`\n`
+      result += `\n**${translate(locale, "transcript.input")}**\n\`\`\`json\n${JSON.stringify(part.state.input, null, 2)}\n\`\`\`\n`
     }
     if (options.toolDetails && part.state.status === "completed" && part.state.output) {
-      result += `\n**Output:**\n\`\`\`\n${part.state.output}\n\`\`\`\n`
+      result += `\n**${translate(locale, "transcript.output")}**\n\`\`\`\n${part.state.output}\n\`\`\`\n`
     }
     if (options.toolDetails && part.state.status === "error" && part.state.error) {
-      result += `\n**Error:**\n\`\`\`\n${part.state.error}\n\`\`\`\n`
+      result += `\n**${translate(locale, "transcript.error")}**\n\`\`\`\n${part.state.error}\n\`\`\`\n`
     }
     result += `\n`
     return result

@@ -27,10 +27,11 @@ test("tab expands the selected directory and enter still submits raw text", asyn
   await Bun.write(path.join(state, "kv.json"), "{}")
 
   const confirmed: string[] = []
-  const [{ DialogProvider }, { DialogPrompt }, { KVProvider }, { ThemeProvider }, { TuiConfigProvider }, { ToastProvider }, { AinnKeymapProvider, registerAinnKeymap }] = await Promise.all([
+  const [{ DialogProvider }, { DialogPrompt }, { KVProvider }, { LanguageProvider }, { ThemeProvider }, { TuiConfigProvider }, { ToastProvider }, { AinnKeymapProvider, registerAinnKeymap }] = await Promise.all([
     import("../../../src/ui/dialog"),
     import("../../../src/ui/dialog-prompt"),
     import("../../../src/context/kv"),
+    import("../../../src/context/language"),
     import("../../../src/context/theme"),
     import("../../../src/config"),
     import("../../../src/ui/toast"),
@@ -49,18 +50,20 @@ test("tab expands the selected directory and enter still submits raw text", asyn
         <AinnKeymapProvider keymap={keymap}>
           <TuiConfigProvider config={resolvedConfig}>
             <KVProvider persist={false}>
-              <ThemeProvider mode="dark">
-                <ToastProvider>
-                  <DialogProvider>
-                    <DialogPrompt
-                      title="Launch Codex"
-                      value="a"
-                      directoryCompletion={{ basePath: tmp.path }}
-                      onConfirm={(value) => confirmed.push(value)}
-                    />
-                  </DialogProvider>
-                </ToastProvider>
-              </ThemeProvider>
+              <LanguageProvider>
+                <ThemeProvider mode="dark">
+                  <ToastProvider>
+                    <DialogProvider>
+                      <DialogPrompt
+                        title="Launch Codex"
+                        value="a"
+                        directoryCompletion={{ basePath: tmp.path }}
+                        onConfirm={(value) => confirmed.push(value)}
+                      />
+                    </DialogProvider>
+                  </ToastProvider>
+                </ThemeProvider>
+              </LanguageProvider>
             </KVProvider>
           </TuiConfigProvider>
         </AinnKeymapProvider>

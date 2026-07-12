@@ -7,6 +7,8 @@ import { zhCN } from "../../src/i18n/zh-CN"
 // tied to the source text.
 const missingCoreKeys = {
   "category.dialog": "Dialog",
+  "category.prompt": "Prompt",
+  "category.question": "Question",
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
   "session.copyShareLink": "Copy share link",
@@ -81,6 +83,14 @@ const missingCoreKeys = {
   "session.messageReverted": "{{count}} message reverted",
   "session.redoRestoreHint": "or /redo to restore",
   "session.compaction": "Compaction",
+  "session.shareFailed": "Failed to share session",
+  "session.unshareFailed": "Failed to unshare session",
+  "session.exportTranscript": "Export session transcript",
+  "session.taskTitle": "{{agent}} Task — {{description}}",
+  "session.backgroundTaskTitle": "{{agent}} Task (background) — {{description}}",
+  "session.toolcall": "{{count}} toolcall",
+  "session.toolcalls": "{{count}} toolcalls",
+  "session.toolcallDuration": "{{toolcalls}} · {{duration}}",
 
   "prompt.clear": "Clear prompt",
   "prompt.submitAction": "Submit prompt",
@@ -107,6 +117,8 @@ const missingCoreKeys = {
   "prompt.creatingWorkspace": "Creating {{workspaceType}}",
   "prompt.selection": "Selection {{index}}: ",
   "prompt.note": "Note: The user selected {{selection}} from \"{{filePath}}\". ```{{text}}```",
+  "prompt.shellMode": "Shell mode",
+  "prompt.exitShellAction": "Exit shell mode",
   "prompt.createCopy": "Creating copy",
   "prompt.createSession": "Creating session",
   "prompt.moveSessionProgress": "Moving session",
@@ -148,6 +160,9 @@ const missingCoreKeys = {
   "dialog.helpConfirm": "ok",
   "dialog.help.close": "Close help",
   "dialog.help.description": "Press {{shortcut}} to see all available actions and commands in any context.",
+  "dialog.close": "Close dialog",
+  "dialog.nextAction": "Next dialog action",
+  "dialog.previousAction": "Previous dialog action",
 
   "permission.noDiff": "No diff provided",
   "permission.allowPatterns": "This will allow the following patterns until Ainn is restarted",
@@ -201,6 +216,19 @@ const missingCoreKeys = {
   "tool.compaction": "Compaction",
   "tool.subagentView": "view subagents",
   "tool.subagentBackground": "background",
+  "tool.askedQuestion": "Asked {{count}} question",
+  "tool.askedQuestions": "Asked {{count}} questions",
+  "tool.match": "{{count}} match",
+  "tool.matches": "{{count}} matches",
+  "tool.loaded": "Loaded {{path}}",
+  "tool.glob": "Glob \"{{pattern}}\"",
+  "tool.read": "Read {{path}}",
+  "tool.write": "Write {{path}}",
+  "tool.wrote": "# Wrote {{path}}",
+  "tool.patch": "Patch",
+  "tool.skill": "Skill \"{{name}}\"",
+  "tool.inPath": "in {{path}}",
+  "tool.noAnswer": "(no answer)",
 
   "transcript.sessionId": "Session ID:",
   "transcript.created": "Created:",
@@ -237,10 +265,18 @@ const missingCoreKeys = {
   "question.submit": "submit",
   "question.toggle": "toggle",
   "question.dismiss": "dismiss",
+  "question.cancelEdit": "Cancel answer edit",
+  "question.submitEdit": "Submit answer edit",
+  "question.previousQuestion": "Previous question",
+  "question.nextQuestion": "Next question",
+  "question.submitAnswer": "Submit answer",
+  "question.previousAnswer": "Previous answer",
+  "question.nextAnswer": "Next answer",
+  "question.selectAnswer": "Select answer",
 } as const
 
 test("core session inventory has dictionary parity before route migration", () => {
-  expect(Object.keys(missingCoreKeys)).toHaveLength(224)
+  expect(Object.keys(missingCoreKeys)).toHaveLength(260)
   const englishEntries: Record<string, string> = Object.fromEntries(Object.entries(en))
   const chineseEntries: Record<string, string> = Object.fromEntries(Object.entries(zhCN))
   const missing = Object.entries(missingCoreKeys).filter(

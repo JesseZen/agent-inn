@@ -12,6 +12,7 @@ import { DataProvider } from "../../../src/context/data"
 import { EditorContextProvider } from "../../../src/context/editor"
 import { ExitProvider } from "../../../src/context/exit"
 import { KVProvider } from "../../../src/context/kv"
+import { LanguageProvider } from "../../../src/context/language"
 import { LocalProvider } from "../../../src/context/local"
 import { ProjectProvider } from "../../../src/context/project"
 import { RouteProvider } from "../../../src/context/route"
@@ -136,8 +137,9 @@ async function mountPrompt(input: { root: string; keybinds?: Record<string, unkn
                 <ArgsProvider>
                   <ExitProvider exit={() => {}}>
                     <KVProvider persist={false}>
-                      <ToastProvider>
-                        <RouteProvider>
+                      <LanguageProvider>
+                        <ToastProvider>
+                          <RouteProvider>
                           <TuiConfigProvider config={resolvedConfig}>
                             <PluginRuntimeProvider value={pluginRuntime}>
                               <SDKProvider url="http://test" directory={input.root} fetch={createFetch(input.root)}>
@@ -172,8 +174,9 @@ async function mountPrompt(input: { root: string; keybinds?: Record<string, unkn
                               </SDKProvider>
                             </PluginRuntimeProvider>
                           </TuiConfigProvider>
-                        </RouteProvider>
-                      </ToastProvider>
+                          </RouteProvider>
+                        </ToastProvider>
+                      </LanguageProvider>
                     </KVProvider>
                   </ExitProvider>
                 </ArgsProvider>
