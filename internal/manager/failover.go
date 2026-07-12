@@ -129,7 +129,6 @@ func (m *Manager) recordWorkerUpstreamSuccess(workerName string, upstreamName st
 
 func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName string, generation int, outcome workerUpstreamOutcome) error {
 	m.failoverMu.Lock()
-	defer m.failoverMu.Unlock()
 	m.mu.RLock()
 	workerConfig, ok := m.config.Workers[workerName]
 	status := m.workerStatusLocked(workerName)
@@ -139,13 +138,19 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 	}
 	if !ok || status != WorkerStateRunning || generation < 1 || generation != currentGeneration || workerConfig.UpstreamPool == "" || workerUpstreamID(workerConfig) != upstreamName {
 		m.mu.RUnlock()
+		m.failoverMu.Unlock()
 		return nil
 	}
 	poolName := workerConfig.UpstreamPool
 	pool, ok := m.config.UpstreamPools[poolName]
 	m.mu.RUnlock()
 	if !ok {
+		m.failoverMu.Unlock()
 		return fmt.Errorf("upstream pool %q not found", poolName)
+	}
+	if pool.Mode == config.UpstreamPoolModeDisabled {
+		m.failoverMu.Unlock()
+		return nil
 	}
 
 	key := poolCircuitKey(poolName, upstreamName)
@@ -165,7 +170,24 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 	}
 	current := m.circuits.Status(key, pool.CircuitBreaker)
 	m.publishCircuitTransition(poolName, upstreamName, previous, current)
+	refreshFallbacks := outcome == workerUpstreamFailure && previous.State == CircuitStateClosed && previous.ConsecutiveFailures == 0 && current.ConsecutiveFailures == 1
+	if refreshFallbacks {
+		now := m.clock()
+		for _, candidate := range pool.Upstreams {
+			if candidate == upstreamName {
+				continue
+			}
+			m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: candidate}] = poolProbeSchedule{
+				NextProbeAt: now,
+				Reason:      ProbeScheduleWorkerFailure,
+			}
+		}
+	}
 	if outcome != workerUpstreamFailure || current.State != CircuitStateOpen {
+		m.failoverMu.Unlock()
+		if refreshFallbacks {
+			m.probeAllUpstreams(m.probeContext)
+		}
 		return nil
 	}
 
@@ -177,9 +199,22 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 		}
 	}
 	if next == "" || next == upstreamName {
+		if m.exhaustedPools[poolName] != upstreamName {
+			m.exhaustedPools[poolName] = upstreamName
+			m.publishEvent(EventUpstreamPoolExhausted, map[string]any{"pool": poolName, "upstream": upstreamName, "reason": "no_eligible_fallback"})
+		}
+		m.failoverMu.Unlock()
+		if refreshFallbacks {
+			m.probeAllUpstreams(m.probeContext)
+		}
 		return nil
 	}
-	return m.switchUpstreamPool(poolName, upstreamName, next)
+	err := m.switchUpstreamPool(poolName, upstreamName, next)
+	m.failoverMu.Unlock()
+	if refreshFallbacks {
+		m.probeAllUpstreams(m.probeContext)
+	}
+	return err
 }
 
 func (m *Manager) recordPoolProbeResultLocked(poolName string, upstreamName string, probe upstream.ProbeResult) error {

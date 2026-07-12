@@ -49,6 +49,61 @@ func TestManagerActiveProtocolFailurePublishesPoolExhausted(t *testing.T) {
 	}
 }
 
+func TestManagerNoFreshFallbackWaitsForProbeResult(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 4, 5, 6, 0, time.UTC)
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+		"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "coding-ha"},
+	})
+	m.cancelProbes()
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	m.mu.Lock()
+	m.statuses["app"], m.generations["app"] = WorkerStateRunning, 1
+	m.statuses["cli"], m.generations["cli"] = WorkerStateRunning, 1
+	m.mu.Unlock()
+	authorityObserve(t, m, "primary", readinessTestSuccess(1))
+	authorityObserve(t, m, "backup", readinessTestSuccess(1))
+	checkedAt := now
+	now = now.Add(config.DefaultPoolProbeStableIntervalSeconds*time.Second + time.Minute + time.Second)
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	gotStale := struct {
+		Workers    []string
+		Readiness  PoolReadiness
+		Exhaustion []map[string]any
+		Switches   []map[string]any
+	}{[]string{workerUpstreamID(m.config.Workers["app"]), workerUpstreamID(m.config.Workers["cli"])}, m.poolReadiness("coding-ha", "backup"), poolRoutingEvents(m, EventUpstreamPoolExhausted), poolRoutingEvents(m, EventUpstreamPoolSwitched)}
+	wantStale := struct {
+		Workers    []string
+		Readiness  PoolReadiness
+		Exhaustion []map[string]any
+		Switches   []map[string]any
+	}{[]string{"primary", "primary"}, PoolReadiness{
+		Upstream: "backup", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol,
+		Authoritative: true, Readiness: ReadinessStateUnknown, CheckedAt: &checkedAt,
+		OK: true, StatusCode: http.StatusOK, LatencyMS: 1, Stale: true,
+	}, []map[string]any{{"pool": "coding-ha", "upstream": "primary", "reason": "no_eligible_fallback"}}, nil}
+	if !reflect.DeepEqual(gotStale, wantStale) {
+		t.Fatalf("stale fallback changed routing:\n got %#v\nwant %#v", gotStale, wantStale)
+	}
+
+	authorityObserve(t, m, "backup", readinessTestSuccess(2))
+	gotFresh := struct {
+		Workers  []string
+		Switches []map[string]any
+	}{[]string{workerUpstreamID(m.config.Workers["app"]), workerUpstreamID(m.config.Workers["cli"])}, poolRoutingEvents(m, EventUpstreamPoolSwitched)}
+	wantFresh := struct {
+		Workers  []string
+		Switches []map[string]any
+	}{[]string{"backup", "backup"}, []map[string]any{{"pool": "coding-ha", "previous_upstream": "primary", "upstream": "backup"}}}
+	if !reflect.DeepEqual(gotFresh, wantFresh) {
+		t.Fatalf("fresh fallback did not switch pool:\n got %#v\nwant %#v", gotFresh, wantFresh)
+	}
+}
+
 func TestManagerPoolReadinessEligibilityFollowsCircuit(t *testing.T) {
 	m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
 		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},

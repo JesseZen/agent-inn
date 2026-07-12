@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"maps"
 	"net/http"
 	"reflect"
 	"testing"
@@ -399,6 +401,108 @@ func TestManagerWorkerMetricRechecksAuthorityUnderFailoverLock(t *testing.T) {
 				t.Fatalf("metric authority changed after initial check:\n got %#v\nwant %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestManagerFirstWorkerFailureRefreshesFallbacks(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 3, 4, 5, 0, time.UTC)
+	m, pool := newAuthorityTestManager(t, "primary", 3)
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	future := now.Add(time.Hour)
+	for _, upstreamName := range pool.Upstreams {
+		m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
+	}
+	started := make(chan probeSpec, 1)
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		started <- spec
+		return upstream.ProbeResult{}
+	}
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	var probe probeSpec
+	select {
+	case probe = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("failure-triggered probe did not start")
+	}
+	gotProbe := struct {
+		Upstream string
+		Pools    []string
+		Due      bool
+		Reason   ProbeScheduleReason
+	}{probe.Upstream, probe.Pools, probe.Due, probe.Reason}
+	wantProbe := struct {
+		Upstream string
+		Pools    []string
+		Due      bool
+		Reason   ProbeScheduleReason
+	}{"backup", []string{"coding-ha"}, true, ProbeScheduleWorkerFailure}
+	if !reflect.DeepEqual(gotProbe, wantProbe) {
+		t.Fatalf("unexpected failure-triggered probe: got %#v want %#v", gotProbe, wantProbe)
+	}
+	got := struct {
+		Active   string
+		Circuit  CircuitStatus
+		Schedule poolProbeSchedule
+	}{m.poolActiveUpstream("coding-ha"), m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker), m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: "backup"}]}
+	want := struct {
+		Active   string
+		Circuit  CircuitStatus
+		Schedule poolProbeSchedule
+	}{"primary", CircuitStatus{State: CircuitStateClosed, ConsecutiveFailures: 1}, poolProbeSchedule{NextProbeAt: now, Reason: ProbeScheduleWorkerFailure}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected first failure state:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerDisabledPoolIgnoresWorkerOutcomes(t *testing.T) {
+	m, pool := newAuthorityTestManager(t, "primary", 2)
+	m.cancelProbes()
+	defer m.Close()
+	m.updateConfig(func(cfg *config.Config) {
+		configured := cfg.UpstreamPools["coding-ha"]
+		configured.Mode = config.UpstreamPoolModeDisabled
+		cfg.UpstreamPools["coding-ha"] = configured
+	})
+	pool = m.config.UpstreamPools["coding-ha"]
+	m.circuits.RecordFailure(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
+	m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: "backup"}] = poolProbeSchedule{NextProbeAt: time.Now(), Reason: ProbeScheduleStable}
+	m.circuits.mu.Lock()
+	wantCircuits := maps.Clone(m.circuits.states)
+	m.circuits.mu.Unlock()
+	m.mu.RLock()
+	wantWorkers := cloneConfig(m.config).Workers
+	m.mu.RUnlock()
+	want := struct {
+		Circuits  map[string]CircuitStatus
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
+		Workers   map[string]config.WorkerConfig
+		Events    []Event
+	}{wantCircuits, maps.Clone(m.probeSchedules), wantWorkers, m.events.Replay(0)}
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.recordWorkerUpstreamSuccess("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	m.circuits.mu.Lock()
+	gotCircuits := maps.Clone(m.circuits.states)
+	m.circuits.mu.Unlock()
+	m.mu.RLock()
+	gotWorkers := cloneConfig(m.config).Workers
+	m.mu.RUnlock()
+	got := struct {
+		Circuits  map[string]CircuitStatus
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
+		Workers   map[string]config.WorkerConfig
+		Events    []Event
+	}{gotCircuits, maps.Clone(m.probeSchedules), gotWorkers, m.events.Replay(0)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("disabled pool accepted worker outcome:\n got %#v\nwant %#v", got, want)
 	}
 }
 
