@@ -1,11 +1,12 @@
 import { displaySlice, promptOffsetWidth } from "../../prompt/display"
-import type { HostedSessionSummary, RedactedUpstream, WorkerSummary } from "../backend"
+import type { HostedSessionSummary, RedactedUpstream, UpstreamPool, WorkerSummary } from "../backend"
 
 const DASHBOARD_TEXT_OVERHEAD = 6
 const DASHBOARD_META_GAP = 1
 const DASHBOARD_TRUNCATION_MARKER = "…"
 
 export type DashboardNode =
+  | { id: string; kind: "pool"; label: string; data: UpstreamPool }
   | { id: string; kind: "upstream"; label: string; data: RedactedUpstream }
   | { id: string; kind: "worker"; label: string; data: WorkerSummary }
   | { id: string; kind: "session"; label: string; data: HostedSessionSummary }
@@ -15,9 +16,8 @@ export type DashboardWorkerBranch = {
   sessions: Extract<DashboardNode, { kind: "session" }>[]
 }
 
-export type DashboardDomain = {
+type DashboardDomainSummary = {
   id: string
-  upstream: Extract<DashboardNode, { kind: "upstream" }>
   workers: DashboardWorkerBranch[]
   healthyWorkers: number
   totalWorkers: number
@@ -25,7 +25,27 @@ export type DashboardDomain = {
   warning: boolean
 }
 
+export type DashboardPoolMember = {
+  upstream: Extract<DashboardNode, { kind: "upstream" }>
+  workers: DashboardWorkerBranch[]
+  active: boolean
+}
+
+export type DashboardDomain = DashboardDomainSummary &
+  (
+    | {
+        kind: "upstream"
+        upstream: Extract<DashboardNode, { kind: "upstream" }>
+      }
+    | {
+        kind: "pool"
+        pool: Extract<DashboardNode, { kind: "pool" }>
+        members: DashboardPoolMember[]
+      }
+  )
+
 export type DashboardSummary = {
+  pools: number
   upstreams: number
   healthyWorkers: number
   workers: number
@@ -44,6 +64,7 @@ export function buildDashboardModel(
   workers: WorkerSummary[],
   upstreams: RedactedUpstream[],
   sessions: HostedSessionSummary[],
+  pools: UpstreamPool[] = [],
 ): DashboardModel {
   const upstreamByID = new Map(upstreams.map((upstream) => [upstream.id, upstream]))
   const workerIDs = new Set(workers.map((item) => item.id))
@@ -55,16 +76,24 @@ export function buildDashboardModel(
     sessionsByWorkerID.set(workerID, workerSessions)
   }
 
+  const poolIDs = new Set(pools.map((pool) => pool.id))
+  const poolWorkers = new Map<string, WorkerSummary[]>()
   const workersByUpstreamID = new Map<string, WorkerSummary[]>()
   const domainUpstreams = new Map<string, RedactedUpstream>()
   for (const item of workers) {
+    if (item.upstream_pool && poolIDs.has(item.upstream_pool)) {
+      const workers = poolWorkers.get(item.upstream_pool) ?? []
+      workers.push(item)
+      poolWorkers.set(item.upstream_pool, workers)
+      continue
+    }
     const domainWorkers = workersByUpstreamID.get(item.upstream_id) ?? []
     domainWorkers.push(item)
     workersByUpstreamID.set(item.upstream_id, domainWorkers)
     domainUpstreams.set(item.upstream_id, upstreamByID.get(item.upstream_id) ?? item.upstream)
   }
 
-  const domains = [...domainUpstreams.entries()]
+  const upstreamDomains: DashboardDomain[] = [...domainUpstreams.entries()]
     .map(([upstreamID, upstream]) => {
       const domainWorkers = (workersByUpstreamID.get(upstreamID) ?? []).sort((left, right) => left.name.localeCompare(right.name))
       const branches = domainWorkers.map((item) => ({
@@ -85,6 +114,7 @@ export function buildDashboardModel(
       }))
       const healthyWorkers = domainWorkers.filter((item) => item.status === "running").length
       return {
+        kind: "upstream" as const,
         id: `upstream:${upstreamID}`,
         upstream: {
           id: `upstream:${upstreamID}`,
@@ -101,7 +131,71 @@ export function buildDashboardModel(
     })
     .sort((left, right) => left.upstream.label.localeCompare(right.upstream.label))
 
-  const usedUpstreamIDs = new Set(workersByUpstreamID.keys())
+  const poolDomains: DashboardDomain[] = pools
+    .map((pool) => {
+      const members = pool.upstreams.map((upstreamID) => {
+        const upstream = upstreamByID.get(upstreamID) ?? {
+          id: upstreamID,
+          name: upstreamID,
+          has_api_key: false,
+          missing: true,
+        }
+        const memberWorkers = (poolWorkers.get(pool.id) ?? [])
+          .filter((worker) => worker.upstream_id === upstreamID)
+          .sort((left, right) => left.name.localeCompare(right.name))
+        return {
+          upstream: {
+            id: `pool-member:${pool.id}:${upstreamID}`,
+            kind: "upstream" as const,
+            label: upstream.name,
+            data: upstream,
+          },
+          workers: memberWorkers.map((item) => ({
+            worker: {
+              id: `worker:${item.id}`,
+              kind: "worker" as const,
+              label: item.name,
+              data: item,
+            },
+            sessions: (sessionsByWorkerID.get(item.id) ?? [])
+              .sort((left, right) => left.session_label.localeCompare(right.session_label))
+              .map((hostedSession) => ({
+                id: `session:${hostedSession.session_id}`,
+                kind: "session" as const,
+                label: hostedSession.session_label,
+                data: hostedSession,
+              })),
+          })),
+          active: pool.active_upstream === upstreamID,
+        }
+      })
+      const branches = members.flatMap((member) => member.workers)
+      const workers = poolWorkers.get(pool.id) ?? []
+      return {
+        kind: "pool" as const,
+        id: `pool:${pool.id}`,
+        pool: {
+          id: `pool:${pool.id}`,
+          kind: "pool" as const,
+          label: pool.name,
+          data: pool,
+        },
+        members,
+        workers: branches,
+        healthyWorkers: workers.filter((worker) => worker.status === "running").length,
+        totalWorkers: workers.length,
+        totalSessions: branches.reduce((count, branch) => count + branch.sessions.length, 0),
+        warning:
+          members.some((member) => member.upstream.data.missing || !member.upstream.data.has_api_key) || workers.some((worker) => worker.status === "failed"),
+      }
+    })
+    .sort((left, right) => {
+      if (left.kind !== "pool" || right.kind !== "pool") return 0
+      return left.pool.label.localeCompare(right.pool.label)
+    })
+  const domains = [...poolDomains, ...upstreamDomains]
+
+  const usedUpstreamIDs = new Set([...workersByUpstreamID.keys(), ...pools.flatMap((pool) => pool.upstreams)])
   const unboundUpstreams = upstreams
     .filter((upstream) => !usedUpstreamIDs.has(upstream.id))
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -123,6 +217,7 @@ export function buildDashboardModel(
 
   return {
     summary: {
+      pools: pools.length,
       upstreams: new Set([...upstreams.map((upstream) => upstream.id), ...domainUpstreams.keys()]).size,
       healthyWorkers: domains.reduce((count, domain) => count + domain.healthyWorkers, 0),
       workers: workers.length,
@@ -135,11 +230,7 @@ export function buildDashboardModel(
   }
 }
 
-export function fitDashboardText(
-  label: string,
-  meta: string,
-  availableWidth: number,
-): { label: string; meta: string } {
+export function fitDashboardText(label: string, meta: string, availableWidth: number): { label: string; meta: string } {
   if (!Number.isFinite(availableWidth)) return { label, meta }
   const contentWidth = Math.max(0, availableWidth - DASHBOARD_TEXT_OVERHEAD)
   if (promptOffsetWidth(label) + DASHBOARD_META_GAP + promptOffsetWidth(meta) <= contentWidth) return { label, meta }

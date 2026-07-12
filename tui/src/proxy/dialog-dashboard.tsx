@@ -12,6 +12,7 @@ import { useToast } from "../ui/toast"
 import { getScrollAcceleration } from "../util/scroll"
 import type { HostedSessionSummary, RedactedUpstream, WorkerSummary } from "./backend"
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
+import { DialogPoolEditor } from "./dialog-pool"
 import { DialogUpstreamEditor } from "./dialog-upstream"
 import { DialogWorkerStatus } from "./dialog-worker-status"
 import { buildDashboardModel, type DashboardNode } from "./dashboard/model"
@@ -54,15 +55,18 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
   const [sessionsLoaded, setSessionsLoaded] = createSignal(false)
   const [hoveredID, setHoveredID] = createSignal<string | null>(null)
   const [dragSource, setDragSource] = createSignal<DashboardNode | null>(null)
-  const [state, setStateValue] = createSignal<DashboardViewState>(props.snapshot.state ?? {
-    expandedDomains: new Set(),
-    expandedSessionGroups: new Set(),
-    collapsedSessionGroups: new Set(),
-    unboundExpanded: false,
-    query: "",
-    selectedID: null,
-  })
-  const model = createMemo(() => buildDashboardModel(sync.data.workers, sync.data.upstreams, sessions()))
+  const [state, setStateValue] = createSignal<DashboardViewState>(
+    props.snapshot.state ?? {
+      expandedDomains: new Set(),
+      expandedUpstreams: new Set(),
+      expandedSessionGroups: new Set(),
+      collapsedSessionGroups: new Set(),
+      unboundExpanded: false,
+      query: "",
+      selectedID: null,
+    },
+  )
+  const model = createMemo(() => buildDashboardModel(sync.data.workers, sync.data.upstreams, sessions(), sync.data.upstreamPools))
   const rows = createMemo(() => dashboardVisibleRows(model(), state()))
   const selectedRow = createMemo(() => rows().find((row) => row.id === state().selectedID) ?? null)
   const dragTarget = createMemo(() => {
@@ -83,45 +87,54 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
 
   onMount(() => {
     dialog.setSize("xlarge")
-    void sdk.client.listHostedSessions()
+    void sdk.client
+      .listHostedSessions()
       .then(setSessions)
       .catch(toast.error)
       .finally(() => setSessionsLoaded(true))
   })
 
-  createEffect(on([model, sessionsLoaded], ([next, loaded]) => {
-    if (!loaded) return
-    if (!initialized) {
-      initialized = true
-      setState(dashboardInitialState(next))
-      return
-    }
-    const domainIDs = new Set(next.domains.map((domain) => domain.id))
-    const workerIDs = new Set(next.domains.flatMap((domain) => domain.workers.map((branch) => branch.worker.id)))
-    const expandedDomains = new Set([...state().expandedDomains].filter((id) => domainIDs.has(id)))
-    const expandedSessionGroups = new Set([...state().expandedSessionGroups].filter((id) => workerIDs.has(id)))
-    const collapsedSessionGroups = new Set([...state().collapsedSessionGroups].filter((id) => workerIDs.has(id)))
-    for (const domain of next.domains) {
-      if (domain.warning) expandedDomains.add(domain.id)
-    }
-    const candidate = {
-      ...state(),
-      expandedDomains,
-      expandedSessionGroups,
-      collapsedSessionGroups,
-    }
-    const visible = dashboardVisibleRows(next, candidate)
-    setState({
-      ...candidate,
-      selectedID: visible.some((row) => row.id === candidate.selectedID) ? candidate.selectedID : visible[0]?.id ?? null,
-    })
-    if (restoreScroll) {
-      restoreScroll = false
-      setTimeout(() => {
-        if (scroll && !scroll.isDestroyed) scroll.scrollTop = props.snapshot.scrollTop
-      }, 0)
-    }
-  }))
+  createEffect(
+    on([model, sessionsLoaded], ([next, loaded]) => {
+      if (!loaded) return
+      if (!initialized) {
+        initialized = true
+        setState(dashboardInitialState(next))
+        return
+      }
+      const domainIDs = new Set(next.domains.map((domain) => domain.id))
+      const workerIDs = new Set(next.domains.flatMap((domain) => domain.workers.map((branch) => branch.worker.id)))
+      const upstreamIDs = new Set(next.domains.flatMap((domain) => (domain.kind === "pool" ? domain.members.map((member) => member.upstream.id) : [])))
+      const expandedDomains = new Set([...state().expandedDomains].filter((id) => domainIDs.has(id)))
+      const expandedUpstreams = new Set([...state().expandedUpstreams].filter((id) => upstreamIDs.has(id)))
+      const expandedSessionGroups = new Set([...state().expandedSessionGroups].filter((id) => workerIDs.has(id)))
+      const collapsedSessionGroups = new Set([...state().collapsedSessionGroups].filter((id) => workerIDs.has(id)))
+      for (const domain of next.domains) {
+        if (domain.warning) expandedDomains.add(domain.id)
+        if (domain.kind === "pool") {
+          for (const member of domain.members) expandedUpstreams.add(member.upstream.id)
+        }
+      }
+      const candidate = {
+        ...state(),
+        expandedDomains,
+        expandedUpstreams,
+        expandedSessionGroups,
+        collapsedSessionGroups,
+      }
+      const visible = dashboardVisibleRows(next, candidate)
+      setState({
+        ...candidate,
+        selectedID: visible.some((row) => row.id === candidate.selectedID) ? candidate.selectedID : (visible[0]?.id ?? null),
+      })
+      if (restoreScroll) {
+        restoreScroll = false
+        setTimeout(() => {
+          if (scroll && !scroll.isDestroyed) scroll.scrollTop = props.snapshot.scrollTop
+        }, 0)
+      }
+    }),
+  )
 
   function revealSelected(selectedID = state().selectedID) {
     queueMicrotask(() => {
@@ -137,22 +150,25 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
 
   function applyNavigation(result: DashboardNavigationResult) {
     const expandedDomains = new Set(state().expandedDomains)
+    const expandedUpstreams = new Set(state().expandedUpstreams)
     const expandedSessionGroups = new Set(state().expandedSessionGroups)
     const collapsedSessionGroups = new Set(state().collapsedSessionGroups)
     if (result.expandID) expandedDomains.add(result.expandID)
     if (result.collapseID) expandedDomains.delete(result.collapseID)
+    if (result.expandUpstreamID) expandedUpstreams.add(result.expandUpstreamID)
+    if (result.collapseUpstreamID) expandedUpstreams.delete(result.collapseUpstreamID)
     if (result.toggleSessionGroupID) expandedSessionGroups.add(result.toggleSessionGroupID)
     if (result.expandSessionGroupID) collapsedSessionGroups.delete(result.expandSessionGroupID)
     if (result.collapseSessionGroupID) collapsedSessionGroups.add(result.collapseSessionGroupID)
     const selectedID = result.toggleSessionGroupID
-      ? model().domains
-        .flatMap((domain) => domain.workers)
-        .find((branch) => branch.worker.id === result.toggleSessionGroupID)
-        ?.sessions[DASHBOARD_SESSION_PREVIEW_LIMIT]?.id ?? result.selectedID
+      ? (model()
+          .domains.flatMap((domain) => domain.workers)
+          .find((branch) => branch.worker.id === result.toggleSessionGroupID)?.sessions[DASHBOARD_SESSION_PREVIEW_LIMIT]?.id ?? result.selectedID)
       : result.selectedID
     setState({
       ...state(),
       expandedDomains,
+      expandedUpstreams,
       expandedSessionGroups,
       collapsedSessionGroups,
       selectedID,
@@ -163,6 +179,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
 
   function isRowExpanded(row: ReturnType<typeof rows>[number]) {
     if (row.kind === "domain" && row.depth === 0) return state().expandedDomains.has(row.id)
+    if (row.kind === "upstream") return state().expandedUpstreams.has(row.id)
     if (row.kind === "worker") return !state().collapsedSessionGroups.has(row.id)
     if (row.kind === "unbound") return state().unboundExpanded
     return false
@@ -170,13 +187,15 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
 
   function toggleRow(row: ReturnType<typeof rows>[number]) {
     const selectedState = { ...state(), selectedID: row.id }
-    applyNavigation(isRowExpanded(row)
-      ? dashboardCollapse(rows(), selectedState)
-      : dashboardExpand(rows(), selectedState))
+    applyNavigation(isRowExpanded(row) ? dashboardCollapse(rows(), selectedState) : dashboardExpand(rows(), selectedState))
   }
 
   function openNode(node: DashboardNode) {
     props.snapshot.scrollTop = scroll?.scrollTop ?? 0
+    if (node.kind === "pool") {
+      dialog.push(() => <DialogPoolEditor id={node.data.id} />)
+      return
+    }
     if (node.kind === "session") {
       dialog.push(() => <DialogHostedTerminal initialSessions={[node.data]} />)
       return
@@ -216,7 +235,10 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
         })
         if (launched) workerFrecency.record(target.data.id)
         setSessions(await sdk.client.listHostedSessions())
-        toast.show({ message: `Rebound ${source.data.session_label} -> ${target.data.name}`, variant: "success" })
+        toast.show({
+          message: `Rebound ${source.data.session_label} -> ${target.data.name}`,
+          variant: "success",
+        })
       } catch (error) {
         toast.error(error)
       }
@@ -225,9 +247,14 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     const { worker, upstream } = dashboardDropPair(source, target)
     if (worker.data.upstream_id === upstream.data.id) return
     try {
-      await sdk.client.patchWorker(worker.data.id, { upstream_id: upstream.data.id })
+      await sdk.client.patchWorker(worker.data.id, {
+        upstream_id: upstream.data.id,
+      })
       await sync.bootstrap({ fatal: false })
-      toast.show({ message: `Switched ${worker.data.name} -> ${upstream.data.name}`, variant: "success" })
+      toast.show({
+        message: `Switched ${worker.data.name} -> ${upstream.data.name}`,
+        variant: "success",
+      })
     } catch (error) {
       toast.error(error)
     }
@@ -235,14 +262,54 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
 
   useBindings(() => ({
     commands: [
-      { name: "dashboard.previous", title: "Previous dashboard row", category: "Dashboard", run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -1)) },
-      { name: "dashboard.next", title: "Next dashboard row", category: "Dashboard", run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, 1)) },
-      { name: "dashboard.collapse", title: "Collapse dashboard row", category: "Dashboard", run: () => applyNavigation(dashboardCollapse(rows(), state())) },
-      { name: "dashboard.expand", title: "Expand dashboard row", category: "Dashboard", run: () => applyNavigation(dashboardExpand(rows(), state())) },
-      { name: "dashboard.home", title: "First dashboard row", category: "Dashboard", run: () => updateSelection(rows()[0]?.id ?? null) },
-      { name: "dashboard.end", title: "Last dashboard row", category: "Dashboard", run: () => updateSelection(rows().at(-1)?.id ?? null) },
-      { name: "dashboard.page_up", title: "Dashboard page up", category: "Dashboard", run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -(scroll?.viewport.height ?? 1))) },
-      { name: "dashboard.page_down", title: "Dashboard page down", category: "Dashboard", run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, scroll?.viewport.height ?? 1)) },
+      {
+        name: "dashboard.previous",
+        title: "Previous dashboard row",
+        category: "Dashboard",
+        run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -1)),
+      },
+      {
+        name: "dashboard.next",
+        title: "Next dashboard row",
+        category: "Dashboard",
+        run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, 1)),
+      },
+      {
+        name: "dashboard.collapse",
+        title: "Collapse dashboard row",
+        category: "Dashboard",
+        run: () => applyNavigation(dashboardCollapse(rows(), state())),
+      },
+      {
+        name: "dashboard.expand",
+        title: "Expand dashboard row",
+        category: "Dashboard",
+        run: () => applyNavigation(dashboardExpand(rows(), state())),
+      },
+      {
+        name: "dashboard.home",
+        title: "First dashboard row",
+        category: "Dashboard",
+        run: () => updateSelection(rows()[0]?.id ?? null),
+      },
+      {
+        name: "dashboard.end",
+        title: "Last dashboard row",
+        category: "Dashboard",
+        run: () => updateSelection(rows().at(-1)?.id ?? null),
+      },
+      {
+        name: "dashboard.page_up",
+        title: "Dashboard page up",
+        category: "Dashboard",
+        run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -(scroll?.viewport.height ?? 1))),
+      },
+      {
+        name: "dashboard.page_down",
+        title: "Dashboard page down",
+        category: "Dashboard",
+        run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, scroll?.viewport.height ?? 1)),
+      },
       {
         name: "dashboard.submit",
         title: "Open dashboard row",
@@ -274,7 +341,9 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
   return (
     <box flexDirection="column" height={Math.max(DASHBOARD_MIN_HEIGHT, dimensions().height - DASHBOARD_VERTICAL_MARGIN)} paddingLeft={4} paddingRight={4}>
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.text} attributes={TextAttributes.BOLD} selectable={false}>Dashboard</text>
+        <text fg={theme.text} attributes={TextAttributes.BOLD} selectable={false}>
+          Dashboard
+        </text>
         <EscHint dialog={dialog} />
       </box>
       <DashboardSummary model={model()} theme={theme} />
@@ -284,9 +353,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
           const next = { ...state(), query }
           const visible = dashboardVisibleRows(model(), next)
           const normalizedQuery = query.trim().toLocaleLowerCase()
-          const selectedID = [...visible]
-            .reverse()
-            .find((row) => row.node?.label.toLocaleLowerCase().includes(normalizedQuery))?.id ?? visible[0]?.id ?? null
+          const selectedID = [...visible].reverse().find((row) => row.node?.label.toLocaleLowerCase().includes(normalizedQuery))?.id ?? visible[0]?.id ?? null
           setState({ ...next, selectedID })
           revealSelected(selectedID)
         }}
@@ -304,9 +371,14 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
         placeholderColor={theme.textMuted}
       />
       <box flexGrow={1} flexShrink={1} paddingTop={1}>
-        <Show when={model().summary.upstreams + model().summary.workers + model().summary.sessions > 0} fallback={
-          <text fg={theme.textMuted} selectable={false}>No workers, upstreams, or sessions configured</text>
-        }>
+        <Show
+          when={model().summary.pools + model().summary.upstreams + model().summary.workers + model().summary.sessions > 0}
+          fallback={
+            <text fg={theme.textMuted} selectable={false}>
+              No pools, workers, upstreams, or sessions configured
+            </text>
+          }
+        >
           <scrollbox
             flexGrow={1}
             flexShrink={1}
