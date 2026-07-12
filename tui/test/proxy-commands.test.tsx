@@ -504,6 +504,10 @@ test("proxy workers detail renames worker display name", async () => {
       await app.render()
       return app.calls.patchWorker.some((call) => "name" in call && call.name === "Codex Main")
     })
+		await wait(async () => {
+			await app.render()
+			return app.frame().includes("Codex Main")
+		})
 
     expect(app.calls.patchWorker).toContainEqual({ id: "app", name: "Codex Main" })
     expect(app.frame()).toContain("Codex Main")
@@ -683,6 +687,10 @@ test("proxy workers proxy URL prompt patches worker proxy_url", async () => {
       await app.render()
       return app.calls.patchWorker.some((call) => "proxy_url" in call && call.proxy_url === "http://127.0.0.1:7890")
     })
+		await wait(async () => {
+			await app.render()
+			return app.frame().includes("proxy: http://127.0.0.1:7890")
+		})
 
     expect(app.calls.patchWorker).toContainEqual({
       port: 6767,

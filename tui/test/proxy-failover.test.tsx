@@ -40,6 +40,7 @@ test("upstream manager renders protocol, reachability, unknown, and mixed pool r
     })
     try {
       await openUpstreamManager(app)
+      await runCommand(app, "dialog.select.end")
       expect(app.frame()).toContain(item.text)
     } finally {
       await app.cleanup()
@@ -83,6 +84,7 @@ test("upstream manager renders protocol, reachability, unknown, and mixed pool r
       await openUpstreamManager(app)
       await runCommand(app, "dialog.select.next")
       await runCommand(app, "dialog.select.submit")
+      await runCommand(app, "dialog.select.end")
       await wait(async () => {
         await app.render()
         return app.frame().includes(item.text)

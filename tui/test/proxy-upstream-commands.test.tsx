@@ -316,6 +316,7 @@ test("proxy upstream editor deletes upstream after confirmation", async () => {
     await openUpstreamManager(app)
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await runCommand(app, "dialog.select.end")
     app.api.keymap.dispatchCommand("dialog.select.submit")
@@ -353,6 +354,7 @@ test("proxy upstream editor returns to manager after deleting the last upstream"
 
   try {
     await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
