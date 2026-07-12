@@ -12,6 +12,7 @@ import type { HostedSessionSummary } from "./backend"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { rebindHostedSession } from "./hosted-session-rebind"
 import { useWorkerFrecency } from "./worker-frecency-context"
+import { useLanguage } from "../context/language"
 
 type BulkSessionOption =
   | { type: "change-worker" }
@@ -28,6 +29,7 @@ export function DialogHostedTerminalBulkActions(props: {
   const dialog = useDialog()
   const tuiConfig = useTuiConfig()
   const workerFrecency = useWorkerFrecency()
+  const { t } = useLanguage()
   const toggleShortcut = useCommandShortcut("session.bulk.toggle")
   const [selectedIDs, setSelectedIDs] = createSignal(new Set<string>())
   const [highlightedSession, setHighlightedSession] = createSignal<HostedSessionSummary>()
@@ -57,8 +59,8 @@ export function DialogHostedTerminalBulkActions(props: {
     commands: [
       {
         name: "session.bulk.toggle",
-        title: "Toggle hosted session selection",
-        category: "Dialog",
+        title: t("proxy.hosted.toggleCommand"),
+        category: t("proxy.hosted.categoryDialog"),
         run() {
           const session = highlightedSession()
           if (session) toggleSession(session)
@@ -70,24 +72,24 @@ export function DialogHostedTerminalBulkActions(props: {
 
   const options = createMemo<DialogSelectOption<BulkSessionOption>[]>(() => [
     {
-      title: "Change worker",
+      title: t("proxy.hosted.bulkChange"),
       value: { type: "change-worker" },
-      description: "Move selected sessions to one worker",
-      category: "Action",
+      description: t("proxy.hosted.bulkChangeDescription"),
+      category: t("proxy.hosted.categoryAction"),
     },
     {
-      title: "Delete selected",
+      title: t("proxy.hosted.bulkDelete"),
       value: { type: "delete" },
-      description: "Delete selected hosted sessions",
-      category: "Action",
+      description: t("proxy.hosted.bulkDeleteDescription"),
+      category: t("proxy.hosted.categoryAction"),
     },
     ...props.sessions.map((session) => {
-      const worker = session.worker?.missing ? `missing worker: ${session.worker_id}` : session.worker?.name ?? session.worker_name
+      const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
       return {
         title: session.session_label,
         value: { type: "session" as const, session },
         description: `${worker} • ${session.status}${session.turn_state === "running" ? " • running" : ""}`,
-        category: "Hosted sessions",
+        category: t("proxy.hosted.categorySessions"),
         gutter: () => <text>{selectedIDs().has(session.session_id) ? "✓" : "○"}</text>,
       }
     }),
@@ -97,13 +99,13 @@ export function DialogHostedTerminalBulkActions(props: {
     const sessions = selectedSessions()
     if (sessions.length === 0) return
     if (sessions.some((session) => session.turn_state === "running")) {
-      void DialogAlert.show(dialog, "Change hosted session worker failed", "Stop running sessions before changing their worker.")
+      void DialogAlert.show(dialog, t("proxy.hosted.changeWorkerFailed"), t("proxy.hosted.stopRunning"))
       return
     }
     dialog.push(() => (
       <DialogWorkerPicker
-        title="Change worker"
-        placeholder="Search compatible workers..."
+        title={t("proxy.hosted.bulkChange")}
+        placeholder={t("proxy.hosted.compatibleSearch")}
         workers={compatibleWorkers()}
         onSelect={(worker) => {
           void (async () => {
@@ -125,7 +127,7 @@ export function DialogHostedTerminalBulkActions(props: {
               dialog.pop()
               dialog.pop()
             } catch (err) {
-              await DialogAlert.show(dialog, "Change hosted session worker failed", String(err instanceof Error ? err.message : err))
+              await DialogAlert.show(dialog, t("proxy.hosted.changeWorkerFailed"), String(err instanceof Error ? err.message : err))
             }
           })()
         }}
@@ -139,8 +141,8 @@ export function DialogHostedTerminalBulkActions(props: {
     void (async () => {
       const confirmed = await DialogConfirm.show(
         dialog,
-        "Delete hosted sessions",
-        `Delete ${sessions.length} selected hosted session${sessions.length === 1 ? "" : "s"}?`,
+        t("proxy.hosted.deleteManyConfirmTitle"),
+        t("proxy.hosted.deleteSelectedConfirm", { count: sessions.length, plural: sessions.length === 1 ? "" : "s" }),
       )
       if (!confirmed) return
       try {
@@ -150,19 +152,19 @@ export function DialogHostedTerminalBulkActions(props: {
         await props.onComplete()
         dialog.pop()
       } catch (err) {
-        await DialogAlert.show(dialog, "Delete hosted sessions failed", String(err instanceof Error ? err.message : err))
+        await DialogAlert.show(dialog, t("proxy.hosted.deleteManyFailed"), String(err instanceof Error ? err.message : err))
       }
     })()
   }
 
   return (
     <DialogSelect
-      title="Bulk session actions"
+      title={t("proxy.hosted.bulk")}
       options={options()}
-      placeholder="Search hosted sessions..."
+      placeholder={t("proxy.hosted.bulkSearch")}
       footerHints={[
-        { title: `${selectedSessions().length} selected`, label: "" },
-        { title: "toggle", label: toggleShortcut() },
+        { title: t("proxy.hosted.selected", { count: selectedSessions().length }), label: "" },
+        { title: t("proxy.hosted.toggleLabel"), label: toggleShortcut() },
       ]}
       onMove={(option) => {
         setHighlightedSession(option.value.type === "session" ? option.value.session : undefined)

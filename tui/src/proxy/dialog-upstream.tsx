@@ -9,6 +9,8 @@ import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
 import type { RedactedUpstream, UpstreamProbeResult } from "./backend"
 import { DialogPool } from "./dialog-pool"
+import { useLanguage } from "../context/language"
+import type { TranslationKey, Translate } from "../i18n/en"
 
 type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" } | { type: "pools" }
 type FieldKey = "name" | "base_url" | "api_key" | "api_format" | "protocol_probe_model"
@@ -24,24 +26,25 @@ export type Draft = {
 
 type Field = {
   key: FieldKey
-  title: string
+  title: TranslationKey
   placeholder: string
+  placeholderKey?: TranslationKey
   hidden?: boolean
 }
 
 const API_FORMAT_OPTIONS = [
-  { title: "responses", value: "responses", description: "OpenAI Responses API" },
-  { title: "chat_completions", value: "chat_completions", description: "OpenAI-compatible Chat Completions API" },
-  { title: "anthropic", value: "anthropic", description: "Anthropic Messages API" },
-  { title: "unset", value: "", description: "Native Responses passthrough" },
-]
+  { title: "responses", value: "responses", description: "proxy.upstream.responsesApi" },
+  { title: "chat_completions", value: "chat_completions", description: "proxy.upstream.chatCompletionsApi" },
+  { title: "anthropic", value: "anthropic", description: "proxy.upstream.anthropicApi" },
+  { title: "unset", value: "", description: "proxy.upstream.nativePassthrough" },
+] as const satisfies Array<{ title: string; value: string; description: TranslationKey }>
 
 const FIELDS: Field[] = [
-  { key: "name", title: "Name", placeholder: "Display name" },
-  { key: "base_url", title: "Base URL", placeholder: "https://example.com/v1" },
-  { key: "api_key", title: "API Key", placeholder: "sk-...", hidden: true },
-  { key: "api_format", title: "API Format", placeholder: "responses, chat_completions, or anthropic" },
-  { key: "protocol_probe_model", title: "Probe model", placeholder: "Model used for protocol readiness" },
+  { key: "name", title: "common.name", placeholder: "", placeholderKey: "proxy.upstream.displayName" },
+  { key: "base_url", title: "proxy.upstream.baseUrl", placeholder: "https://example.com/v1" },
+  { key: "api_key", title: "proxy.upstream.apiKey", placeholder: "sk-...", hidden: true },
+  { key: "api_format", title: "proxy.upstream.apiFormat", placeholder: "responses, chat_completions, or anthropic" },
+  { key: "protocol_probe_model", title: "proxy.upstream.probeModel", placeholder: "", placeholderKey: "proxy.upstream.probeModelDescription" },
 ]
 
 export function DialogUpstream() {
@@ -49,18 +52,19 @@ export function DialogUpstream() {
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { t } = useLanguage()
 
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
-    { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
-    { title: "Test All Upstreams", value: { type: "test-all" as const }, description: "Probe every configured upstream", category: "Actions" },
-    { title: "Manage Pools", value: { type: "pools" as const }, description: "Configure ordered fallback routes", category: "Actions" },
+    { title: t("proxy.upstream.create"), value: { type: "create" }, description: t("proxy.upstream.createDescription"), category: t("common.actions") },
+    { title: t("proxy.upstream.testAll"), value: { type: "test-all" as const }, description: t("proxy.upstream.testAllDescription"), category: t("common.actions") },
+    { title: t("proxy.upstream.managePools"), value: { type: "pools" as const }, description: t("proxy.upstream.managePoolsDescription"), category: t("common.actions") },
     ...sync.data.upstreams.map((upstream) => {
       const probe = sync.data.upstreamProbes[upstream.id]
       return {
         title: upstream.name,
         value: { type: "edit" as const, id: upstream.id },
-        description: `${upstream.base_url ?? ""}${upstream.has_api_key ? "" : " (no key)"}`,
-        category: "Configured upstreams",
+        description: `${upstream.base_url ?? ""}${upstream.has_api_key ? "" : ` ${t("proxy.upstream.noKey")}`}`,
+        category: t("proxy.upstream.configured"),
         footer: <UpstreamStatusFooter upstream={upstream} probe={probe} />,
       }
     }),
@@ -68,17 +72,17 @@ export function DialogUpstream() {
 
   return (
     <DialogSelect
-      title="Manage Upstreams"
+      title={t("proxy.upstream.manage")}
       options={options()}
-      placeholder="Search upstreams..."
+      placeholder={t("proxy.upstream.search")}
       onSelect={async (opt) => {
         const value = opt.value
         if (value.type === "create") {
-          const name = await DialogPrompt.show(dialog, "New Upstream Name", { placeholder: "e.g. groq" })
+          const name = await DialogPrompt.show(dialog, t("proxy.upstream.newName"), { placeholder: t("proxy.upstream.namePlaceholder") })
           if (name === null) return
           const upstreamName = name.trim()
           if (!upstreamName || upstreamName.includes("/")) {
-            toast.show({ message: "Invalid upstream name", variant: "error" })
+            toast.show({ message: t("proxy.upstream.invalidName"), variant: "error" })
             return
           }
           dialog.push(() => <DialogUpstreamEditor id={upstreamName} draft={{ name: upstreamName, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false, protocol_probe_model: "" }} mode="created" />)
@@ -91,7 +95,7 @@ export function DialogUpstream() {
             for (const result of results) {
               sync.set("upstreamProbes", result.upstream, result)
             }
-            toast.show({ message: `Tested ${results.length} upstreams`, variant: "success" })
+            toast.show({ message: t("proxy.upstream.tested", { count: results.length }), variant: "success" })
           } catch (err) {
             toast.error(err)
           }
@@ -129,6 +133,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { t } = useLanguage()
   const draft = createMemo<Draft>(() => {
     const upstream = sync.data.upstreams.find((item) => item.id === props.id)
     if (!upstream) return props.draft
@@ -144,17 +149,18 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
 
   const options = createMemo<DialogSelectOption<FieldKey>[]>(() =>
     FIELDS.map((field) => ({
-      title: field.title,
+      title: t(field.title),
       value: field.key,
       description: describe(field, draft()),
-      category: "Fields",
+      category: t("proxy.upstream.fields"),
       onSelect: async () => {
-        const patch = await editField(dialog, field, draft())
+        const patch = await editField(dialog, field, draft(), t)
         if (!patch) return
         try {
           await sdk.client.patchUpstream(props.id, patch)
           await sync.bootstrap({ fatal: false })
-          toast.show({ message: `${props.mode === "created" ? "Created" : "Saved"} upstream ${"name" in patch ? patch.name ?? draft().name : draft().name}`, variant: "success" })
+          const name = "name" in patch ? patch.name ?? draft().name : draft().name
+          toast.show({ message: t(props.mode === "created" ? "proxy.upstream.created" : "proxy.upstream.saved", { name }), variant: "success" })
         } catch (err) {
           toast.error(err)
         }
@@ -162,16 +168,16 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
     })),
   )
   const deleteAction: DialogSelectOption<string> = {
-    title: "Delete Upstream",
+    title: t("proxy.upstream.delete"),
     value: "delete",
     description: draft().name,
     onSelect: async () => {
-      const confirmed = await DialogConfirm.show(dialog, "Delete upstream", `Delete ${draft().name}? This will remove the provider config.`)
+      const confirmed = await DialogConfirm.show(dialog, t("proxy.upstream.deleteConfirmTitle"), t("proxy.upstream.deleteConfirm", { name: draft().name }))
       if (!confirmed) return
       try {
         await sdk.client.deleteUpstream(props.id)
         await sync.bootstrap({ fatal: false })
-        toast.show({ message: `Deleted upstream ${draft().name}`, variant: "success" })
+        toast.show({ message: t("proxy.upstream.deleted", { name: draft().name }), variant: "success" })
       } catch (err) {
         toast.error(err)
       }
@@ -179,9 +185,9 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
     },
   }
   const testAction: DialogSelectOption<string> = {
-    title: "Test Upstream",
+    title: t("proxy.upstream.test"),
     value: "test",
-    description: "Probe reachability and auth",
+    description: t("proxy.upstream.probeDescription"),
     onSelect: async () => {
       try {
         const result = await sdk.client.testUpstream(props.id)
@@ -196,7 +202,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
     },
   }
 
-  return <DialogSelect title={`Edit Upstream: ${draft().name}`} options={[...options(), testAction, deleteAction]} placeholder="Select a field..." footer={<EscHint dialog={dialog} />} />
+  return <DialogSelect title={t("proxy.upstream.editTitle", { name: draft().name })} options={[...options(), testAction, deleteAction]} placeholder={t("proxy.upstream.selectField")} footer={<EscHint dialog={dialog} />} />
 }
 
 function describe(field: Field, draft: Draft) {
@@ -204,13 +210,13 @@ function describe(field: Field, draft: Draft) {
   return draft[field.key] || "—"
 }
 
-async function editField(dialog: ReturnType<typeof useDialog>, field: Field, draft: Draft) {
+async function editField(dialog: ReturnType<typeof useDialog>, field: Field, draft: Draft, t: Translate) {
   if (field.hidden) {
     let dirty = false
     let value = draft.api_key
-    const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.base_url || "upstream"}`, {
+    const result = await DialogPrompt.show(dialog, `${t(field.title)}: ${draft.base_url || t("proxy.upstream.fallbackLabel")}`, {
       value: draft.has_api_key ? "******" : "",
-      placeholder: field.placeholder,
+      placeholder: field.placeholderKey ? t(field.placeholderKey) : field.placeholder,
       onInputChange(next) {
         value = next
         dirty = true
@@ -218,7 +224,7 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
     })
     if (result === null) {
       if (!dirty) return
-      const save = await DialogConfirm.show(dialog, "Save API Key", "Save the edited API key?")
+      const save = await DialogConfirm.show(dialog, t("proxy.upstream.saveApiKey"), t("proxy.upstream.saveApiKeyConfirm"))
       if (save !== true) return
     }
     if (!dirty) return
@@ -230,12 +236,14 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
       dialog.push(
         () => (
           <DialogSelect
-            title={`${field.title}: ${draft.base_url || "upstream"}`}
+            title={`${t(field.title)}: ${draft.base_url || t("proxy.upstream.fallbackLabel")}`}
             options={API_FORMAT_OPTIONS.map((option) => ({
-              ...option,
-              category: option.value === draft.api_format ? "Current" : "Options",
+              title: option.title,
+              value: option.value,
+              description: t(option.description),
+              category: option.value === draft.api_format ? t("common.current") : t("common.options"),
             }))}
-            placeholder="Select API format..."
+            placeholder={t("proxy.upstream.selectApiFormat")}
             current={draft.api_format}
             onSelect={(opt) => {
               resolve(opt.value)
@@ -251,18 +259,18 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
   }
 
   if (field.key === "protocol_probe_model") {
-    const result = await DialogPrompt.show(dialog, `${field.title}: ${draft.name || "upstream"}`, {
+    const result = await DialogPrompt.show(dialog, `${t(field.title)}: ${draft.name || t("proxy.upstream.fallbackLabel")}`, {
       value: draft.protocol_probe_model,
-      placeholder: field.placeholder,
+      placeholder: field.placeholderKey ? t(field.placeholderKey) : field.placeholder,
     })
     if (result === null) return
     return { protocol_probe: { model: result } }
   }
 
-  const promptTarget = field.key === "name" ? draft.name : draft.base_url || "upstream"
-  const result = await DialogPrompt.show(dialog, `${field.title}: ${promptTarget}`, {
+  const promptTarget = field.key === "name" ? draft.name : draft.base_url || t("proxy.upstream.fallbackLabel")
+  const result = await DialogPrompt.show(dialog, `${t(field.title)}: ${promptTarget}`, {
     value: draft[field.key],
-    placeholder: field.placeholder,
+    placeholder: field.placeholderKey ? t(field.placeholderKey) : field.placeholder,
   })
   if (result === null) return
   return { [field.key]: result } as Partial<Draft>
@@ -270,16 +278,16 @@ async function editField(dialog: ReturnType<typeof useDialog>, field: Field, dra
 
 type StatusKind = "protocol_ok" | "protocol_error" | "reachable" | "unreachable" | "unknown"
 
-function statusForUpstream(upstream: RedactedUpstream, probe?: UpstreamProbeResult, pool?: string): { kind: StatusKind; label: string } {
+function statusForUpstream(upstream: RedactedUpstream, t: Translate, probe?: UpstreamProbeResult, pool?: string): { kind: StatusKind; label: string } {
   const bindings = pool
     ? (upstream.pool_readiness ?? []).filter((item) => item.pool === pool)
     : (upstream.pool_readiness ?? [])
   if (bindings.length > 0) {
     const ready = bindings.filter((item) => item.readiness === "ready" && !item.stale).length
-    const count = `${ready}/${bindings.length} pools`
+    const count = t("proxy.upstream.poolCount", { ready, total: bindings.length })
     const failed = bindings.find((item) => item.readiness === "not_ready")
     if (failed) return { kind: "protocol_error", label: `${failed.error || "protocol_error"} ${count}` }
-    if (bindings.some((item) => item.readiness !== "ready" || item.stale)) return { kind: "unknown", label: `unknown ${count}` }
+    if (bindings.some((item) => item.readiness !== "ready" || item.stale)) return { kind: "unknown", label: t("proxy.upstream.unknownCount", { count }) }
     return { kind: "protocol_ok", label: `${bindings[0]?.latency_ms ?? 0}ms ${count}` }
   }
   if (!probe) return { kind: "unknown", label: "" }
@@ -289,13 +297,14 @@ function statusForUpstream(upstream: RedactedUpstream, probe?: UpstreamProbeResu
       : { kind: "protocol_error", label: probe.error || String(probe.status_code) }
   }
   return probe.status_code > 0
-    ? { kind: "reachable", label: `reachable ${probe.latency_ms}ms` }
+    ? { kind: "reachable", label: t("proxy.upstream.reachableLatency", { latency: probe.latency_ms }) }
     : { kind: "unreachable", label: probe.error || "unreachable" }
 }
 
 export function UpstreamStatusFooter(props: { upstream: RedactedUpstream; probe?: UpstreamProbeResult; pool?: string }) {
   const { theme } = useTheme()
-  const status = statusForUpstream(props.upstream, props.probe, props.pool)
+  const { t } = useLanguage()
+  const status = statusForUpstream(props.upstream, t, props.probe, props.pool)
   if (status.kind === "protocol_ok") return <span style={{ fg: theme.success }}>●{status.label}</span>
   if (status.kind === "protocol_error" || status.kind === "unreachable") return <span style={{ fg: theme.error }}>✕{status.label}</span>
   if (status.kind === "reachable") return <span style={{ fg: theme.warning }}>▲{status.label}</span>

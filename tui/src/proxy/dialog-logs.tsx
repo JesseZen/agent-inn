@@ -5,12 +5,14 @@ import { useTheme } from "../context/theme"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, onMount, onCleanup, For, Show, batch } from "solid-js"
 import type { WorkerSummary } from "../context/sdk"
+import { useLanguage } from "../context/language"
 
 export function DialogLogs(props: { worker: WorkerSummary; initialLines?: string[] }) {
   const sdk = useSDK()
   const dialog = useDialog()
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
+  const { t } = useLanguage()
   const [lines, setLines] = createSignal<string[]>(props.initialLines ?? [])
   const [loading, setLoading] = createSignal(true)
   const [connected, setConnected] = createSignal(false)
@@ -74,9 +76,9 @@ export function DialogLogs(props: { worker: WorkerSummary; initialLines?: string
       <box paddingLeft={2} flexDirection="row" justifyContent="space-between">
         <box flexDirection="row" gap={1}>
           <text fg={theme.text} attributes={TextAttributes.BOLD}>
-            Logs: {props.worker.name} (:{props.worker.port})
+            {t("proxy.logs.title", { name: props.worker.name, port: props.worker.port })}
           </text>
-          <text fg={theme.textMuted}>{connected() ? "● live" : "○ disconnected"}</text>
+          <text fg={theme.textMuted}>{connected() ? t("proxy.logs.live") : t("proxy.logs.disconnected")}</text>
         </box>
         <EscHint dialog={dialog} />
       </box>
@@ -85,7 +87,7 @@ export function DialogLogs(props: { worker: WorkerSummary; initialLines?: string
           {(line) => <text fg={theme.textMuted}>{line}</text>}
         </For>
         <Show when={!loading() && lines().length === 0}>
-          <text fg={theme.textMuted}>No logs yet</text>
+          <text fg={theme.textMuted}>{t("proxy.logs.empty")}</text>
         </Show>
       </scrollbox>
     </box>

@@ -31,6 +31,7 @@ import { DashboardInspector, DashboardRows, DashboardSummary } from "./dashboard
 import { dashboardDropPair, isValidDashboardDrop } from "./dashboard/drag"
 import { rebindHostedSession } from "./hosted-session-rebind"
 import { useWorkerFrecency } from "./worker-frecency-context"
+import { useLanguage } from "../context/language"
 
 const DASHBOARD_DIALOG_MARGIN = 4
 const DASHBOARD_CONTENT_PADDING = 8
@@ -51,6 +52,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
   const dimensions = useTerminalDimensions()
   const tuiConfig = useTuiConfig()
   const workerFrecency = useWorkerFrecency()
+  const { t } = useLanguage()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
   const [sessionsLoaded, setSessionsLoaded] = createSignal(false)
   const [hoveredID, setHoveredID] = createSignal<string | null>(null)
@@ -236,7 +238,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
         if (launched) workerFrecency.record(target.data.id)
         setSessions(await sdk.client.listHostedSessions())
         toast.show({
-          message: `Rebound ${source.data.session_label} -> ${target.data.name}`,
+          message: t("proxy.dashboard.rebound", { session: source.data.session_label, worker: target.data.name }),
           variant: "success",
         })
       } catch (error) {
@@ -252,7 +254,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
       })
       await sync.bootstrap({ fatal: false })
       toast.show({
-        message: `Switched ${worker.data.name} -> ${upstream.data.name}`,
+        message: t("proxy.worker.switchedUpstream", { name: worker.data.name, upstream: upstream.data.name }),
         variant: "success",
       })
     } catch (error) {
@@ -264,56 +266,56 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     commands: [
       {
         name: "dashboard.previous",
-        title: "Previous dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.previous"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -1)),
       },
       {
         name: "dashboard.next",
-        title: "Next dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.next"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, 1)),
       },
       {
         name: "dashboard.collapse",
-        title: "Collapse dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.collapse"),
+        category: t("proxy.command.category"),
         run: () => applyNavigation(dashboardCollapse(rows(), state())),
       },
       {
         name: "dashboard.expand",
-        title: "Expand dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.expand"),
+        category: t("proxy.command.category"),
         run: () => applyNavigation(dashboardExpand(rows(), state())),
       },
       {
         name: "dashboard.home",
-        title: "First dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.home"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(rows()[0]?.id ?? null),
       },
       {
         name: "dashboard.end",
-        title: "Last dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.end"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(rows().at(-1)?.id ?? null),
       },
       {
         name: "dashboard.page_up",
-        title: "Dashboard page up",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.pageUp"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, -(scroll?.viewport.height ?? 1))),
       },
       {
         name: "dashboard.page_down",
-        title: "Dashboard page down",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.pageDown"),
+        category: t("proxy.command.category"),
         run: () => updateSelection(moveDashboardSelection(rows(), state().selectedID, scroll?.viewport.height ?? 1)),
       },
       {
         name: "dashboard.submit",
-        title: "Open dashboard row",
-        category: "Dashboard",
+        title: t("proxy.dashboard.command.open"),
+        category: t("proxy.command.category"),
         run: () => {
           const row = selectedRow()
           if (!row) return
@@ -342,7 +344,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     <box flexDirection="column" height={Math.max(DASHBOARD_MIN_HEIGHT, dimensions().height - DASHBOARD_VERTICAL_MARGIN)} paddingLeft={4} paddingRight={4}>
       <box flexDirection="row" justifyContent="space-between">
         <text fg={theme.text} attributes={TextAttributes.BOLD} selectable={false}>
-          Dashboard
+          {t("proxy.dashboard.heading")}
         </text>
         <EscHint dialog={dialog} />
       </box>
@@ -367,7 +369,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
             if (!input.isDestroyed) input.focus()
           }, 1)
         }}
-        placeholder="Filter relationships"
+        placeholder={t("proxy.dashboard.filter")}
         placeholderColor={theme.textMuted}
       />
       <box flexGrow={1} flexShrink={1} paddingTop={1}>
@@ -375,7 +377,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
           when={model().summary.pools + model().summary.upstreams + model().summary.workers + model().summary.sessions > 0}
           fallback={
             <text fg={theme.textMuted} selectable={false}>
-              No pools, workers, upstreams, or sessions configured
+              {t("proxy.dashboard.empty")}
             </text>
           }
         >

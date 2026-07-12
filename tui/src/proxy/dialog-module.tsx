@@ -5,37 +5,40 @@ import { useDialog, EscHint } from "../ui/dialog"
 import { useSDK, type WorkerDetail, type WorkerSummary } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
+import { useLanguage } from "../context/language"
+import type { TranslationKey, Translate } from "../i18n/en"
 
 type ModuleKey = "enabled" | "model" | "api_format" | "config_path" | "state_dir" | "blocked_tools"
 
 type ModuleField = {
   key: ModuleKey
-  title: string
+  title: TranslationKey
   placeholder: string
 }
 
 const MODULE_FIELDS: Record<string, ModuleField[]> = {
-  model_override: [{ key: "model", title: "Model", placeholder: "gpt-4o" }],
-  api_translate: [{ key: "api_format", title: "API Format", placeholder: "responses or chat_completions" }],
+  model_override: [{ key: "model", title: "proxy.module.model", placeholder: "gpt-4o" }],
+  api_translate: [{ key: "api_format", title: "proxy.module.apiFormat", placeholder: "responses or chat_completions" }],
   config_patch: [
-    { key: "config_path", title: "Config Path", placeholder: "~/.codex/config.toml" },
-    { key: "state_dir", title: "State Dir", placeholder: "~/.ainn" },
+    { key: "config_path", title: "proxy.module.configPath", placeholder: "~/.codex/config.toml" },
+    { key: "state_dir", title: "proxy.module.stateDir", placeholder: "~/.ainn" },
   ],
 }
 
 const TOOL_FILTER_TOOLS = [
-  { value: "image_generation", description: "OpenAI image generation" },
-  { value: "web_search_preview", description: "OpenAI web search" },
-  { value: "file_search", description: "OpenAI file search" },
-  { value: "code_interpreter", description: "OpenAI code interpreter" },
-  { value: "computer_use_preview", description: "OpenAI computer use" },
-  { value: "function", description: "Function tools" },
-]
+  { value: "image_generation", descriptionKey: "proxy.module.imageGeneration" },
+  { value: "web_search_preview", descriptionKey: "proxy.module.webSearch" },
+  { value: "file_search", descriptionKey: "proxy.module.fileSearch" },
+  { value: "code_interpreter", descriptionKey: "proxy.module.codeInterpreter" },
+  { value: "computer_use_preview", descriptionKey: "proxy.module.computerUse" },
+  { value: "function", descriptionKey: "proxy.module.functionTools" },
+] as const satisfies Array<{ value: string; descriptionKey: TranslationKey }>
 
 export function DialogModulePicker(props: { worker: WorkerSummary }) {
   const sdk = useSDK()
   const sync = useSync()
   const dialog = useDialog()
+  const { t } = useLanguage()
   const options = createMemo<DialogSelectOption<string>[]>(() => {
     const plugins = sync.data.manager_config.plugins ?? {}
     const configuredRequestModules = Object.entries(props.worker.modules ?? {}).filter(
@@ -61,7 +64,7 @@ export function DialogModulePicker(props: { worker: WorkerSummary }) {
       return {
         title: `${cfg.enabled ? "✓" : "○"} ${name}`,
         value: name,
-        description: availabilityDescription(props.worker, name, cfg.params ?? {}),
+        description: availabilityDescription(props.worker, name, cfg.params ?? {}, t),
         category,
         onSelect: async () => {
           if (!available && !configured) return
@@ -71,17 +74,17 @@ export function DialogModulePicker(props: { worker: WorkerSummary }) {
       }
     }
     return [
-      ...configuredRequestModules.map(([name, cfg]) => moduleOption(name, cfg, "Request Middleware", true)),
-      ...availableRequestModules.map(([name, cfg]) => moduleOption(name, cfg, "Request Middleware", false)),
-      ...hooks.map(([name, cfg]) => moduleOption(name, cfg, "Lifecycle Hooks", props.worker.hooks?.[name] !== undefined)),
+      ...configuredRequestModules.map(([name, cfg]) => moduleOption(name, cfg, t("proxy.module.requestMiddleware"), true)),
+      ...availableRequestModules.map(([name, cfg]) => moduleOption(name, cfg, t("proxy.module.requestMiddleware"), false)),
+      ...hooks.map(([name, cfg]) => moduleOption(name, cfg, t("proxy.module.lifecycleHooks"), props.worker.hooks?.[name] !== undefined)),
     ]
   })
 
   return (
     <DialogSelect
-      title={`Modules & Hooks: ${props.worker.name} (:${props.worker.port})`}
+      title={t("proxy.module.title", { name: props.worker.name, port: props.worker.port })}
       options={options()}
-      placeholder="Search modules..."
+      placeholder={t("proxy.module.search")}
       footer={<EscHint dialog={dialog} />}
     />
   )
@@ -93,6 +96,7 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
   const sync = useSync()
   const toast = useToast()
   const [draft, setDraft] = createSignal(props.worker.modules?.[props.moduleName] ?? props.worker.hooks?.[props.moduleName] ?? { enabled: false })
+  const { t } = useLanguage()
 
   const options = createMemo<DialogSelectOption<ModuleKey>[]>(() => {
     const cfg = draft()
@@ -100,10 +104,10 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
       if (cfg.enabled) {
         return [
           {
-            title: "Disable",
+            title: t("proxy.module.disable"),
             value: "enabled",
-            description: "unavailable for current protocol",
-            category: "Actions",
+            description: t("proxy.module.unavailableDescription"),
+            category: t("proxy.module.categoryActions"),
             onSelect: async () => {
               await saveModule({ enabled: false, params: cfg.params })
             },
@@ -112,10 +116,10 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
       }
       return [
         {
-          title: "Unavailable",
+          title: t("proxy.module.unavailable"),
           value: "enabled",
-          description: "disabled for current protocol",
-          category: "Status",
+          description: t("proxy.module.disabledDescription"),
+          category: t("proxy.module.categoryStatus"),
           onSelect: async () => {},
         },
       ]
@@ -125,22 +129,22 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
       props.moduleName === "tool_filter"
         ? [
             {
-              title: "Blocked Tools",
+              title: t("proxy.module.blockedTools"),
               value: "blocked_tools",
               description: describeBlockedTools(cfg.params ?? {}),
-              category: "Fields",
+              category: t("proxy.module.categoryFields"),
               onSelect: async () => {
                 dialog.push(() => (
                   <DialogSelect
-                    title={`Blocked Tools: ${props.worker.name}`}
-                    options={toolFilterToolOptions(draft().params ?? {}, async (tool) => {
+                    title={t("proxy.module.blockedToolsTitle", { name: props.worker.name })}
+                    options={toolFilterToolOptions(draft().params ?? {}, t, async (tool) => {
                       const params = {
                         ...(draft().params ?? {}),
                         blocked_tools: toggledBlockedTools(draft().params ?? {}, tool),
                       }
                       await patchModule({ enabled: draft().enabled, params })
                     })}
-                    placeholder="Select a tool..."
+                    placeholder={t("proxy.module.selectTool")}
                     footer={<EscHint dialog={dialog} />}
                   />
                 ))
@@ -150,22 +154,22 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
         : []
     return [
       {
-        title: cfg.enabled ? "Disable" : "Enable",
+        title: cfg.enabled ? t("proxy.module.disable") : t("proxy.module.enable"),
         value: "enabled",
-        description: cfg.enabled ? "enabled" : "disabled",
-        category: "Actions",
+        description: cfg.enabled ? t("common.enabled") : t("common.disabled"),
+        category: t("proxy.module.categoryActions"),
         onSelect: async () => {
           await saveModule({ enabled: !cfg.enabled, params: cfg.params })
         },
       },
       ...toolFields,
       ...fields.map((field) => ({
-        title: field.title,
+        title: t(field.title),
         value: field.key,
         description: describeField(cfg.params ?? {}, field.key),
-        category: "Fields",
+        category: t("proxy.module.categoryFields"),
         onSelect: async () => {
-          const next = await DialogPrompt.show(dialog, `${field.title}: ${props.moduleName}`, {
+          const next = await DialogPrompt.show(dialog, t("proxy.module.fieldTitle", { field: t(field.title), module: props.moduleName }), {
             placeholder: field.placeholder,
           })
           if (next === null) return
@@ -184,7 +188,7 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
         params: result.module.params,
       })
       await sync.bootstrap({ fatal: false })
-      toast.show({ message: `Saved ${props.moduleName}`, variant: "success" })
+      toast.show({ message: t("proxy.module.saved", { name: props.moduleName }), variant: "success" })
       return true
     } catch (err) {
       toast.error(err)
@@ -200,9 +204,9 @@ function DialogModuleEditor(props: { worker: WorkerDetail; moduleName: string; a
 
   return (
     <DialogSelect
-      title={`Edit Module: ${props.worker.name}`}
+      title={t("proxy.module.editTitle", { name: props.worker.name })}
       options={options()}
-      placeholder="Select a field..."
+      placeholder={t("proxy.module.selectField")}
       footer={<EscHint dialog={dialog} />}
     />
   )
@@ -223,9 +227,9 @@ function moduleAvailable(worker: WorkerSummary, name: string) {
   return support.protocols.includes(protocol)
 }
 
-function availabilityDescription(worker: WorkerSummary, name: string, params: Record<string, unknown>) {
+function availabilityDescription(worker: WorkerSummary, name: string, params: Record<string, unknown>, t: Translate) {
   const base = describeModule(name, params)
-  return moduleAvailable(worker, name) ? base : `${base} • unavailable`
+  return moduleAvailable(worker, name) ? base : t("proxy.module.unavailableSuffix", { description: base })
 }
 
 function describeField(params: Record<string, unknown>, key: string) {
@@ -235,18 +239,21 @@ function describeField(params: Record<string, unknown>, key: string) {
 
 function toolFilterToolOptions(
   params: Record<string, unknown>,
+  t: Translate,
   onToggle: (tool: string) => Promise<void>,
 ): DialogSelectOption<string>[] {
   const blocked = blockedToolList(params)
-  const known = new Set(TOOL_FILTER_TOOLS.map((tool) => tool.value))
-  const custom = blocked.filter((tool) => !known.has(tool)).map((tool) => ({ value: tool, description: "Custom tool" }))
+  const known = new Set<string>(TOOL_FILTER_TOOLS.map((tool) => tool.value))
+  const custom: Array<{ value: string; descriptionKey: TranslationKey }> = blocked
+    .filter((tool) => !known.has(tool))
+    .map((tool) => ({ value: tool, descriptionKey: "proxy.module.customTool" }))
   return [...TOOL_FILTER_TOOLS, ...custom].map((tool) => {
     const selected = blocked.includes(tool.value)
     return {
       title: `${selected ? "✓" : "○"} ${tool.value}`,
       value: tool.value,
-      description: selected ? `filtered • ${tool.description}` : `allowed • ${tool.description}`,
-      category: "Tools",
+      description: selected ? t("proxy.module.filtered", { description: t(tool.descriptionKey) }) : t("proxy.module.allowed", { description: t(tool.descriptionKey) }),
+      category: t("proxy.module.categoryTools"),
       onSelect: async () => {
         await onToggle(tool.value)
       },
@@ -267,7 +274,7 @@ function toggledBlockedTools(params: Record<string, unknown>, tool: string) {
   } else {
     selected.add(tool)
   }
-  const knownOrder = TOOL_FILTER_TOOLS.map((item) => item.value)
+  const knownOrder: string[] = TOOL_FILTER_TOOLS.map((item) => item.value)
   return [...knownOrder.filter((name) => selected.has(name)), ...current.filter((name) => selected.has(name) && !knownOrder.includes(name))]
 }
 

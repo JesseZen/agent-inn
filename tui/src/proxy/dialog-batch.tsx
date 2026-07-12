@@ -11,6 +11,7 @@ import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import type { BatchRun, BatchVariant, HostedSessionSummary, WorkerSummary } from "./backend"
 import { launchProxySession, type HostedTerminalAttachMode } from "./launch"
+import { useLanguage } from "../context/language"
 
 const minBatchVariantCount = 1
 const maxBatchVariantCount = 8
@@ -36,6 +37,7 @@ export function DialogBatch(props: DialogBatchProps = {}) {
   const sync = useSync()
   const project = useProject()
   const toast = useToast()
+  const { t } = useLanguage()
   const [batches, setBatches] = createSignal<BatchRun[]>([])
 
   onMount(async () => {
@@ -44,16 +46,16 @@ export function DialogBatch(props: DialogBatchProps = {}) {
 
   const options = createMemo<DialogSelectOption<BatchListOption>[]>(() => [
     {
-      title: "Create a worktree race",
+      title: t("proxy.batch.createRace"),
       value: { type: "create" },
-      description: "Create isolated worktrees",
-      category: "Action",
+      description: t("proxy.batch.createDescription"),
+      category: t("proxy.batch.categoryAction"),
     },
     ...batches().map((batch) => ({
       title: batch.title,
       value: { type: "batch" as const, batch },
-      description: `${batch.worker_name} • ${batch.variants.length} variants`,
-      category: "Batches",
+      description: t("proxy.batch.summary", { worker: batch.worker_name, count: batch.variants.length }),
+      category: t("proxy.batch.category"),
     })),
   ])
 
@@ -79,16 +81,16 @@ export function DialogBatch(props: DialogBatchProps = {}) {
   function createBatch() {
     dialog.push(() => (
       <DialogSelect
-        title="Choose worker"
+        title={t("proxy.batch.chooseWorker")}
         options={sync.data.workers
           .filter((worker) => (worker.role ?? "cli") === "cli")
           .map((worker) => ({
             title: worker.name,
             value: worker,
             description: `:${worker.port} • ${worker.upstream.name} • ${worker.status}`,
-            category: worker.status === "running" ? "Running" : "Stopped",
+            category: worker.status === "running" ? t("proxy.batch.categoryRunning") : t("proxy.batch.categoryStopped"),
           }))}
-        placeholder="Search workers..."
+        placeholder={t("proxy.worker.search")}
         onSelect={(option) => {
           void createBatchForWorker(option.value)
         }}
@@ -98,20 +100,20 @@ export function DialogBatch(props: DialogBatchProps = {}) {
 
   async function createBatchForWorker(worker: WorkerSummary) {
     const basePath = project.instance.directory() || sync.path.directory
-    const sourceDirectory = await DialogPrompt.show(dialog, "Source Directory", {
-      placeholder: "Source directory",
+    const sourceDirectory = await DialogPrompt.show(dialog, t("proxy.batch.sourceDirectoryTitle"), {
+      placeholder: t("proxy.batch.sourceDirectory"),
       value: basePath,
       directoryCompletion: basePath ? { basePath } : undefined,
     })
     if (sourceDirectory === null) return
-    const title = await DialogPrompt.show(dialog, "Batch Title", {
-      placeholder: "Title",
+    const title = await DialogPrompt.show(dialog, t("proxy.batch.titlePrompt"), {
+      placeholder: t("proxy.batch.titlePlaceholder"),
     })
     if (title === null) return
     let count: number | undefined
     for (;;) {
-      const countText = await DialogPrompt.show(dialog, "Variant Count", {
-        placeholder: "Count",
+      const countText = await DialogPrompt.show(dialog, t("proxy.batch.countPrompt"), {
+        placeholder: t("proxy.batch.countPlaceholder"),
       })
       if (countText === null) return
       const trimmedCount = countText.trim()
@@ -121,10 +123,10 @@ export function DialogBatch(props: DialogBatchProps = {}) {
         count = parsedCount
         break
       }
-      toast.show({ message: `Variant count must be between ${minBatchVariantCount} and ${maxBatchVariantCount}`, variant: "error" })
+      toast.show({ message: t("proxy.batch.variantCount", { min: minBatchVariantCount, max: maxBatchVariantCount }), variant: "error" })
     }
-    const model = await DialogPrompt.show(dialog, "Model", {
-      placeholder: "Model",
+    const model = await DialogPrompt.show(dialog, t("proxy.module.model"), {
+      placeholder: t("proxy.module.model"),
     })
     if (model === null) return
 
@@ -144,9 +146,9 @@ export function DialogBatch(props: DialogBatchProps = {}) {
 
   return (
     <DialogSelect
-      title="Batch Runs"
+      title={t("proxy.batch.title")}
       options={options()}
-      placeholder="Search batches..."
+      placeholder={t("proxy.batch.search")}
       onSelect={(option) => {
         const selected = option.value
         if (selected.type === "create") {
@@ -163,6 +165,7 @@ export function DialogBatchRun(props: { batch: BatchRun; launchSession?: BatchSe
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
+  const { t } = useLanguage()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
   const sessionStates = createMemo(() => new Map(sessions().map((session) => [session.session_id, session.turn_state ?? "idle"])))
 
@@ -201,25 +204,25 @@ export function DialogBatchRun(props: { batch: BatchRun; launchSession?: BatchSe
 
   return (
     <DialogSelect
-      title={`Batch: ${props.batch.title}`}
+      title={t("proxy.batch.runTitle", { title: props.batch.title })}
       options={options()}
-      placeholder="Select variant..."
+      placeholder={t("proxy.batch.selectVariant")}
       actions={[
         {
           command: "batch.delete",
-          title: "delete",
+          title: t("common.delete"),
           onTrigger: async () => {
             const confirmed = await DialogConfirm.show(
               dialog,
-              "Delete batch",
-              "Remove all variants, hosted sessions, and worktrees?",
+              t("proxy.batch.deleteTitle"),
+              t("proxy.batch.deleteConfirm"),
             )
             if (!confirmed) return
             try {
               await sdk.client.deleteBatch(props.batch.id)
               dialog.replace(() => <DialogBatch launchSession={props.launchSession} />)
             } catch (err) {
-              await DialogAlert.show(dialog, "Delete batch failed", String(err instanceof Error ? err.message : err))
+              await DialogAlert.show(dialog, t("proxy.batch.deleteFailed"), String(err instanceof Error ? err.message : err))
             }
           },
         },

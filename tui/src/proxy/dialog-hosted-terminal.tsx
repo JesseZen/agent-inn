@@ -14,6 +14,7 @@ import { DialogHostedTerminalBulkActions } from "./dialog-hosted-terminal-bulk-a
 import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
 import { Global } from "@agent-inn/core/global"
 import { useWorkerFrecency } from "./worker-frecency-context"
+import { useLanguage } from "../context/language"
 
 type HostedTerminalSurface = "dialog" | "popup"
 
@@ -45,6 +46,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   const sync = useSync()
   const project = useProject()
   const workerFrecency = useWorkerFrecency()
+  const { t } = useLanguage()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
   const mode = props.mode ?? "dialog"
   const executable = import.meta.env?.AINN_EXECUTABLE || undefined
@@ -67,54 +69,54 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ...(mode === "popup"
       ? [
           {
-            title: "Refresh",
+            title: t("common.refresh"),
             value: { type: "refresh" as const },
-            description: "Reload hosted sessions",
-            category: "Action",
+            description: t("proxy.hosted.refreshDescription"),
+            category: t("proxy.hosted.categoryAction"),
           },
         ]
       : []),
     {
-      title: "Create new session",
+      title: t("proxy.hosted.create"),
       value: { type: "create" },
-      description: "Choose a worker, then name a new hosted terminal session",
-      category: "Action",
+      description: t("proxy.hosted.createDescription"),
+      category: t("proxy.hosted.categoryAction"),
     },
     {
-      title: "Delete",
+      title: t("common.delete"),
       value: { type: "delete" },
-      description: "Delete a hosted terminal session",
-      category: "Action",
+      description: t("proxy.hosted.deleteDescription"),
+      category: t("proxy.hosted.categoryAction"),
     },
     ...sessions().map((session) => {
-      const worker = session.worker?.missing ? `missing worker: ${session.worker_id}` : session.worker?.name ?? session.worker_name
+      const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
       return {
         title: session.session_label,
         value: { type: "session" as const, session },
         description: `${worker} • ${session.status}`,
-        category: "Existing sessions",
+        category: t("proxy.hosted.existing"),
       }
     }),
     {
-      title: "Bulk session actions",
+      title: t("proxy.hosted.bulk"),
       value: { type: "bulk-actions" },
-      description: "Change worker or delete selected sessions",
-      category: "Bulk actions",
+      description: t("proxy.hosted.bulkDescription"),
+      category: t("proxy.hosted.categoryBulk"),
     },
   ])
 
   async function createSession() {
     dialog.push(() => (
       <DialogWorkerPicker
-        title="Choose worker"
-        placeholder="Search workers..."
+        title={t("proxy.hosted.chooseWorker")}
+        placeholder={t("proxy.worker.search")}
         recentWorkers={workerSections().recent}
         workers={workerSections().rest}
         onSelect={async (worker) => {
           const basePath = project.instance.directory() || sync.path.directory
-          const workspace = await DialogPrompt.show(dialog, "Launch Worker", {
-            placeholder: "Workspace directory",
-            description: () => <text>Launch this worker in the workspace.</text>,
+          const workspace = await DialogPrompt.show(dialog, t("proxy.command.launchWorker"), {
+            placeholder: t("proxy.hosted.workspace"),
+            description: () => <text>{t("proxy.hosted.launchDescription")}</text>,
             value: basePath,
             directoryCompletion: basePath
               ? {
@@ -132,15 +134,15 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
             if (Number.isInteger(value) && value >= nextCounter) nextCounter = value + 1
           }
           const defaultLabel = `${worker.name} ${nextCounter}`
-          const label = await DialogPrompt.show(dialog, "Create Hosted Session", {
-            placeholder: "Session label",
+          const label = await DialogPrompt.show(dialog, t("proxy.hosted.createTitle"), {
+            placeholder: t("proxy.hosted.sessionLabel"),
             value: defaultLabel,
-            description: () => <text>Label must be unique. It will appear on the tmux tab.</text>,
+            description: () => <text>{t("proxy.hosted.labelDescription")}</text>,
           })
           if (label === null) return
           const sessionLabel = label || defaultLabel
           if (sessions().some((session) => session.session_label === sessionLabel)) {
-            await DialogAlert.show(dialog, "Create hosted session failed", `Session label "${sessionLabel}" already exists.`)
+            await DialogAlert.show(dialog, t("proxy.hosted.createFailed"), t("proxy.hosted.labelExists", { label: sessionLabel }))
             return
           }
           try {
@@ -161,7 +163,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
             await refreshSessions()
             dialog.pop()
           } catch (err) {
-            await DialogAlert.show(dialog, "Create hosted session failed", String(err instanceof Error ? err.message : err))
+            await DialogAlert.show(dialog, t("proxy.hosted.createFailed"), String(err instanceof Error ? err.message : err))
           }
         }}
       />
@@ -175,8 +177,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     const workers = sync.data.workers.filter((worker) => (worker.launcher ?? "codex") === currentLauncher)
     dialog.push(() => (
       <DialogWorkerPicker
-        title={`Change worker: ${session.session_label}`}
-        placeholder="Search workers..."
+        title={t("proxy.hosted.changeWorkerTitle", { session: session.session_label })}
+        placeholder={t("proxy.worker.search")}
         workers={workers}
         onSelect={async (worker) => {
           try {
@@ -192,7 +194,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
             await refreshSessions()
             dialog.pop()
           } catch (err) {
-            await DialogAlert.show(dialog, "Change hosted session worker failed", String(err instanceof Error ? err.message : err))
+            await DialogAlert.show(dialog, t("proxy.hosted.changeWorkerFailed"), String(err instanceof Error ? err.message : err))
           }
         }}
       />
@@ -200,10 +202,10 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   }
 
   async function renameSession(session: HostedSessionSummary) {
-    const label = await DialogPrompt.show(dialog, "Rename Hosted Session", {
-      placeholder: "Session label",
+    const label = await DialogPrompt.show(dialog, t("proxy.hosted.renameTitle"), {
+      placeholder: t("proxy.hosted.sessionLabel"),
       value: session.session_label,
-      description: () => <text>Label must be unique. It will appear on the tmux tab.</text>,
+      description: () => <text>{t("proxy.hosted.labelDescription")}</text>,
     })
     if (label === null) return
     try {
@@ -215,7 +217,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       }
       dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
     } catch (err) {
-      await DialogAlert.show(dialog, "Rename hosted session failed", String(err instanceof Error ? err.message : err))
+      await DialogAlert.show(dialog, t("proxy.hosted.renameFailed"), String(err instanceof Error ? err.message : err))
     }
   }
 
@@ -238,7 +240,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       if (launched) workerFrecency.record(duplicatedWorkerID)
       await refreshSessions()
     } catch (err) {
-      await DialogAlert.show(dialog, "Duplicate hosted session failed", String(err instanceof Error ? err.message : err))
+      await DialogAlert.show(dialog, t("proxy.hosted.duplicateFailed"), String(err instanceof Error ? err.message : err))
     }
   }
 
@@ -247,21 +249,21 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       await sdk.client.markHostedSessionUnread(session.session_id)
       await refreshSessions()
     } catch (err) {
-      await DialogAlert.show(dialog, "Mark hosted session unread failed", String(err instanceof Error ? err.message : err))
+      await DialogAlert.show(dialog, t("proxy.hosted.markUnreadFailed"), String(err instanceof Error ? err.message : err))
     }
   }
 
   return (
     <DialogSelect
-      title="Hosted Terminal"
+      title={t("proxy.hosted.title")}
       onClose={props.onClose}
       locked={mode === "popup" && dialog.stack.length > 0}
       options={options()}
-      placeholder="Select hosted session..."
+      placeholder={t("proxy.hosted.search")}
       actions={[
         {
           command: "session.change_worker",
-          title: "worker",
+          title: t("proxy.hosted.actionWorker"),
           hidden: (option) => {
             if (option?.value.type !== "session") return true
             const session = option.value.session
@@ -274,7 +276,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         },
         {
           command: "session.rename",
-          title: "rename",
+          title: t("proxy.hosted.actionRename"),
           hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
@@ -283,7 +285,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         },
         {
           command: "session.duplicate",
-          title: "duplicate",
+          title: t("proxy.hosted.actionDuplicate"),
           hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
@@ -292,7 +294,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         },
         {
           command: "session.mark_unread",
-          title: "unread",
+          title: t("proxy.hosted.actionUnread"),
           hidden: (option) => {
             if (option?.value.type !== "session") return true
             const session = option.value.session
@@ -310,7 +312,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         },
         {
           command: "session.delete",
-          title: "delete",
+          title: t("proxy.hosted.actionDelete"),
           hidden: (option) => option?.value.type !== "session",
           onTrigger: (option) => {
             if (option.value.type !== "session") return
@@ -319,6 +321,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
               dialog,
               session: option.value.session,
               refreshSessions,
+              t,
               onDeleted: (session) => {
                 const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
                 if (mode === "popup") {
@@ -371,7 +374,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
             if (launched) workerFrecency.record(currentWorkerID)
             if (mode === "popup") await refreshSessions()
           } catch (err) {
-            await DialogAlert.show(dialog, "Open hosted session failed", String(err instanceof Error ? err.message : err))
+            await DialogAlert.show(dialog, t("proxy.hosted.openFailed"), String(err instanceof Error ? err.message : err))
           }
         })
       }}

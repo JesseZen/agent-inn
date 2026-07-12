@@ -5,6 +5,8 @@ import { useDialog, type DialogContext } from "../ui/dialog"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogAlert } from "../ui/dialog-alert"
 import type { HostedSessionSummary } from "./backend"
+import { useLanguage } from "../context/language"
+import type { Translate } from "../i18n/en"
 
 type SDKContext = ReturnType<typeof useSDK>
 type HostedTerminalDeleteOption =
@@ -21,13 +23,16 @@ export async function deleteHostedTerminalSession(input: {
   dialog: DialogContext
   session: HostedSessionSummary
   refreshSessions: () => Promise<void>
+  t: Translate
   onDeleted?: (session: HostedSessionSummary) => Promise<void> | void
 }) {
   const { sdk, dialog, session, refreshSessions, onDeleted } = input
   const confirmed = await DialogConfirm.show(
     dialog,
-    "Delete hosted session",
-    `Delete ${session.session_label}? This will remove the AINN session record${session.status === "active" ? " and close its tmux window" : ""}.`,
+    input.t("proxy.hosted.deleteConfirmTitle"),
+    session.status === "active"
+      ? input.t("proxy.hosted.deleteActiveConfirm", { session: session.session_label })
+      : input.t("proxy.hosted.deleteConfirm", { session: session.session_label, suffix: "" }),
   )
   if (!confirmed) return
   try {
@@ -38,7 +43,7 @@ export async function deleteHostedTerminalSession(input: {
     }
     await refreshSessions()
   } catch (err) {
-    await DialogAlert.show(dialog, "Delete hosted session failed", String(err instanceof Error ? err.message : err))
+    await DialogAlert.show(dialog, input.t("proxy.hosted.deleteFailed"), String(err instanceof Error ? err.message : err))
   }
 }
 
@@ -48,6 +53,7 @@ export function DialogHostedTerminalDelete(
   const sdk = useSDK()
   const dialog = useDialog()
   const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
+  const { t } = useLanguage()
 
   async function refreshSessions() {
     setSessions(await sdk.client.listHostedSessions())
@@ -62,38 +68,38 @@ export function DialogHostedTerminalDelete(
     ...(staleSessions().length > 0
       ? [
           {
-            title: "GC stale sessions",
+            title: t("proxy.hosted.gcStale"),
             value: { type: "gc-stale" as const },
-            description: "Delete every stale session currently shown in TUI",
-            category: "Action",
+            description: t("proxy.hosted.gcDescription"),
+            category: t("proxy.hosted.categoryAction"),
           },
         ]
       : []),
     ...sessions()
       .filter((session) => session.status === "active" || session.status === "stale")
       .map((session) => {
-        const worker = session.worker?.missing ? `missing worker: ${session.worker_id}` : session.worker?.name ?? session.worker_name
+        const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
         return {
           title: session.session_label,
           value: { type: "session" as const, session },
           description: `${worker} • ${session.status}`,
-          category: session.status === "active" ? "Active sessions" : "Stale sessions",
+          category: session.status === "active" ? t("proxy.hosted.activeCategory") : t("proxy.hosted.staleCategory"),
         }
       }),
   ])
 
   return (
     <DialogSelect
-      title="Delete Hosted Session"
+      title={t("proxy.hosted.deleteTitle")}
       options={options()}
-      placeholder="Select session to delete..."
+      placeholder={t("proxy.hosted.deleteSearch")}
       onSelect={(option) => {
         if (option.value.type === "gc-stale") {
           void (async () => {
             const confirmed = await DialogConfirm.show(
               dialog,
-              "Delete hosted sessions",
-              "Delete all stale sessions? This will remove every stale AINN session record currently shown in TUI. Active sessions will not be touched.",
+              t("proxy.hosted.deleteManyConfirmTitle"),
+              t("proxy.hosted.deleteAllConfirm"),
             )
             if (!confirmed) return
             try {
@@ -105,7 +111,7 @@ export function DialogHostedTerminalDelete(
               setSessions(nextSessions)
               props.onSessionsChanged?.(nextSessions)
             } catch (err) {
-              await DialogAlert.show(dialog, "Delete hosted sessions failed", String(err instanceof Error ? err.message : err))
+              await DialogAlert.show(dialog, t("proxy.hosted.deleteManyFailed"), String(err instanceof Error ? err.message : err))
             }
           })()
           return
@@ -115,6 +121,7 @@ export function DialogHostedTerminalDelete(
           dialog,
           session: option.value.session,
           refreshSessions,
+          t,
           onDeleted: (session) => {
             const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
             setSessions(nextSessions)

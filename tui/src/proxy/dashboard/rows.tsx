@@ -5,15 +5,17 @@ import type { DashboardModel, DashboardNode } from "./model"
 import { fitDashboardText } from "./model"
 import type { DashboardRow } from "./navigation"
 import { isValidDashboardDrop } from "./drag"
+import { useLanguage } from "../../context/language"
 
 export function DashboardSummary(props: { model: DashboardModel; theme: Theme }) {
+  const { t } = useLanguage()
   const items = () =>
     [
-      ["POOLS", props.model.summary.pools],
-      ["UPSTREAMS", props.model.summary.upstreams],
-      ["WORKERS", props.model.summary.workers],
-      ["SESSIONS", props.model.summary.sessions],
-      ["UNBOUND", props.model.summary.unbound],
+      [t("proxy.dashboard.summaryPools"), props.model.summary.pools],
+      [t("proxy.dashboard.summaryUpstreams"), props.model.summary.upstreams],
+      [t("proxy.dashboard.summaryWorkers"), props.model.summary.workers],
+      [t("proxy.dashboard.summarySessions"), props.model.summary.sessions],
+      [t("proxy.dashboard.unbound"), props.model.summary.unbound],
     ] as const
   return (
     <box flexDirection="row" gap={3} paddingTop={1} paddingBottom={1}>
@@ -49,6 +51,7 @@ export function DashboardRows(props: {
   onDragEnd(): void
   onDrop(target: DashboardNode): void
 }) {
+  const { t } = useLanguage()
   let pressedID: string | null = null
   return (
     <For each={props.rows}>
@@ -65,11 +68,11 @@ export function DashboardRows(props: {
           const value = node()
           if ((row.kind === "domain" || row.kind === "upstream") && value?.kind === "upstream") {
             const upstream = value.data
-            if (upstream.missing) return "missing"
-            if (!upstream.has_api_key) return "missing key"
-            return row.active ? "active" : ""
+            if (upstream.missing) return t("proxy.dashboard.missing")
+            if (!upstream.has_api_key) return t("proxy.dashboard.missingKey")
+            return row.active ? t("proxy.pool.active") : ""
           }
-          if (value?.kind === "pool") return `${value.data.upstreams.length} members`
+          if (value?.kind === "pool") return t("proxy.dashboard.membersCount", { count: value.data.upstreams.length })
           if (row.kind === "worker" && value?.kind === "worker") return value.data.status
           if (row.kind === "session" && value?.kind === "session") return value.data.status
           return ""
@@ -86,8 +89,8 @@ export function DashboardRows(props: {
           return props.theme.text
         }
         const label = () => {
-          if (row.kind === "unbound") return `⚠ UNBOUND ${row.count ?? 0}`
-          if (row.kind === "session-more") return `+${row.count ?? 0} sessions`
+          if (row.kind === "unbound") return `⚠ ${t("proxy.dashboard.unbound")} ${row.count ?? 0}`
+          if (row.kind === "session-more") return t("proxy.dashboard.sessionsCount", { count: row.count ?? 0 })
           if (row.kind === "domain") return `${node()?.kind === "pool" ? "▣" : "◆"} ${fitted().label}`
           if (row.kind === "upstream") return `◆ ${fitted().label}`
           return `└─ ${fitted().label}`
@@ -156,7 +159,7 @@ export function DashboardRows(props: {
                     ? props.theme.textMuted
                     : meta() === "failed"
                       ? props.theme.error
-                      : meta() === "missing key" || meta() === "missing"
+                      : meta() === t("proxy.dashboard.missingKey") || meta() === t("proxy.dashboard.missing")
                         ? props.theme.warning
                         : props.theme.textMuted
                 }
@@ -174,6 +177,7 @@ export function DashboardRows(props: {
 }
 
 export function DashboardInspector(props: { selected: DashboardRow | null; source: DashboardNode | null; target: DashboardNode | null; theme: Theme }) {
+  const { t } = useLanguage()
   return (
     <box height={3} flexDirection="column" paddingTop={1}>
       <Show
@@ -183,7 +187,7 @@ export function DashboardInspector(props: { selected: DashboardRow | null; sourc
             when={props.selected}
             fallback={
               <text fg={props.theme.textMuted} selectable={false}>
-                Select a relationship to inspect
+                {t("proxy.dashboard.inspect")}
               </text>
             }
           >
@@ -194,29 +198,29 @@ export function DashboardInspector(props: { selected: DashboardRow | null; sourc
               <Switch>
                 <Match when={props.selected!.kind === "domain" || props.selected!.kind === "upstream"}>
                   <text fg={props.theme.textMuted} selectable={false}>
-                    {props.selected!.node?.kind === "pool" ? "enter edit pool" : "enter edit upstream"}
+                    {props.selected!.node?.kind === "pool" ? t("proxy.dashboard.enterEditPool") : t("proxy.dashboard.enterEditUpstream")}
                   </text>
                 </Match>
                 <Match when={props.selected!.kind === "worker"}>
                   <text fg={props.theme.textMuted} selectable={false}>
-                    enter manage worker
+                    {t("proxy.dashboard.enterManageWorker")}
                   </text>
                 </Match>
                 <Match when={props.selected!.kind === "session"}>
                   <text fg={props.theme.textMuted} selectable={false}>
                     {props.selected!.node?.kind === "session" && props.selected!.node.data.turn_state === "running"
-                      ? "enter open session"
-                      : "enter open session · drag to rebind"}
+                      ? t("proxy.dashboard.enterOpenSession")
+                      : t("proxy.dashboard.enterOpenSessionRebind")}
                   </text>
                 </Match>
                 <Match when={props.selected!.kind === "session-more"}>
                   <text fg={props.theme.textMuted} selectable={false}>
-                    enter show all sessions
+                    {t("proxy.dashboard.enterShowAllSessions")}
                   </text>
                 </Match>
                 <Match when={props.selected!.kind === "unbound"}>
                   <text fg={props.theme.textMuted} selectable={false}>
-                    click or ←→ expand/collapse
+                    {t("proxy.dashboard.expandHint")}
                   </text>
                 </Match>
               </Switch>
@@ -225,11 +229,11 @@ export function DashboardInspector(props: { selected: DashboardRow | null; sourc
         }
       >
         <text fg={props.theme.text} selectable={false}>
-          Move From {props.source!.label} To {props.target?.label ?? "?"}
+          {t("proxy.dashboard.move", { source: props.source!.label, target: props.target?.label ?? "?" })}
         </text>
       </Show>
       <text fg={props.theme.textMuted} selectable={false}>
-        ↑↓ select ←→ collapse/expand enter open type to filter esc close
+        {t("proxy.dashboard.hint")}
       </text>
     </box>
   )

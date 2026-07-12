@@ -7,12 +7,14 @@ import { useSync } from "../context/sync"
 import { useTheme } from "../context/theme"
 import { useToast } from "../ui/toast"
 import { DialogWorkerStatus } from "./dialog-worker-status"
+import { useLanguage } from "../context/language"
+import type { TranslationKey } from "../i18n/en"
 
 type MetricsOption = { type: "worker"; port: number }
 
-const RANGES: Array<{ title: string; value: MetricsRangeName }> = [
-  { title: "Today", value: "today" },
-  { title: "Last 24h", value: "last_24h" },
+const RANGES: Array<{ title: TranslationKey; value: MetricsRangeName }> = [
+  { title: "proxy.metrics.today", value: "today" },
+  { title: "proxy.metrics.last24Hours", value: "last_24h" },
 ]
 
 const METRICS_REFRESH_DELAY_MS = 1000
@@ -29,6 +31,7 @@ export function DialogMetrics() {
   const dialog = useDialog()
   const toast = useToast()
   const { theme } = useTheme()
+  const { t } = useLanguage()
   const [range, setRange] = createSignal<MetricsRangeName>("today")
   const [metrics, setMetrics] = createSignal<MetricsResponse>()
   let refreshTimer: ReturnType<typeof setTimeout> | undefined
@@ -106,14 +109,14 @@ export function DialogMetrics() {
     if (!result) return []
     const details: string[] = []
     if (result.persistence_errors > 0) {
-      details.push(`${result.persistence_errors} manager-session persistence error${result.persistence_errors === 1 ? "" : "s"}`)
+      details.push(t("proxy.metrics.persistenceCount", { count: result.persistence_errors, plural: result.persistence_errors === 1 ? "" : "s" }))
     }
     if (result.query_limited && result.skipped_records > 0) {
-      details.push(`query limit; totals incomplete; ${result.skipped_records} unreadable records`)
+      details.push(t("proxy.metrics.queryIncomplete", { count: result.skipped_records }))
     } else if (result.query_limited) {
-      details.push("query limit: persisted totals incomplete")
+      details.push(t("proxy.metrics.queryLimited"))
     } else if (result.skipped_records > 0) {
-      details.push(`${result.skipped_records} persisted records unreadable`)
+      details.push(t("proxy.metrics.unreadable", { count: result.skipped_records }))
     }
     return details
   })
@@ -124,13 +127,13 @@ export function DialogMetrics() {
       ...(result?.workers ?? []).map((worker) => {
         const liveRates = worker.live_available
           ? `RPM ${worker.live.rpm} • TPM ${worker.live.tpm}`
-          : "RPM unavailable • TPM unavailable"
+          : t("proxy.metrics.rpmUnavailable")
         const details: string[] = []
         if (worker.live.dropped_events > 0) {
-          details.push(`${worker.live.dropped_events} live events dropped`)
+          details.push(t("proxy.metrics.dropped", { count: worker.live.dropped_events }))
         }
         if (worker.totals.unknown_usage_requests > 0) {
-          details.push(`${worker.totals.unknown_usage_requests} requests missing usage; token totals exclude them`)
+          details.push(t("proxy.metrics.missingUsage", { count: worker.totals.unknown_usage_requests }))
         }
         return {
           title: worker.worker,
@@ -156,10 +159,10 @@ export function DialogMetrics() {
 
   return (
     <DialogSelect
-      title="Worker Metrics"
+      title={t("proxy.metrics.title")}
       titleView={
         <box flexDirection="row" gap={2}>
-          <text fg={theme.text} attributes={TextAttributes.BOLD}>Worker Metrics</text>
+          <text fg={theme.text} attributes={TextAttributes.BOLD}>{t("proxy.metrics.title")}</text>
           <For each={RANGES}>
             {(item) => {
               const selected = () => range() === item.value
@@ -171,7 +174,7 @@ export function DialogMetrics() {
                   onMouseUp={() => loadMetrics(item.value)}
                 >
                   <text fg={selected() ? theme.selectedListItemText : theme.textMuted} attributes={selected() ? TextAttributes.BOLD : undefined}>
-                    {item.title}
+                    {t(item.title)}
                   </text>
                 </box>
               )
@@ -180,7 +183,7 @@ export function DialogMetrics() {
         </box>
       }
       options={options()}
-      placeholder="Search metrics..."
+      placeholder={t("proxy.metrics.search")}
       footer={
         rangeDetails().length > 0 ? (
           <box flexDirection="column">
@@ -189,8 +192,8 @@ export function DialogMetrics() {
         ) : undefined
       }
       bindings={[
-        { key: "left", desc: "Today", group: "Metrics", cmd: () => loadMetrics("today") },
-        { key: "right", desc: "Last 24h", group: "Metrics", cmd: () => loadMetrics("last_24h") },
+        { key: "left", desc: t("proxy.metrics.today"), group: t("category.metrics"), cmd: () => loadMetrics("today") },
+        { key: "right", desc: t("proxy.metrics.last24Hours"), group: t("category.metrics"), cmd: () => loadMetrics("last_24h") },
       ]}
     />
   )

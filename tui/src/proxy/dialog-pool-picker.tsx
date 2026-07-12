@@ -4,28 +4,30 @@ import { useSync } from "../context/sync"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
+import { useLanguage } from "../context/language"
 
 export function DialogPoolPicker(props: { worker: WorkerSummary }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { t } = useLanguage()
   const options = createMemo<DialogSelectOption<string>[]>(() => [
-    { title: "None", value: "", description: "Disable automatic failover", category: props.worker.upstream_pool ? "Options" : "Current" },
+    { title: t("common.none"), value: "", description: t("proxy.worker.fallbackPoolDisabled"), category: props.worker.upstream_pool ? t("common.options") : t("common.current") },
     ...sync.data.upstreamPools.map((pool) => ({
       title: pool.name,
       value: pool.id,
       description: pool.upstreams.join(" -> "),
-      details: pool.active_upstream ? [`active: ${pool.active_upstream}`] : undefined,
-      category: pool.id === props.worker.upstream_pool ? "Current" : "Pools",
+      details: pool.active_upstream ? [t("proxy.pool.activeUpstream", { upstream: pool.active_upstream })] : undefined,
+      category: pool.id === props.worker.upstream_pool ? t("common.current") : t("proxy.dashboard.pools"),
     })),
   ])
 
   return (
     <DialogSelect
-      title={`Fallback Pool: ${props.worker.name}`}
+      title={`${t("proxy.worker.fallbackPool")}: ${props.worker.name}`}
       options={options()}
-      placeholder="Select a pool..."
+      placeholder={t("proxy.pool.select")}
       current={props.worker.upstream_pool ?? ""}
       onSelect={async (option) => {
         if (option.value === (props.worker.upstream_pool ?? "")) {
@@ -43,7 +45,7 @@ export function DialogPoolPicker(props: { worker: WorkerSummary }) {
             })
           }
           await sync.bootstrap({ fatal: false })
-          toast.show({ message: `Saved ${props.worker.name} fallback pool: ${option.value || "none"}`, variant: "success" })
+          toast.show({ message: t("proxy.worker.fallbackPoolSaved", { name: props.worker.name, pool: option.value || t("common.none") }), variant: "success" })
           dialog.pop()
         } catch (error) {
           toast.error(error)

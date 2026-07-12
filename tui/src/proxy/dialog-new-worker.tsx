@@ -5,11 +5,13 @@ import { useSDK } from "../context/sdk"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { createMemo } from "solid-js"
+import { useLanguage } from "../context/language"
+import type { Translate } from "../i18n/en"
 
 type Launcher = "codex" | "claudecode" | "grok" | "opencode" | "pi"
 
-export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../ui/dialog").useDialog>, sdk: ReturnType<typeof import("../context/sdk").useSDK>["client"], toast: ReturnType<typeof import("../ui/toast").useToast>) {
-  const name = await DialogPrompt.show(dialog, "Worker Name", { placeholder: "e.g. worker-main" })
+export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../ui/dialog").useDialog>, sdk: ReturnType<typeof import("../context/sdk").useSDK>["client"], toast: ReturnType<typeof import("../ui/toast").useToast>, t: Translate) {
+  const name = await DialogPrompt.show(dialog, t("proxy.worker.name"), { placeholder: t("proxy.worker.namePlaceholder") })
   if (!name) return
 
   dialog.replace(() => <LauncherStep name={name} />)
@@ -17,39 +19,40 @@ export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../u
 
 function LauncherStep(props: { name: string }) {
   const dialog = useDialog()
+  const { t } = useLanguage()
   const options: DialogSelectOption<Launcher>[] = [
     {
       title: "Codex CLI",
       value: "codex",
-      description: "codex launcher",
+      description: t("proxy.worker.codexDescription"),
     },
     {
       title: "Claude Code",
       value: "claudecode",
-      description: "claude launcher",
+      description: t("proxy.worker.claudeDescription"),
     },
     {
       title: "Grok Build",
       value: "grok",
-      description: "grok coding agent",
+      description: t("proxy.worker.grokDescription"),
     },
     {
       title: "OpenCode",
       value: "opencode",
-      description: "opencode coding agent",
+      description: t("proxy.worker.opencodeDescription"),
     },
     {
       title: "Pi",
       value: "pi",
-      description: "pi coding agent",
+      description: t("proxy.worker.piDescription"),
     },
   ]
 
   return (
     <DialogSelect
-      title={`Select Launcher for ${props.name}`}
+      title={t("proxy.worker.selectLauncher", { name: props.name })}
       options={options}
-      placeholder="Search launchers..."
+      placeholder={t("proxy.worker.searchLaunchers")}
       onSelect={async (opt) => {
         dialog.replace(() => <UpstreamStep name={props.name} launcher={opt.value} />)
       }}
@@ -62,24 +65,25 @@ function UpstreamStep(props: { name: string; launcher: Launcher }) {
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { t } = useLanguage()
 
   const options = createMemo<DialogSelectOption<string>[]>(() =>
     sync.data.upstreams.map((p) => ({
       title: p.name,
       value: p.id,
-      description: `${p.base_url}${p.has_api_key ? "" : " (no key)"}`,
+      description: `${p.base_url}${p.has_api_key ? "" : ` ${t("proxy.upstream.noKey")}`}`,
     })),
   )
 
   return (
     <DialogSelect
-      title={`Select Upstream for ${props.name}`}
+      title={t("proxy.worker.selectUpstream", { name: props.name })}
       options={options()}
-      placeholder="Search upstreams..."
+      placeholder={t("proxy.upstream.search")}
       onSelect={async (opt) => {
         try {
           await sdk.client.createWorker({ name: props.name, upstream: opt.value, launcher: props.launcher })
-          toast.show({ message: `Created worker ${props.name}`, variant: "success" })
+          toast.show({ message: t("proxy.worker.created", { name: props.name }), variant: "success" })
         } catch (err) {
           toast.error(err)
         }

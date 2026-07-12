@@ -9,15 +9,17 @@ import { DialogLaunch } from "./dialog-launch"
 import { DialogBatch, type BatchSessionLauncher } from "./dialog-batch"
 import { DialogStatus } from "./dialog-status"
 import { DialogPool } from "./dialog-pool"
+import { useLanguage } from "../context/language"
 
 export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSessionLauncher?: BatchSessionLauncher } = {}) {
+  const { t } = useLanguage()
   return api.keymap.registerLayer({
     commands: [
       {
         namespace: "palette",
         name: "proxy.upstreams",
-        title: "Manage upstreams",
-        category: "Proxy",
+        title: t("proxy.command.manageUpstreams"),
+        category: t("proxy.command.category"),
         slashName: "upstreams",
         run() {
           api.ui.dialog.replace(() => <DialogUpstream />)
@@ -26,8 +28,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.workers",
-        title: "Manage workers",
-        category: "Proxy",
+        title: t("proxy.command.manageWorkers"),
+        category: t("proxy.command.category"),
         slashName: "workers",
         run() {
           api.ui.dialog.replace(() => <DialogWorkers />)
@@ -36,8 +38,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.pools",
-        title: "Manage pools",
-        category: "Proxy",
+        title: t("proxy.command.managePools"),
+        category: t("proxy.command.category"),
         slashName: "pools",
         run() {
           api.ui.dialog.replace(() => <DialogPool />)
@@ -46,14 +48,14 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.logs",
-        title: "View worker logs",
-        category: "Proxy",
+        title: t("proxy.command.viewWorkerLogs"),
+        category: t("proxy.command.category"),
         slashName: "logs",
         async run() {
           api.ui.dialog.replace(() => (
             <DialogWorkerPicker
-              title="Worker Logs"
-              placeholder="Search workers..."
+              title={t("proxy.logs.workerTitle")}
+              placeholder={t("proxy.worker.search")}
               onSelect={async (worker) => {
                 const initialLines = await (api.client as unknown as { getLogs(port: number): Promise<string[]> }).getLogs(
                   worker.port,
@@ -67,8 +69,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.status",
-        title: "View worker metrics",
-        category: "Proxy",
+        title: t("proxy.command.viewWorkerMetrics"),
+        category: t("proxy.command.category"),
         slashName: "status",
         run() {
           api.ui.dialog.replace(() => <DialogStatus />)
@@ -77,8 +79,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.settings",
-        title: "View proxy settings",
-        category: "Proxy",
+        title: t("proxy.settings.view"),
+        category: t("proxy.command.category"),
         slashName: "settings",
         slashAliases: ["config"],
         run() {
@@ -88,8 +90,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.launch",
-        title: "Launch Worker",
-        category: "Proxy",
+        title: t("proxy.command.launchWorker"),
+        category: t("proxy.command.category"),
         slashName: "launch",
         run() {
           api.ui.dialog.replace(() => <DialogLaunch />)
@@ -98,8 +100,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.batch",
-        title: "Run batch",
-        category: "Proxy",
+        title: t("proxy.command.runBatch"),
+        category: t("proxy.command.category"),
         slashName: "batch",
         run() {
           api.ui.dialog.replace(() => <DialogBatch launchSession={dependencies.batchSessionLauncher} />)
@@ -108,8 +110,8 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
       {
         namespace: "palette",
         name: "proxy.dashboard",
-        title: "View relationship dashboard",
-        category: "Proxy",
+        title: t("proxy.command.viewDashboard"),
+        category: t("proxy.command.category"),
         slashName: "dashboard",
         slashAliases: ["topology"],
         run() {

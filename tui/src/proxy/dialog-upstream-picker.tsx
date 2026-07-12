@@ -5,12 +5,14 @@ import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { createMemo } from "solid-js"
 import { UpstreamStatusFooter } from "./dialog-upstream"
+import { useLanguage } from "../context/language"
 
 export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
+  const { t } = useLanguage()
 
   const options = createMemo<DialogSelectOption<string>[]>(() =>
     sync.data.upstreams.filter((upstream) => {
@@ -22,8 +24,8 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
       return {
         title: p.name,
         value: p.id,
-        description: `${p.base_url ?? ""}${p.has_api_key ? "" : " (no key)"}`,
-        category: p.id === props.worker.upstream_id ? "Current" : props.worker.upstream_pool && !readiness?.eligible ? "Unavailable" : "Available",
+        description: `${p.base_url ?? ""}${p.has_api_key ? "" : ` ${t("proxy.upstream.noKey")}`}`,
+        category: p.id === props.worker.upstream_id ? t("common.current") : props.worker.upstream_pool && !readiness?.eligible ? t("common.unavailable") : t("proxy.upstream.available"),
         footer: <UpstreamStatusFooter upstream={p} probe={probe} pool={props.worker.upstream_pool} />,
       }
     }),
@@ -31,9 +33,9 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
 
   return (
     <DialogSelect
-      title={`Switch Upstream: ${props.worker.name}`}
+      title={t("proxy.worker.switchUpstreamTitle", { name: props.worker.name })}
       options={options()}
-      placeholder="Search upstreams..."
+      placeholder={t("proxy.upstream.search")}
       current={props.worker.upstream_id}
       onSelect={async (opt) => {
         if (opt.value === props.worker.upstream_id) {
@@ -44,14 +46,14 @@ export function DialogUpstreamPicker(props: { worker: WorkerSummary }) {
           const target = sync.data.upstreams.find((item) => item.id === opt.value)
           const readiness = target?.pool_readiness?.find((item) => item.pool === props.worker.upstream_pool)
           if (!readiness?.eligible) {
-            toast.show({ message: "target upstream is not eligible", variant: "error" })
+            toast.show({ message: t("proxy.upstream.targetIneligible"), variant: "error" })
             return
           }
         }
         try {
           await sdk.client.patchWorker(props.worker.id, { upstream_id: opt.value })
           await sync.bootstrap({ fatal: false })
-          toast.show({ message: `Switched ${props.worker.name} to ${opt.value}`, variant: "success" })
+          toast.show({ message: t("proxy.worker.switchedUpstream", { name: props.worker.name, upstream: opt.value }), variant: "success" })
           dialog.pop()
         } catch (err) {
           toast.error(err)
