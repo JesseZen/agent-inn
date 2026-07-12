@@ -6,6 +6,7 @@ import { useDialog, type DialogContext } from "../ui/dialog"
 import { Link } from "../ui/link"
 import { BgPulse } from "./bg-pulse"
 import { useBindings } from "../keymap"
+import { useLanguage } from "../context/language"
 
 const GO_URL = "https://opencode.ai/go"
 const PAD_X = 3
@@ -39,6 +40,7 @@ function panelOverlay(color: RGBA) {
 export function DialogRetryAction(props: DialogRetryActionProps) {
   const dialog = useDialog()
   const { theme } = useTheme()
+  const language = useLanguage()
   const fg = selectedForeground(theme)
   const showGoTreatment = () => props.link === GO_URL
   const textBg = () => (showGoTreatment() ? panelOverlay(theme.backgroundPanel) : undefined)
@@ -48,25 +50,25 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
     bindings: [
       {
         key: "left",
-        desc: "Previous retry option",
+        desc: language.t("dialog.retry.previous"),
         group: "Dialog",
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "right",
-        desc: "Next retry option",
+        desc: language.t("dialog.retry.next"),
         group: "Dialog",
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "tab",
-        desc: "Next retry option",
+        desc: language.t("dialog.retry.next"),
         group: "Dialog",
         cmd: () => setSelected((value) => (value === "action" ? "dismiss" : "action")),
       },
       {
         key: "return",
-        desc: "Confirm retry option",
+        desc: language.t("dialog.retry.confirm"),
         group: "Dialog",
         cmd: () => {
           if (selected() === "action") runAction(props, dialog)

@@ -2,16 +2,18 @@ import { createMemo } from "solid-js"
 import { useLocal } from "../context/local"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
+import { useLanguage } from "../context/language"
 
 export function DialogVariant() {
   const local = useLocal()
   const dialog = useDialog()
+  const language = useLanguage()
 
   const options = createMemo(() => {
     return [
       {
         value: "default",
-        title: "Default",
+        title: language.t("dialog.variant.default"),
         onSelect: () => {
           dialog.clear()
           local.model.variant.set(undefined)
@@ -31,7 +33,7 @@ export function DialogVariant() {
   return (
     <DialogSelect<string>
       options={options()}
-      title={"Select variant"}
+      title={language.t("dialog.variant.select")}
       current={local.model.variant.selected()}
       flat={true}
     />

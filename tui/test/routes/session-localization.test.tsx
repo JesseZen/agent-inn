@@ -1,7 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
 import { expect, test } from "bun:test"
-import { onMount } from "solid-js"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { translate, LanguageProvider, useLanguage } from "../../src/context/language"
@@ -64,6 +63,27 @@ const routeKeys = {
   "ui/dialog-select.tsx": ["dialog.search", "dialog.noResults", "dialog.selectItem"],
   "ui/dialog.tsx": ["dialog.backHint", "dialog.closeHint"],
   "ui/dialog-export-options.tsx": ["export.filename", "export.includeThinking", "export.openWithoutSaving"],
+  "component/dialog-agent.tsx": ["dialog.agent.native", "dialog.agent.select"],
+  "component/dialog-console-org.tsx": ["dialog.console.loadingOrgs", "dialog.console.noOrgs", "dialog.console.switchOrg", "dialog.console.switchedOrg"],
+  "component/dialog-logo-list.tsx": ["dialog.logo.title"],
+  "component/dialog-mcp.tsx": ["dialog.mcp.disabled", "dialog.mcp.enabled", "dialog.mcp.loading", "dialog.mcp.title", "dialog.mcp.toggle"],
+  "component/dialog-model.tsx": ["dialog.model.connectProvider", "dialog.model.favorite", "dialog.model.favoriteDescription", "dialog.model.free", "dialog.model.popularProviders", "dialog.model.recent", "dialog.model.select", "dialog.model.viewProviders"],
+  "component/dialog-move-session.tsx": ["dialog.move.confirmDelete", "dialog.move.current", "dialog.move.delete", "dialog.move.deleteCopyFailed", "dialog.move.deleteCopyMessage", "dialog.move.deleteCopyTitle", "dialog.move.deleting", "dialog.move.loadError", "dialog.move.loadingDirectories", "dialog.move.new", "dialog.move.noDirectories", "dialog.move.other", "dialog.move.refresh", "dialog.move.title"],
+  "component/dialog-provider.tsx": ["dialog.provider.apiKey", "dialog.provider.authCode", "dialog.provider.connect", "dialog.provider.copied", "dialog.provider.copy", "dialog.provider.copyCode", "dialog.provider.customHelp", "dialog.provider.goHelp", "dialog.provider.goLongDescription", "dialog.provider.idPlaceholder", "dialog.provider.invalidCode", "dialog.provider.invalidId", "dialog.provider.oauthFailed", "dialog.provider.other", "dialog.provider.savedCredential", "dialog.provider.selectAuth", "dialog.provider.waiting", "dialog.provider.zenDescription", "dialog.provider.zenHelp"],
+  "component/dialog-retry-action.tsx": ["dialog.retry.confirm", "dialog.retry.next", "dialog.retry.previous"],
+  "component/dialog-session-delete-failed.tsx": ["dialog.sessionDelete.chooseRecovery", "dialog.sessionDelete.confirm", "dialog.sessionDelete.deleteBroken", "dialog.sessionDelete.deleteDescription", "dialog.sessionDelete.deleteWorkspace", "dialog.sessionDelete.restoreBroken", "dialog.sessionDelete.restoreDescription", "dialog.sessionDelete.restoreWorkspace", "dialog.sessionDelete.title", "dialog.sessionDelete.unavailable"],
+  "component/dialog-session-list.tsx": ["dialog.sessionList.confirmDelete", "dialog.sessionList.createFailed", "dialog.sessionList.delete", "dialog.sessionList.deleteFailed", "dialog.sessionList.deleteWorkspaceFailed", "dialog.sessionList.pin", "dialog.sessionList.pinned", "dialog.sessionList.rename", "dialog.sessionList.switch", "dialog.sessionList.title", "dialog.sessionList.today"],
+  "component/dialog-session-rename.tsx": ["dialog.sessionRename.title"],
+  "component/dialog-skill.tsx": ["dialog.skill.category", "dialog.skill.placeholder"],
+  "component/dialog-stash.tsx": ["dialog.sessionList.confirmDelete", "dialog.stash.daysAgo", "dialog.stash.delete", "dialog.stash.hoursAgo", "dialog.stash.justNow", "dialog.stash.lines", "dialog.stash.minutesAgo", "dialog.stash.title"],
+  "component/dialog-status.tsx": ["dialog.status.connected", "dialog.status.disabled", "dialog.status.formatterCount", "dialog.status.lspCount", "dialog.status.mcpCount", "dialog.status.needsAuth", "dialog.status.noFormatters", "dialog.status.noMcp", "dialog.status.noPlugins", "dialog.status.pluginCount", "dialog.status.title"],
+  "component/dialog-tag.tsx": ["dialog.tag.title"],
+  "component/dialog-theme-list.tsx": ["dialog.theme.title"],
+  "component/dialog-variant.tsx": ["dialog.variant.default", "dialog.variant.select"],
+  "component/dialog-workspace-create.tsx": ["dialog.workspaceCreate.all", "dialog.workspaceCreate.allDescription", "dialog.workspaceCreate.choose", "dialog.workspaceCreate.existing", "dialog.workspaceCreate.loadFailed", "dialog.workspaceCreate.local", "dialog.workspaceCreate.new", "dialog.workspaceCreate.none", "dialog.workspaceCreate.warp", "dialog.workspaceCreate.warpConflictMessage", "dialog.workspaceCreate.warpConflictTitle", "dialog.workspaceCreate.warpFailed"],
+  "component/dialog-workspace-file-changes.tsx": ["dialog.workspaceChanges.defaultMessage", "dialog.workspaceChanges.defaultTitle", "dialog.workspaceChanges.no", "dialog.workspaceChanges.yes"],
+  "component/dialog-workspace-list.tsx": ["dialog.workspaceList.confirmDelete", "dialog.workspaceList.delete", "dialog.workspaceList.deleteFailed", "dialog.workspaceList.deleting", "dialog.workspaceList.title"],
+  "component/dialog-workspace-unavailable.tsx": ["dialog.workspaceUnavailable.cancel", "dialog.workspaceUnavailable.cancelLabel", "dialog.workspaceUnavailable.confirm", "dialog.workspaceUnavailable.restore", "dialog.workspaceUnavailable.restoreLabel", "dialog.workspaceUnavailable.restoreQuestion", "dialog.workspaceUnavailable.sessionAttached", "dialog.workspaceUnavailable.title"],
 } as const
 
 test("core session surfaces consume their typed translation keys", async () => {
@@ -173,20 +193,11 @@ test("mounted core labels react to a runtime locale switch", async () => {
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), JSON.stringify({ locale: "en" }))
 
-  let snapshot: { before: string; after: string } | undefined
-  let ready = false
+  let setLocale!: (locale: "en" | "zh-CN") => void
   function Probe() {
     const language = useLanguage()
-    onMount(() => {
-      snapshot = {
-        before: language.t("session.timeline"),
-        after: language.t("session.timeline"),
-      }
-      language.setLocale("zh-CN")
-      snapshot = { before: snapshot.before, after: language.t("session.timeline") }
-      ready = true
-    })
-    return <box />
+    setLocale = language.setLocale
+    return <text>{language.t("dialog.status.title")}</text>
   }
 
   const app = await testRender(() => (
@@ -200,8 +211,14 @@ test("mounted core labels react to a runtime locale switch", async () => {
   ))
 
   try {
-    while (!ready) await Bun.sleep(10)
-    expect(snapshot).toEqual({ before: "Timeline", after: "时间线" })
+    await app.renderOnce()
+    const before = app.captureCharFrame()
+    expect(before).toContain("Status")
+    setLocale("zh-CN")
+    await app.renderOnce()
+    const after = app.captureCharFrame()
+    expect(after).toContain("状态")
+    expect(after).not.toContain("Status")
   } finally {
     app.renderer.destroy()
   }

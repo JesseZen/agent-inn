@@ -4,6 +4,7 @@ import { useDialog } from "../ui/dialog"
 import { createStore } from "solid-js/store"
 import { For } from "solid-js"
 import { useBindings } from "../keymap"
+import { useLanguage } from "../context/language"
 
 export function DialogSessionDeleteFailed(props: {
   session: string
@@ -14,6 +15,7 @@ export function DialogSessionDeleteFailed(props: {
 }) {
   const dialog = useDialog()
   const { theme } = useTheme()
+  const language = useLanguage()
   const [store, setStore] = createStore({
     active: "delete" as "delete" | "restore",
   })
@@ -21,14 +23,14 @@ export function DialogSessionDeleteFailed(props: {
   const options = [
     {
       id: "delete" as const,
-      title: "Delete workspace",
-      description: "Delete the workspace and all sessions attached to it.",
+      title: language.t("dialog.sessionDelete.deleteWorkspace"),
+      description: language.t("dialog.sessionDelete.deleteDescription"),
       run: props.onDelete,
     },
     {
       id: "restore" as const,
-      title: "Restore to new workspace",
-      description: "Try to restore this session into a new workspace.",
+      title: language.t("dialog.sessionDelete.restoreWorkspace"),
+      description: language.t("dialog.sessionDelete.restoreDescription"),
       run: props.onRestore,
     },
   ]
@@ -42,11 +44,11 @@ export function DialogSessionDeleteFailed(props: {
 
   useBindings(() => ({
     bindings: [
-      { key: "return", desc: "Confirm recovery option", group: "Dialog", cmd: () => void confirm() },
-      { key: "left", desc: "Delete broken session", group: "Dialog", cmd: () => setStore("active", "delete") },
-      { key: "up", desc: "Delete broken session", group: "Dialog", cmd: () => setStore("active", "delete") },
-      { key: "right", desc: "Restore broken session", group: "Dialog", cmd: () => setStore("active", "restore") },
-      { key: "down", desc: "Restore broken session", group: "Dialog", cmd: () => setStore("active", "restore") },
+      { key: "return", desc: language.t("dialog.sessionDelete.confirm"), group: "Dialog", cmd: () => void confirm() },
+      { key: "left", desc: language.t("dialog.sessionDelete.deleteBroken"), group: "Dialog", cmd: () => setStore("active", "delete") },
+      { key: "up", desc: language.t("dialog.sessionDelete.deleteBroken"), group: "Dialog", cmd: () => setStore("active", "delete") },
+      { key: "right", desc: language.t("dialog.sessionDelete.restoreBroken"), group: "Dialog", cmd: () => setStore("active", "restore") },
+      { key: "down", desc: language.t("dialog.sessionDelete.restoreBroken"), group: "Dialog", cmd: () => setStore("active", "restore") },
     ],
   }))
 
@@ -54,17 +56,17 @@ export function DialogSessionDeleteFailed(props: {
     <box paddingLeft={2} paddingRight={2} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
-          Failed to Delete Session
+          {language.t("dialog.sessionDelete.title")}
         </text>
         <box onMouseUp={() => dialog.clear()}>
           <text fg={theme.textMuted}>esc</text>
         </box>
       </box>
       <text fg={theme.textMuted} wrapMode="word">
-        {`The session "${props.session}" could not be deleted because the workspace "${props.workspace}" is not available.`}
+        {language.t("dialog.sessionDelete.unavailable", { session: props.session, workspace: props.workspace })}
       </text>
       <text fg={theme.textMuted} wrapMode="word">
-        Choose how you want to recover this broken workspace session.
+        {language.t("dialog.sessionDelete.chooseRecovery")}
       </text>
       <box flexDirection="column" paddingBottom={1} gap={1}>
         <For each={options}>

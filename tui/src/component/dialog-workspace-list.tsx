@@ -10,6 +10,7 @@ import { createStore } from "solid-js/store"
 import { errorMessage } from "../util/error"
 import { useSDK } from "../context/sdk"
 import { useToast } from "../ui/toast"
+import { useLanguage } from "../context/language"
 
 type WorkspaceOption = { workspace: Workspace }
 
@@ -21,6 +22,7 @@ export function DialogWorkspaceList() {
   const toast = useToast()
   const project = useProject()
   const { theme } = useTheme()
+  const language = useLanguage()
   const [deleting, setDeleting] = createSignal<string>()
   const [removing, setRemoving] = createSignal<string>()
   const [expanded, setExpanded] = createStore<Record<string, boolean>>({})
@@ -39,9 +41,9 @@ export function DialogWorkspaceList() {
         return {
           title:
             removing() === workspace.id
-              ? "Deleting..."
+              ? language.t("dialog.workspaceList.deleting")
               : deleting() === workspace.id
-                ? `Delete ${workspace.name}? Press delete again`
+                ? language.t("dialog.workspaceList.confirmDelete", { name: workspace.name })
                 : workspace.name,
           value: { workspace },
           footer: workspace.type,
@@ -71,7 +73,7 @@ export function DialogWorkspaceList() {
       setRemoving(undefined)
       toast.show({
         variant: "error",
-        title: "Failed to delete workspace",
+        title: language.t("dialog.workspaceList.deleteFailed"),
         message: errorMessage(result.error),
       })
       return
@@ -94,7 +96,7 @@ export function DialogWorkspaceList() {
 
   return (
     <DialogSelect
-      title="Workspaces"
+      title={language.t("dialog.workspaceList.title")}
       options={options()}
       onMove={(option) => {
         setDeleting(undefined)
@@ -103,7 +105,7 @@ export function DialogWorkspaceList() {
       actions={[
         {
           command: "session.delete",
-          title: "delete",
+          title: language.t("dialog.workspaceList.delete"),
           onTrigger: (option) => void remove(option.value.workspace),
         },
       ]}

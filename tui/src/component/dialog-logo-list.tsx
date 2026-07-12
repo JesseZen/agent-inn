@@ -3,10 +3,12 @@ import { defaultLogoStyleID, logoStyleIDs, logoStyles, resolveLogoStyle, type Lo
 import { useKV } from "../context/kv"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
+import { useLanguage } from "../context/language"
 
 export function DialogLogoList() {
   const kv = useKV()
   const dialog = useDialog()
+  const language = useLanguage()
   const [selected] = kv.signal<LogoStyleID>("logo_style", defaultLogoStyleID)
   const initial = resolveLogoStyle(selected()).id
   const options = logoStyleIDs.map((id) => ({
@@ -22,7 +24,7 @@ export function DialogLogoList() {
 
   return (
     <DialogSelect
-      title="Logo"
+      title={language.t("dialog.logo.title")}
       options={options}
       current={initial}
       skipFilter

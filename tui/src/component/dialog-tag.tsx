@@ -4,10 +4,12 @@ import { useDialog } from "../ui/dialog"
 import { useProject } from "../context/project"
 import { useSDK } from "../context/sdk"
 import { createStore } from "solid-js/store"
+import { useLanguage } from "../context/language"
 
 export function DialogTag(props: { onSelect?: (value: string) => void }) {
   const sdk = useSDK()
   const dialog = useDialog()
+  const language = useLanguage()
   const project = useProject()
 
   const [store] = createStore({
@@ -36,7 +38,7 @@ export function DialogTag(props: { onSelect?: (value: string) => void }) {
 
   return (
     <DialogSelect
-      title="Autocomplete"
+      title={language.t("dialog.tag.title")}
       options={options()}
       onSelect={(option) => {
         props.onSelect?.(option.value)

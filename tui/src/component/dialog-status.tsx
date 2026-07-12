@@ -4,6 +4,7 @@ import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { useSync } from "../context/sync"
 import { For, Match, Switch, Show, createMemo } from "solid-js"
+import { useLanguage } from "../context/language"
 
 export type DialogStatusProps = {}
 
@@ -11,6 +12,7 @@ export function DialogStatus() {
   const sync = useSync()
   const { theme } = useTheme()
   const dialog = useDialog()
+  const language = useLanguage()
 
   const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
 
@@ -44,15 +46,15 @@ export function DialogStatus() {
     <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text fg={theme.text} attributes={TextAttributes.BOLD}>
-          Status
+          {language.t("dialog.status.title")}
         </text>
         <box onMouseUp={() => dialog.clear()}>
           <text fg={theme.textMuted}>esc</text>
         </box>
       </box>
-      <Show when={Object.keys(sync.data.mcp).length > 0} fallback={<text fg={theme.text}>No MCP Servers</text>}>
+      <Show when={Object.keys(sync.data.mcp).length > 0} fallback={<text fg={theme.text}>{language.t("dialog.status.noMcp")}</text>}>
         <box>
-          <text fg={theme.text}>{Object.keys(sync.data.mcp).length} MCP Servers</text>
+          <text fg={theme.text}>{language.t("dialog.status.mcpCount", { count: Object.keys(sync.data.mcp).length })}</text>
           <For each={Object.entries(sync.data.mcp)}>
             {([key, item]) => (
               <box flexDirection="row" gap={1}>
@@ -76,11 +78,11 @@ export function DialogStatus() {
                   <b>{key}</b>{" "}
                   <span style={{ fg: theme.textMuted }}>
                     <Switch fallback={item.status}>
-                      <Match when={item.status === "connected"}>Connected</Match>
+                      <Match when={item.status === "connected"}>{language.t("dialog.status.connected")}</Match>
                       <Match when={item.status === "failed" && item}>{(val) => val().error}</Match>
-                      <Match when={item.status === "disabled"}>Disabled in configuration</Match>
+                      <Match when={item.status === "disabled"}>{language.t("dialog.status.disabled")}</Match>
                       <Match when={(item.status as string) === "needs_auth"}>
-                        Needs authentication (run: ainn mcp auth {key})
+                        {language.t("dialog.status.needsAuth", { name: key })}
                       </Match>
                       <Match when={(item.status as string) === "needs_client_registration" && item}>
                         {(val) => (val() as { error: string }).error}
@@ -95,7 +97,7 @@ export function DialogStatus() {
       </Show>
       {sync.data.lsp.length > 0 && (
         <box>
-          <text fg={theme.text}>{sync.data.lsp.length} LSP Servers</text>
+          <text fg={theme.text}>{language.t("dialog.status.lspCount", { count: sync.data.lsp.length })}</text>
           <For each={sync.data.lsp}>
             {(item) => (
               <box flexDirection="row" gap={1}>
@@ -118,9 +120,9 @@ export function DialogStatus() {
           </For>
         </box>
       )}
-      <Show when={enabledFormatters().length > 0} fallback={<text fg={theme.text}>No Formatters</text>}>
+      <Show when={enabledFormatters().length > 0} fallback={<text fg={theme.text}>{language.t("dialog.status.noFormatters")}</text>}>
         <box>
-          <text fg={theme.text}>{enabledFormatters().length} Formatters</text>
+          <text fg={theme.text}>{language.t("dialog.status.formatterCount", { count: enabledFormatters().length })}</text>
           <For each={enabledFormatters()}>
             {(item) => (
               <box flexDirection="row" gap={1}>
@@ -140,9 +142,9 @@ export function DialogStatus() {
           </For>
         </box>
       </Show>
-      <Show when={plugins().length > 0} fallback={<text fg={theme.text}>No Plugins</text>}>
+      <Show when={plugins().length > 0} fallback={<text fg={theme.text}>{language.t("dialog.status.noPlugins")}</text>}>
         <box>
-          <text fg={theme.text}>{plugins().length} Plugins</text>
+          <text fg={theme.text}>{language.t("dialog.status.pluginCount", { count: plugins().length })}</text>
           <For each={plugins()}>
             {(item) => (
               <box flexDirection="row" gap={1}>

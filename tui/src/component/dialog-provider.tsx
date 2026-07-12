@@ -15,6 +15,8 @@ import { isConsoleManagedProvider } from "../util/provider-origin"
 import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
 import { useClipboard } from "../context/clipboard"
+import { useLanguage, translate } from "../context/language"
+import type { TranslationKey } from "../i18n/en"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
   opencode: 0,
@@ -44,7 +46,10 @@ type ProviderOption =
       type: "custom"
     })
 
-export function providerOptions(list: { id: string; name: string }[]): ProviderOption[] {
+export function providerOptions(
+  list: { id: string; name: string }[],
+  t: (key: TranslationKey) => string = (key) => translate("en", key),
+): ProviderOption[] {
   return [
     ...pipe(
       list,
@@ -59,20 +64,20 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
         value: provider.id,
         providerID: provider.id,
         description: {
-          opencode: "(Recommended)",
-          anthropic: "(API key)",
-          openai: "(ChatGPT Plus/Pro or API key)",
-          "opencode-go": "Low cost subscription for everyone",
+          opencode: t("dialog.provider.recommended"),
+          anthropic: t("dialog.provider.apiKeyHint"),
+          openai: t("dialog.provider.chatgptHint"),
+          "opencode-go": t("dialog.provider.goDescription"),
         }[provider.id],
-        category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Providers",
+        category: provider.id in PROVIDER_PRIORITY ? t("dialog.provider.popular") : t("dialog.provider.providers"),
       })),
     ),
     {
       type: "custom",
-      title: "Other",
+      title: t("dialog.provider.other"),
       value: CUSTOM_PROVIDER_OPTION_VALUE,
-      description: "Custom provider",
-      category: "Providers",
+      description: t("dialog.provider.custom"),
+      category: t("dialog.provider.providers"),
     },
   ]
 }
@@ -90,13 +95,14 @@ export function createDialogProviderOptions() {
   const toast = useToast()
   const { theme } = useTheme()
   const onboarded = useConnected()
+  const language = useLanguage()
 
   async function promptCustomProviderID(): Promise<string | undefined> {
-    const value = await DialogPrompt.show(dialog, "Other", {
-      placeholder: "Provider id",
+    const value = await DialogPrompt.show(dialog, language.t("dialog.provider.other"), {
+      placeholder: language.t("dialog.provider.idPlaceholder"),
       description: () => (
         <text fg={theme.textMuted}>
-          This only stores a credential. Configure the provider in ainn.json to use it.
+          {language.t("dialog.provider.customHelp")}
         </text>
       ),
     })
@@ -108,14 +114,14 @@ export function createDialogProviderOptions() {
     toast.show({
       variant: "error",
       message:
-        "Provider ids must start with a lowercase letter or number and only use lowercase letters, numbers, hyphens, and underscores",
+        language.t("dialog.provider.invalidId"),
     })
     return promptCustomProviderID()
   }
 
   const options = createMemo(() => {
     return pipe(
-      providerOptions(sync.data.provider_next.all),
+      providerOptions(sync.data.provider_next.all, language.t),
       map((provider) => {
         if (provider.type === "custom") {
           return {
@@ -126,7 +132,7 @@ export function createDialogProviderOptions() {
             async onSelect() {
               const providerID = await promptCustomProviderID()
               if (!providerID) return
-              return dialog.replace(() => <ApiMethod providerID={providerID} title="API key" custom />)
+              return dialog.replace(() => <ApiMethod providerID={providerID} title={language.t("dialog.provider.apiKey")} custom />)
             },
           }
         }
@@ -148,7 +154,7 @@ export function createDialogProviderOptions() {
             const methods = sync.data.provider_auth[providerID] ?? [
               {
                 type: "api",
-                label: "API key",
+                label: language.t("dialog.provider.apiKey"),
               },
             ]
             let index: number | null = 0
@@ -157,7 +163,7 @@ export function createDialogProviderOptions() {
                 dialog.replace(
                   () => (
                     <DialogSelect
-                      title="Select auth method"
+                      title={language.t("dialog.provider.selectAuth")}
                       options={methods.map((x, index) => ({
                         title: x.label,
                         value: index,
@@ -227,7 +233,8 @@ export function createDialogProviderOptions() {
 
 export function DialogProvider() {
   const options = createDialogProviderOptions()
-  return <DialogSelect title="Connect a provider" options={options()} />
+  const language = useLanguage()
+  return <DialogSelect title={language.t("dialog.provider.connect")} options={options()} />
 }
 
 interface AutoMethodProps {
@@ -243,19 +250,20 @@ function AutoMethod(props: AutoMethodProps) {
   const sync = useSync()
   const toast = useToast()
   const clipboard = useClipboard()
+  const language = useLanguage()
 
   useBindings(() => ({
     bindings: [
       {
         key: "c",
-        desc: "Copy provider code",
+        desc: language.t("dialog.provider.copyCode"),
         group: "Dialog",
         cmd: () => {
           const code =
             props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.authorization.url
           clipboard
             .write?.(code)
-            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .then(() => toast.show({ message: language.t("dialog.provider.copied"), variant: "info" }))
             .catch(toast.error)
         },
       },
@@ -272,7 +280,7 @@ function AutoMethod(props: AutoMethodProps) {
         variant: "error",
         message:
           "name" in result.error && result.error.name === "ProviderAuthOauthCallbackFailed"
-            ? "OAuth authorization failed. Try /connect again."
+            ? language.t("dialog.provider.oauthFailed")
             : JSON.stringify(result.error),
       })
       dialog.clear()
@@ -297,9 +305,9 @@ function AutoMethod(props: AutoMethodProps) {
         <Link href={props.authorization.url} fg={theme.primary} />
         <text fg={theme.textMuted}>{props.authorization.instructions}</text>
       </box>
-      <text fg={theme.textMuted}>Waiting for authorization...</text>
+      <text fg={theme.textMuted}>{language.t("dialog.provider.waiting")}</text>
       <text fg={theme.text}>
-        c <span style={{ fg: theme.textMuted }}>copy</span>
+        c <span style={{ fg: theme.textMuted }}>{language.t("dialog.provider.copy")}</span>
       </text>
     </box>
   )
@@ -317,11 +325,12 @@ function CodeMethod(props: CodeMethodProps) {
   const sync = useSync()
   const dialog = useDialog()
   const [error, setError] = createSignal(false)
+  const language = useLanguage()
 
   return (
     <DialogPrompt
       title={props.title}
-      placeholder="Authorization code"
+      placeholder={language.t("dialog.provider.authCode")}
       onConfirm={async (value) => {
         const { error } = await sdk.client.provider.oauth.callback({
           providerID: props.providerID,
@@ -341,7 +350,7 @@ function CodeMethod(props: CodeMethodProps) {
           <text fg={theme.textMuted}>{props.authorization.instructions}</text>
           <Link href={props.authorization.url} fg={theme.primary} />
           <Show when={error()}>
-            <text fg={theme.error}>Invalid code</text>
+            <text fg={theme.error}>{language.t("dialog.provider.invalidCode")}</text>
           </Show>
         </box>
       )}
@@ -361,32 +370,31 @@ function ApiMethod(props: ApiMethodProps) {
   const sync = useSync()
   const toast = useToast()
   const { theme } = useTheme()
+  const language = useLanguage()
 
   return (
     <DialogPrompt
       title={props.title}
-      placeholder="API key"
+      placeholder={language.t("dialog.provider.apiKey")}
       description={
         {
           opencode: (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API
-                key.
+                {language.t("dialog.provider.zenDescription")}
               </text>
               <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
+                {language.t("dialog.provider.zenHelp")}
               </text>
             </box>
           ),
           "opencode-go": (
             <box gap={1}>
               <text fg={theme.textMuted}>
-                OpenCode Go is a $10 per month subscription that provides reliable access to popular open coding models
-                with generous usage limits.
+                {language.t("dialog.provider.goLongDescription")}
               </text>
               <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/go</span> and enable OpenCode Go
+                {language.t("dialog.provider.goHelp")}
               </text>
             </box>
           ),
@@ -407,7 +415,7 @@ function ApiMethod(props: ApiMethodProps) {
         if (props.custom && !sync.data.provider_next.all.some((provider) => provider.id === props.providerID)) {
           toast.show({
             variant: "info",
-            message: `Saved credential for ${props.providerID}. Configure it in ainn.json to use it.`,
+            message: language.t("dialog.provider.savedCredential", { providerID: props.providerID }),
           })
           dialog.clear()
           return

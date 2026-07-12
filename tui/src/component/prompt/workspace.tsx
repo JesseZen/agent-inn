@@ -20,7 +20,8 @@ export function usePromptWorkspace(sessionID?: string) {
   const project = useProject()
   const sync = useSync()
   const toast = useToast()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
   const [selection, setSelection] = createSignal<WorkspaceSelection>()
   const [creating, setCreating] = createSignal(false)
   const [creatingDots, setCreatingDots] = createSignal(3)
@@ -87,6 +88,7 @@ export function usePromptWorkspace(sessionID?: string) {
       sync,
       project,
       toast,
+      language,
       sourceWorkspaceID,
       workspaceID: workspace.id,
       sessionID,
@@ -105,7 +107,7 @@ export function usePromptWorkspace(sessionID?: string) {
   }
 
   function open() {
-    void openWorkspaceSelect({ dialog, sdk, sync, project, toast, onSelect: warp })
+    void openWorkspaceSelect({ dialog, sdk, sync, project, toast, language, onSelect: warp })
   }
 
   createEffect(() => {

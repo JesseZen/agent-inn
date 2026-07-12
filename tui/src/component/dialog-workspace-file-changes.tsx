@@ -8,6 +8,7 @@ import { useTheme } from "../context/theme"
 import { useTuiConfig } from "../config"
 import { useDialog, type DialogContext } from "../ui/dialog"
 import { getScrollAcceleration } from "../util/scroll"
+import { useLanguage } from "../context/language"
 
 const options = ["no", "yes"] as const
 
@@ -32,6 +33,7 @@ export function DialogWorkspaceFileChanges(props: {
 }) {
   const dialog = useDialog()
   const { theme } = useTheme()
+  const language = useLanguage()
   const tuiConfig = useTuiConfig()
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
   const [store, setStore] = createStore({ active: "yes" as WorkspaceFileChangesChoice })
@@ -69,7 +71,7 @@ export function DialogWorkspaceFileChanges(props: {
     <box gap={1}>
       <box flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2}>
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
-          {props.title ?? "File Changes Found"}
+          {props.title ?? language.t("dialog.workspaceChanges.defaultTitle")}
         </text>
         <box onMouseUp={() => dialog.clear()}>
           <text fg={theme.textMuted}>esc</text>
@@ -77,7 +79,7 @@ export function DialogWorkspaceFileChanges(props: {
       </box>
       <box paddingLeft={2} paddingRight={2}>
         <text fg={theme.textMuted} wrapMode="word">
-          {props.message ?? "Do you want to move these changes with the session?"}
+          {props.message ?? language.t("dialog.workspaceChanges.defaultMessage")}
         </text>
       </box>
       <scrollbox
@@ -121,7 +123,9 @@ export function DialogWorkspaceFileChanges(props: {
                 dialog.clear()
               }}
             >
-              <text fg={item === store.active ? theme.selectedListItemText : theme.textMuted}>{item}</text>
+              <text fg={item === "yes" ? theme.selectedListItemText : theme.textMuted}>
+                {item === "yes" ? language.t("dialog.workspaceChanges.yes") : language.t("dialog.workspaceChanges.no")}
+              </text>
             </box>
           )}
         </For>

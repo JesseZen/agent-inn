@@ -60,6 +60,12 @@ export const dialogInventory = {
   "dialog.provider.goHelp": "Go to https://opencode.ai/go and enable OpenCode Go",
   "dialog.provider.savedCredential": "Saved credential for {{providerID}}. Configure it in ainn.json to use it.",
   "dialog.provider.goDescription": "Low cost subscription for everyone",
+  "dialog.provider.recommended": "(Recommended)",
+  "dialog.provider.apiKeyHint": "(API key)",
+  "dialog.provider.chatgptHint": "(ChatGPT Plus/Pro or API key)",
+  "dialog.provider.customHelp": "This only stores a credential. Configure the provider in ainn.json to use it.",
+  "dialog.provider.zenDescription": "OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.",
+  "dialog.provider.goLongDescription": "OpenCode Go is a $10 per month subscription that provides reliable access to popular open coding models with generous usage limits.",
   "dialog.sessionDelete.deleteWorkspace": "Delete workspace",
   "dialog.sessionDelete.deleteDescription": "Delete the workspace and all sessions attached to it.",
   "dialog.sessionDelete.restoreWorkspace": "Restore to new workspace",
@@ -69,6 +75,8 @@ export const dialogInventory = {
   "dialog.sessionDelete.restoreBroken": "Restore broken session",
   "dialog.sessionDelete.unavailable":
     "The session \"{{session}}\" could not be deleted because the workspace \"{{workspace}}\" is not available.",
+  "dialog.sessionDelete.title": "Failed to Delete Session",
+  "dialog.sessionDelete.chooseRecovery": "Choose how you want to recover this broken workspace session.",
   "dialog.sessionList.createFailed": "Failed to create workspace",
   "dialog.sessionList.deleteWorkspaceFailed": "Failed to delete workspace",
   "dialog.sessionList.switch": "switch",
@@ -151,7 +159,7 @@ function placeholders(value: string) {
 }
 
 test("dialog source inventory has exact dictionary coverage", () => {
-  expect(Object.keys(dialogInventory)).toHaveLength(134)
+  expect(Object.keys(dialogInventory)).toHaveLength(142)
 
   for (const [key, value] of Object.entries(dialogInventory)) {
     expect((en as Record<string, string>)[key]).toBe(value)

@@ -5,6 +5,7 @@ import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
 import type { ExperimentalConsoleListOrgsResponse } from "@agent-inn/sdk/v2"
+import { useLanguage } from "../context/language"
 
 type OrgOption = ExperimentalConsoleListOrgsResponse["orgs"][number]
 
@@ -24,6 +25,7 @@ export function DialogConsoleOrg() {
   const dialog = useDialog()
   const toast = useToast()
   const { theme } = useTheme()
+  const language = useLanguage()
 
   const [orgs] = createResource(async () => {
     const result = await sdk.client.experimental.console.listOrgs({}, { throwOnError: true })
@@ -37,7 +39,7 @@ export function DialogConsoleOrg() {
     if (listed === undefined) {
       return [
         {
-          title: "Loading orgs...",
+          title: language.t("dialog.console.loadingOrgs"),
           value: "loading",
           onSelect: () => {},
         },
@@ -47,7 +49,7 @@ export function DialogConsoleOrg() {
     if (listed.length === 0) {
       return [
         {
-          title: "No orgs found",
+          title: language.t("dialog.console.noOrgs"),
           value: "empty",
           onSelect: () => {},
         },
@@ -91,7 +93,7 @@ export function DialogConsoleOrg() {
 
           await sdk.client.instance.dispose()
           toast.show({
-            message: `Switched to ${item.orgName}`,
+            message: language.t("dialog.console.switchedOrg", { orgName: item.orgName }),
             variant: "info",
           })
           dialog.clear()
@@ -99,5 +101,5 @@ export function DialogConsoleOrg() {
       }))
   })
 
-  return <DialogSelect<string | OrgOption> title="Switch org" options={options()} current={current()} />
+  return <DialogSelect<string | OrgOption> title={language.t("dialog.console.switchOrg")} options={options()} current={current()} />
 }
