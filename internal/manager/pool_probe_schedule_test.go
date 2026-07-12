@@ -278,6 +278,7 @@ func markPoolProbeScheduleTestHealthy(m *Manager, now time.Time, next time.Time)
 				Mode: upstream.ProbeModeProtocol, Authoritative: true,
 			},
 			CheckedAt: now,
+			ExpiresAt: next.Add(defaultUpstreamProbeInterval),
 		}
 		m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}] = poolProbeSchedule{
 			NextProbeAt: next,

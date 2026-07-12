@@ -23,9 +23,11 @@ func TestManagerProtocolReadinessExpires(t *testing.T) {
 	got := []PoolReadiness{m.poolReadiness("coding-ha", "primary")}
 	m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
 	got = append(got, m.poolReadiness("coding-ha", "primary"))
-	now = now.Add(readinessFreshness)
+	nextProbeAt := now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second)
+	expiresAt := nextProbeAt.Add(defaultUpstreamProbeInterval)
+	now = expiresAt
 	got = append(got, m.poolReadiness("coding-ha", "primary"))
-	checkedAt := now.Add(-readinessFreshness)
+	checkedAt := expiresAt.Add(-time.Duration(config.DefaultPoolProbeStableIntervalSeconds)*time.Second - defaultUpstreamProbeInterval)
 	never := readinessTestExpected("coding-ha", ReadinessStateUnknown)
 	fresh := readinessTestExpected("coding-ha", ReadinessStateReady)
 	fresh.Eligible, fresh.CheckedAt, fresh.OK, fresh.StatusCode, fresh.LatencyMS = true, &checkedAt, true, http.StatusOK, 12
@@ -47,7 +49,9 @@ func TestManagerExpiredReadinessPublishesUnknown(t *testing.T) {
 	m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
 
 	checkedAt := now
-	now = now.Add(readinessFreshness)
+	nextProbeAt := checkedAt.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second)
+	expiresAt := nextProbeAt.Add(defaultUpstreamProbeInterval)
+	now = expiresAt
 	m.expirePoolReadiness("coding-ha", "primary", spec.Generation, checkedAt)
 	events := m.events.Replay(0)
 	got := events[len(events)-1]
@@ -56,6 +60,8 @@ func TestManagerExpiredReadinessPublishesUnknown(t *testing.T) {
 		"authoritative": true, "readiness": ReadinessStateUnknown, "eligible": false,
 		"checked_at": checkedAt.Format(time.RFC3339), "ok": true,
 		"status_code": http.StatusOK, "latency_ms": int64(12), "stale": true,
+		"probe_state": PoolProbeStateAlert, "next_probe_at": expiresAt.Format(time.RFC3339),
+		"reason": ProbeScheduleStartup,
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected readiness expiry event:\n got %#v\nwant %#v", got, want)
@@ -89,8 +95,8 @@ func TestManagerProbeObservationIdentity(t *testing.T) {
 	}
 	gotEvents := poolRoutingEvents(m, EventUpstreamProbed)
 	wantEvents := []map[string]any{
-		{"upstream": "primary", "pool": "pool-a", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(0)},
-		{"upstream": "primary", "pool": "pool-b", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateNotReady, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": false, "status_code": http.StatusUnauthorized, "latency_ms": int64(0), "error": "auth_error"},
+		{"upstream": "primary", "pool": "pool-a", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(0), "probe_state": PoolProbeStateIdle, "reason": ProbeScheduleStartup},
+		{"upstream": "primary", "pool": "pool-b", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateNotReady, "eligible": false, "checked_at": checkedAt.Format(time.RFC3339), "ok": false, "status_code": http.StatusUnauthorized, "latency_ms": int64(0), "error": "auth_error", "probe_state": PoolProbeStateIdle, "reason": ProbeScheduleStartup},
 	}
 	if !reflect.DeepEqual(gotEvents, wantEvents) {
 		t.Fatalf("unexpected pool-scoped events:\n got %#v\nwant %#v", gotEvents, wantEvents)
@@ -129,13 +135,14 @@ func TestManagerProbeObservationLifecycleJSON(t *testing.T) {
 	m.clock = func() time.Time { return checkedAt }
 	spec := readinessTestProbeSpec("coding-ha", "primary", "", 1, "model-a")
 	installReadinessTestSpec(m, spec)
+	expiresAt := checkedAt.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds)*time.Second + defaultUpstreamProbeInterval)
 	apiValues := make([]string, 0, 3)
 	for index := 0; index < 3; index++ {
 		if index == 1 {
 			m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
 		}
 		if index == 2 {
-			m.clock = func() time.Time { return checkedAt.Add(readinessFreshness) }
+			m.clock = func() time.Time { return expiresAt }
 		}
 		response := httptest.NewRecorder()
 		m.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://manager.local/api/upstreams", nil))
@@ -165,9 +172,17 @@ func TestManagerPreRequestProbeFailurePreservesReadiness(t *testing.T) {
 	spec := readinessTestProbeSpec("coding-ha", "primary", "", 1, "model-a")
 	installReadinessTestSpec(m, spec)
 	m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
-	want := m.poolReadiness("coding-ha", "primary")
+	scheduleKey := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}
+	want := struct {
+		Readiness PoolReadiness
+		Schedules []poolProbeSchedule
+	}{m.poolReadiness("coding-ha", "primary"), []poolProbeSchedule{m.probeSchedules[scheduleKey]}}
 	m.recordScheduledProbeResult(spec, upstream.ProbeResult{Mode: upstream.ProbeModeProtocol, Error: "connection_error"})
-	if got := m.poolReadiness("coding-ha", "primary"); !reflect.DeepEqual(got, want) {
+	got := struct {
+		Readiness PoolReadiness
+		Schedules []poolProbeSchedule
+	}{m.poolReadiness("coding-ha", "primary"), []poolProbeSchedule{m.probeSchedules[scheduleKey]}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pre-request failure replaced readiness:\n got %#v\nwant %#v", got, want)
 	}
 }
@@ -194,7 +209,7 @@ func readinessTestProbeSpec(pool string, upstreamName string, proxyURL string, g
 	return probeSpec{
 		Key:      probeExecutionKey{Upstream: upstreamName, ProxyURL: proxyURL},
 		Upstream: upstreamName, ProxyURL: proxyURL, Model: model, Generation: generation,
-		Fingerprint: model + "@" + proxyURL, Pools: []string{pool},
+		Fingerprint: model + "@" + proxyURL, Pools: []string{pool}, Due: true, Reason: ProbeScheduleStartup,
 	}
 }
 

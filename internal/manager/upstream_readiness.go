@@ -7,8 +7,6 @@ import (
 	"github.com/jesse/agent-inn/internal/upstream"
 )
 
-const readinessFreshness = 120 * time.Second
-
 type ReadinessState string
 
 const (
@@ -36,6 +34,8 @@ type PoolReadiness struct {
 type readinessObservation struct {
 	Result      upstream.ProbeResult
 	CheckedAt   time.Time
+	ExpiresAt   time.Time
+	Reason      ProbeScheduleReason
 	Generation  int
 	Fingerprint string
 }
@@ -67,7 +67,7 @@ func (m *Manager) poolReadinessLocked(poolName string, upstreamName string) Pool
 	result.LatencyMS = observation.Result.LatencyMS
 	result.Degraded = observation.Result.Degraded
 	result.Error = observation.Result.Error
-	if !m.clock().Before(observation.CheckedAt.Add(readinessFreshness)) {
+	if !m.clock().Before(observation.ExpiresAt) {
 		result.Stale = true
 		return result
 	}
@@ -98,35 +98,69 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 		return
 	}
 	checkedAt := m.clock().UTC()
-	readinessValues := make([]PoolReadiness, 0, len(spec.Pools))
+	probeEvents := make([]struct {
+		readiness  PoolReadiness
+		probeState PoolProbeState
+		next       *time.Time
+	}, 0, len(spec.Pools))
 	probeErrors := make([]error, 0, len(spec.Pools))
 	for _, poolName := range spec.Pools {
 		key := poolCircuitKey(poolName, spec.Upstream)
 		m.readiness[key] = readinessObservation{
 			Result:      result,
 			CheckedAt:   checkedAt,
+			ExpiresAt:   checkedAt.Add(defaultUpstreamProbeInterval),
+			Reason:      spec.Reason,
 			Generation:  spec.Generation,
 			Fingerprint: spec.Fingerprint,
 		}
+		if err := m.recordPoolProbeResultLocked(poolName, spec.Upstream, result); err != nil {
+			probeErrors = append(probeErrors, err)
+		}
+		m.mu.RLock()
+		pool := m.config.UpstreamPools[poolName]
+		m.mu.RUnlock()
+		scheduleKey := poolProbeScheduleKey{Pool: poolName, Upstream: spec.Upstream}
+		if result.OK {
+			m.schedulePoolProbeSuccessLocked(poolName, spec.Upstream, checkedAt)
+		} else {
+			schedule := m.probeSchedules[scheduleKey]
+			schedule.ConsecutiveFailures++
+			schedule.NextProbeAt = checkedAt.Add(poolProbeFailureDelay(pool.Probe, schedule.ConsecutiveFailures))
+			schedule.Reason = ProbeScheduleRecovery
+			m.probeSchedules[scheduleKey] = schedule
+		}
+		schedule := m.probeSchedules[scheduleKey]
+		circuit := m.circuits.Status(key, pool.CircuitBreaker)
+		if circuit.State == CircuitStateOpen {
+			recoveryAt := circuit.OpenedAt.Add(time.Duration(pool.CircuitBreaker.RecoveryWaitSeconds) * time.Second)
+			if recoveryAt.After(schedule.NextProbeAt) {
+				schedule.NextProbeAt = recoveryAt
+				m.probeSchedules[scheduleKey] = schedule
+			}
+		}
+		expiresAt := schedule.NextProbeAt.Add(defaultUpstreamProbeInterval)
+		observation := m.readiness[key]
+		observation.ExpiresAt = expiresAt
+		m.readiness[key] = observation
 		if timer := m.readinessTimers[key]; timer != nil {
 			timer.Stop()
 		}
-		pool := poolName
+		timerPool := poolName
 		upstreamName := spec.Upstream
 		generation := spec.Generation
-		m.readinessTimers[key] = time.AfterFunc(readinessFreshness, func() {
-			m.expirePoolReadiness(pool, upstreamName, generation, checkedAt)
+		m.readinessTimers[key] = time.AfterFunc(expiresAt.Sub(checkedAt), func() {
+			m.expirePoolReadiness(timerPool, upstreamName, generation, checkedAt)
 		})
-		if result.Authoritative {
-			if err := m.recordPoolProbeResultLocked(poolName, spec.Upstream, result); err != nil {
-				probeErrors = append(probeErrors, err)
-			}
-		}
-		readinessValues = append(readinessValues, m.poolReadinessLocked(poolName, spec.Upstream))
+		probeEvents = append(probeEvents, struct {
+			readiness  PoolReadiness
+			probeState PoolProbeState
+			next       *time.Time
+		}{m.poolReadinessLocked(poolName, spec.Upstream), m.poolProbeStateLocked(poolName), m.poolNextProbeAtLocked(poolName)})
 	}
 	m.failoverMu.Unlock()
-	for _, readiness := range readinessValues {
-		m.publishEvent(EventUpstreamProbed, poolReadinessPayload(readiness))
+	for _, event := range probeEvents {
+		m.publishEvent(EventUpstreamProbed, poolReadinessPayload(event.readiness, event.probeState, event.next, spec.Reason))
 	}
 	for _, err := range probeErrors {
 		m.logger.Error(logging.EventUpstreamFailover, "upstream", spec.Upstream, "err", redactedErrorMessage(err))
@@ -137,14 +171,16 @@ func (m *Manager) expirePoolReadiness(poolName string, upstreamName string, gene
 	m.failoverMu.Lock()
 	key := poolCircuitKey(poolName, upstreamName)
 	observation, exists := m.readiness[key]
-	if !exists || observation.Generation != generation || !observation.CheckedAt.Equal(checkedAt) || m.clock().Before(checkedAt.Add(readinessFreshness)) {
+	if !exists || observation.Generation != generation || !observation.CheckedAt.Equal(checkedAt) || m.clock().Before(observation.ExpiresAt) {
 		m.failoverMu.Unlock()
 		return
 	}
 	delete(m.readinessTimers, key)
 	readiness := m.poolReadinessLocked(poolName, upstreamName)
+	probeState := m.poolProbeStateLocked(poolName)
+	next := m.poolNextProbeAtLocked(poolName)
 	m.failoverMu.Unlock()
-	m.publishEvent(EventUpstreamProbed, poolReadinessPayload(readiness))
+	m.publishEvent(EventUpstreamProbed, poolReadinessPayload(readiness, probeState, next, observation.Reason))
 }
 
 func (m *Manager) invalidatePoolReadinessLocked(poolName string, upstreamName string) {
@@ -156,7 +192,7 @@ func (m *Manager) invalidatePoolReadinessLocked(poolName string, upstreamName st
 	}
 }
 
-func poolReadinessPayload(readiness PoolReadiness) map[string]any {
+func poolReadinessPayload(readiness PoolReadiness, probeState PoolProbeState, nextProbeAt *time.Time, reason ProbeScheduleReason) map[string]any {
 	payload := map[string]any{
 		"upstream":      readiness.Upstream,
 		"pool":          readiness.Pool,
@@ -167,6 +203,11 @@ func poolReadinessPayload(readiness PoolReadiness) map[string]any {
 		"ok":            readiness.OK,
 		"status_code":   readiness.StatusCode,
 		"latency_ms":    readiness.LatencyMS,
+		"probe_state":   probeState,
+		"reason":        reason,
+	}
+	if nextProbeAt != nil && probeState != PoolProbeStatePaused && probeState != PoolProbeStateIdle {
+		payload["next_probe_at"] = nextProbeAt.Format(time.RFC3339)
 	}
 	if readiness.CheckedAt != nil {
 		payload["checked_at"] = readiness.CheckedAt.Format(time.RFC3339)

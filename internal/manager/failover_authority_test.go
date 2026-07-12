@@ -281,8 +281,9 @@ func TestManagerRecoveredProbeEventUsesFinalEligibility(t *testing.T) {
 	m, pool := newAuthorityTestManager(t, "primary", 1)
 	defer m.Close()
 	m.clock = func() time.Time { return now }
-	pool.CircuitBreaker.RecoverySuccessThreshold = 1
 	m.mu.Lock()
+	pool = m.config.UpstreamPools["coding-ha"]
+	pool.CircuitBreaker.RecoverySuccessThreshold = 1
 	m.config.UpstreamPools["coding-ha"] = pool
 	m.mu.Unlock()
 	key := poolCircuitKey("coding-ha", "primary")
@@ -291,19 +292,36 @@ func TestManagerRecoveredProbeEventUsesFinalEligibility(t *testing.T) {
 	authorityObserve(t, m, "primary", readinessTestSuccess(2))
 	events := m.events.Replay(0)
 	got := struct {
-		Circuit     CircuitStatus
-		Event       any
-		Eligibility bool
+		Circuit   CircuitStatus
+		Event     map[string]any
+		Readiness PoolReadiness
+		Schedule  poolProbeSchedule
 	}{
-		Circuit:     m.circuits.Status(key, pool.CircuitBreaker),
-		Event:       events[len(events)-1].Payload["eligible"],
-		Eligibility: m.poolReadiness("coding-ha", "primary").Eligible,
+		Circuit:   m.circuits.Status(key, pool.CircuitBreaker),
+		Event:     events[len(events)-1].Payload,
+		Readiness: m.poolReadiness("coding-ha", "primary"),
+		Schedule:  m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}],
 	}
 	want := struct {
-		Circuit     CircuitStatus
-		Event       any
-		Eligibility bool
-	}{Circuit: CircuitStatus{State: CircuitStateClosed}, Event: true, Eligibility: true}
+		Circuit   CircuitStatus
+		Event     map[string]any
+		Readiness PoolReadiness
+		Schedule  poolProbeSchedule
+	}{
+		Circuit: CircuitStatus{State: CircuitStateClosed},
+		Event: map[string]any{
+			"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol,
+			"authoritative": true, "readiness": ReadinessStateReady, "eligible": true,
+			"checked_at": now.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK,
+			"latency_ms": int64(2), "probe_state": PoolProbeStateAlert,
+			"next_probe_at": now.Format(time.RFC3339), "reason": ProbeScheduleStartup,
+		},
+		Readiness: m.poolReadiness("coding-ha", "primary"),
+		Schedule: poolProbeSchedule{
+			NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second),
+			Reason:      ProbeScheduleStable,
+		},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("scheduled event used pre-transition eligibility:\n got %#v\nwant %#v", got, want)
 	}

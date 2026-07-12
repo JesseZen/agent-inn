@@ -36,6 +36,8 @@ type probeSpec struct {
 	Generation            int
 	Fingerprint           string
 	Pools                 []string
+	Due                   bool
+	Reason                ProbeScheduleReason
 }
 
 func (m *Manager) StartUpstreamProber(interval time.Duration) func() {
@@ -65,12 +67,13 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	m.failoverMu.Lock()
 	specs, pooled, err := m.buildProbeSpecifications()
 	if err != nil {
+		m.failoverMu.Unlock()
 		m.logger.Error(logging.EventUpstreamFail, "err", redactedErrorMessage(err))
 		return
 	}
-	m.failoverMu.Lock()
 	nextDesired := make(map[probeExecutionKey]probeSpec, len(specs))
 	for _, spec := range specs {
 		previous, exists := m.desiredProbes[spec.Key]
@@ -102,12 +105,14 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 	for _, listed := range specs {
 		spec := m.desiredProbes[listed.Key]
 		if inFlight, exists := m.inFlightProbes[spec.Key]; exists {
-			if inFlight.Generation != spec.Generation || inFlight.Fingerprint != spec.Fingerprint {
+			if spec.Due && (inFlight.Generation != spec.Generation || inFlight.Fingerprint != spec.Fingerprint) {
 				m.pendingProbes[spec.Key] = spec
 			}
 			continue
 		}
-		m.startProbeLocked(spec)
+		if spec.Due {
+			m.startProbeLocked(spec)
+		}
 	}
 	m.failoverMu.Unlock()
 
@@ -146,7 +151,9 @@ func (m *Manager) buildProbeSpecifications() ([]probeSpec, map[string]struct{}, 
 	}
 	sort.Strings(poolNames)
 	specsByKey := map[probeExecutionKey]probeSpec{}
+	deadlinesByKey := map[probeExecutionKey]time.Time{}
 	pooled := map[string]struct{}{}
+	now := m.clock()
 	for _, poolName := range poolNames {
 		pool := pools[poolName]
 		workerNames := make([]string, 0)
@@ -162,6 +169,11 @@ func (m *Manager) buildProbeSpecifications() ([]probeSpec, map[string]struct{}, 
 		}
 		for _, upstreamName := range pool.Upstreams {
 			pooled[upstreamName] = struct{}{}
+		}
+		if pool.Mode != config.UpstreamPoolModeActive || len(workerNames) == 0 {
+			continue
+		}
+		for _, upstreamName := range pool.Upstreams {
 			profile := profiles[upstreamName]
 			runtime, err := upstream.ResolveRuntime(upstreamName, profile)
 			if err != nil {
@@ -195,6 +207,19 @@ func (m *Manager) buildProbeSpecifications() ([]probeSpec, map[string]struct{}, 
 				}
 			}
 			spec.Pools = append(spec.Pools, poolName)
+			schedule, scheduled := m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}]
+			deadline := schedule.NextProbeAt
+			reason := schedule.Reason
+			if !scheduled {
+				deadline = time.Time{}
+				reason = ProbeScheduleStartup
+			}
+			previousDeadline, hasDeadline := deadlinesByKey[key]
+			if !hasDeadline || deadline.Before(previousDeadline) {
+				deadlinesByKey[key] = deadline
+				spec.Due = !scheduled || !now.Before(deadline)
+				spec.Reason = reason
+			}
 			specsByKey[key] = spec
 		}
 	}

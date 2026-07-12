@@ -74,7 +74,7 @@ func TestManagerActiveReadinessExpiryDoesNotSwitch(t *testing.T) {
 	authorityObserve(t, m, "primary", readinessTestSuccess(1))
 	observation := m.readiness[poolCircuitKey("coding-ha", "primary")]
 	switchesBefore := len(poolRoutingEvents(m, EventUpstreamPoolSwitched))
-	now = now.Add(readinessFreshness)
+	now = observation.ExpiresAt
 	m.expirePoolReadiness("coding-ha", "primary", observation.Generation, observation.CheckedAt)
 	got := struct {
 		Active     string
