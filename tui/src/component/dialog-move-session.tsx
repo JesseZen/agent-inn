@@ -292,7 +292,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
         titleView={
           <box flexDirection="row" gap={1}>
             <text fg={theme.text} attributes={TextAttributes.BOLD}>
-              Move session
+              {language.t("dialog.move.title")}
             </text>
             <Show when={working() || directories.loading || loadedProject.loading}>
               <Spinner />
