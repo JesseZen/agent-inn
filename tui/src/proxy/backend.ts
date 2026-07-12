@@ -40,6 +40,24 @@ export type PoolReadiness = UpstreamProbeResult & {
   stale?: boolean
 }
 
+export type CircuitBreaker = {
+  failure_threshold: number
+  recovery_success_threshold: number
+  recovery_wait_seconds: number
+}
+
+export type CircuitBreakerConfig = CircuitBreaker
+
+export type UpstreamPool = {
+  id: string
+  name: string
+  upstreams: string[]
+  circuit_breaker: CircuitBreaker
+  active_upstream?: string
+  workers: string[]
+  readiness: PoolReadiness[]
+}
+
 export type ProtocolProbe = { model: string }
 
 export type ModuleConfig = {
@@ -91,6 +109,7 @@ export type ProxyConfig = {
   plugins?: Record<string, PluginDefinition>
   workers?: Record<string, WorkerConfig>
   upstreams?: Record<string, UpstreamProfile>
+  upstream_pools?: Record<string, Pick<UpstreamPool, "name" | "upstreams" | "circuit_breaker">>
 }
 
 export type MetricsRangeName = "today" | "last_24h"

@@ -91,6 +91,7 @@ export const {
       vcs: undefined,
       workers: [],
       upstreams: [],
+      upstreamPools: [],
       upstreamProbes: {},
       metrics_generation: 0,
       hosted_session_turn_states: {},
@@ -134,19 +135,21 @@ export const {
     let workerHealthError: { worker: string; status: string; error: string } | undefined
 
     async function refreshManagerData() {
-      const [workers, upstreams, config] = await Promise.all([
+      const [workers, upstreams, upstreamPools, config] = await Promise.all([
         sdk.client.listWorkers(),
         sdk.client.getUpstreams(),
+        sdk.client.listUpstreamPools(),
         sdk.client.getConfig(),
       ])
       batch(() => {
         setStore("workers", reconcile(workers))
         setStore("upstreams", reconcile(upstreams))
+        setStore("upstreamPools", reconcile(upstreamPools))
         setStore("manager_config", reconcile(config.config))
         setStore("config_status", reconcile(config.status))
         setStore("error", undefined)
       })
-      return { workers, upstreams, config }
+      return { workers, upstreams, upstreamPools, config }
     }
 
     if (!args.hostedTerminalPopup) {
@@ -244,6 +247,7 @@ export const {
               setStore("config", reconcile(config))
               setStore("workers", reconcile(manager.workers))
               setStore("upstreams", reconcile(manager.upstreams))
+              setStore("upstreamPools", reconcile(manager.upstreamPools))
               setStore("manager_config", reconcile(manager.config.config))
               setStore("config_status", reconcile(manager.config.status))
               setStore("error", undefined)

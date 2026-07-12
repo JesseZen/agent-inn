@@ -88,6 +88,7 @@ export function createFetch(override?: FetchHandler) {
       })
     }
     if (url.pathname === "/api/upstreams") return json({ upstreams: {} })
+    if (url.pathname === "/api/upstream-pools") return json({ pools: [] })
     if (url.pathname === "/api/config")
       return json({
         config: {},

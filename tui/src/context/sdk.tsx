@@ -17,6 +17,8 @@ import type {
   ProxySettingsResponse,
   RedactedUpstream,
   PoolReadiness,
+  CircuitBreaker,
+  UpstreamPool,
   UpstreamProbeResult,
   WorkerDetail,
   WorkerSummary,
@@ -38,6 +40,8 @@ export type {
   ProxySettingsResponse,
   RedactedUpstream,
   PoolReadiness,
+  CircuitBreaker,
+  UpstreamPool,
   UpstreamProbeResult,
   WorkerDetail,
   WorkerSummary,
@@ -92,6 +96,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             port: number
             upstream: string
             upstream_id: string
+            upstream_pool: string
             request_modules: WorkerDetail["modules"]
             hooks: WorkerDetail["hooks"]
             log_level: string
@@ -159,6 +164,28 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           return request<{ upstreams: Record<string, ManagerUpstream> }>("/api/upstreams").then((result) =>
             decodeManagerUpstreams(result.upstreams ?? {}),
           )
+        },
+        async listUpstreamPools() {
+          return request<{ pools: UpstreamPool[] }>("/api/upstream-pools").then((result) => result.pools ?? [])
+        },
+        async createUpstreamPool(input: { name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }) {
+          return request<UpstreamPool>("/api/upstream-pools", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          })
+        },
+        async patchUpstreamPool(id: string, patch: { upstreams?: string[]; circuit_breaker?: CircuitBreaker }) {
+          return request<UpstreamPool>(`/api/upstream-pools/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(patch),
+          })
+        },
+        async deleteUpstreamPool(id: string) {
+          return request<{ pool: string }>(`/api/upstream-pools/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+          })
         },
         async patchUpstream(id: string, profile: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } }) {
           return request(`/api/upstreams/${encodeURIComponent(id)}`, {

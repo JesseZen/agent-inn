@@ -18,6 +18,8 @@ import {
   type ProxyConfigStatus,
   type ProxySettings,
   type PluginDefinition,
+  type UpstreamPool,
+  type CircuitBreaker,
   type RedactedUpstream,
   type UpstreamProbeResult,
   type WorkerSummary,
@@ -55,10 +57,16 @@ function frameLines(frame: string) {
 }
 
 const defaultBatchVariantCount = 3
+const defaultCircuitBreaker: CircuitBreaker = {
+  failure_threshold: 3,
+  recovery_success_threshold: 2,
+  recovery_wait_seconds: 60,
+}
 
 type ProxyHarnessInput = {
   workers?: HarnessWorker[]
   upstreams?: HarnessUpstream[]
+  upstreamPools?: UpstreamPool[]
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
   batchSessionLauncher?: (opts: ProxyLaunchOptions) => Promise<boolean>
@@ -95,6 +103,9 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const id = upstream.id ?? upstream.name
       return [id, { ...upstream, id }] as const
     }),
+  )
+  const upstreamPools = new Map<string, UpstreamPool>(
+    (input.upstreamPools ?? []).map((pool) => [pool.id, { ...pool, upstreams: [...pool.upstreams], workers: [...pool.workers], readiness: [...pool.readiness] }]),
   )
 
   const workers = new Map<string, WorkerSummary>([
@@ -215,16 +226,19 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     createWorker: [] as Array<{ name: string; port?: number; upstream: string; launcher?: string }>,
     patchWorker: [] as Array<
       | { id: string; name: string }
-      | { port: number; upstream?: string; log_level?: string; launcher?: string; next_port?: number; proxy_url?: string }
+      | { port: number; upstream?: string; upstream_pool?: string; log_level?: string; launcher?: string; next_port?: number; proxy_url?: string }
     >,
     patchModule: [] as Array<{ port: number; module: string; body: Record<string, unknown> }>,
     getWorkerRoute: [] as string[],
     patchModuleRoute: [] as string[],
     patchWorkerBodies: [] as Array<Record<string, unknown>>,
     patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } } }>,
+    createUpstreamPool: [] as Array<{ name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }>,
+    patchUpstreamPool: [] as Array<{ id: string; body: { upstreams?: string[]; circuit_breaker?: CircuitBreaker } }>,
     patchSettings: [] as ProxySettingsPatch[],
     deleteWorker: [] as number[],
     deleteUpstream: [] as string[],
+    deleteUpstreamPool: [] as string[],
     restartWorker: [] as number[],
     stopWorker: [] as number[],
     saveConfig: 0,
@@ -299,10 +313,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       return json({
         upstreams: Object.fromEntries(providers.entries()),
       })
+    if (url.pathname === "/api/upstream-pools")
+      return json({ pools: [...upstreamPools.values()] })
     if (url.pathname === "/api/config" && url.search === "") {
       if (url.href.includes("&__method=PUT")) return undefined
       return json({
-        config: { plugins: config.plugins },
+        config: { plugins: config.plugins, upstream_pools: Object.fromEntries(upstreamPools.entries()) },
         status: config.status,
       })
     }
@@ -311,7 +327,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     }
     if (url.pathname === "/api/config")
       return json({
-        config: { plugins: config.plugins },
+        config: { plugins: config.plugins, upstream_pools: Object.fromEntries(upstreamPools.entries()) },
         status: config.status,
       })
     if (url.pathname === "/api/settings") {
@@ -372,6 +388,43 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       return json(updated)
     }
 
+    if (url.pathname === "/api/upstream-pools" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "null")) as { name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }
+      calls.createUpstreamPool.push(body)
+      const pool: UpstreamPool = {
+        id: body.name,
+        name: body.name,
+        upstreams: [...body.upstreams],
+        circuit_breaker: body.circuit_breaker ?? defaultCircuitBreaker,
+        workers: [],
+        readiness: [],
+      }
+      upstreamPools.set(pool.id, pool)
+      return json(pool, { status: 201 })
+    }
+
+    const upstreamPoolRoute = url.pathname.match(/^\/api\/upstream-pools\/([^/]+)$/)
+    if (upstreamPoolRoute && method === "PATCH") {
+      const id = decodeURIComponent(upstreamPoolRoute[1]!)
+      const body = JSON.parse(String(init?.body ?? "null")) as { upstreams?: string[]; circuit_breaker?: CircuitBreaker }
+      calls.patchUpstreamPool.push({ id, body })
+      const current = upstreamPools.get(id)!
+      const pool = {
+        ...current,
+        ...(body.upstreams !== undefined ? { upstreams: [...body.upstreams] } : {}),
+        ...(body.circuit_breaker !== undefined ? { circuit_breaker: body.circuit_breaker } : {}),
+      }
+      upstreamPools.set(id, pool)
+      return json(pool)
+    }
+
+    if (upstreamPoolRoute && method === "DELETE") {
+      const id = decodeURIComponent(upstreamPoolRoute[1]!)
+      calls.deleteUpstreamPool.push(id)
+      upstreamPools.delete(id)
+      return json({ pool: id })
+    }
+
     const workerRoute = url.pathname.match(/^\/api\/workers\/([^/]+)$/)
     if (workerRoute && method === "PATCH") {
       if (input.patchWorkerDelayMs) await Bun.sleep(input.patchWorkerDelayMs)
@@ -382,6 +435,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         port?: number
         upstream?: string
         upstream_id?: string
+        upstream_pool?: string
         log_level?: string
         launcher?: string
         proxy_url?: string
@@ -393,6 +447,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         calls.patchWorker.push({
           port: current.port,
           upstream: body.upstream_id ?? body.upstream ?? current.upstream_id,
+          ...(body.upstream_pool !== undefined ? { upstream_pool: body.upstream_pool } : {}),
           log_level: body.log_level ?? current.log_level,
           ...(body.port !== undefined && body.port !== current.port ? { next_port: body.port } : {}),
           ...(body.launcher ? { launcher: body.launcher } : {}),
@@ -419,6 +474,14 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       }
       if (body.proxy_url !== undefined) {
         setWorker({ ...findWorker(current.id)!, proxy_url: body.proxy_url })
+      }
+      if (body.upstream_pool !== undefined) {
+        for (const [id, pool] of upstreamPools) {
+          upstreamPools.set(id, { ...pool, workers: pool.workers.filter((worker) => worker !== current.name) })
+        }
+        const pool = upstreamPools.get(body.upstream_pool)
+        if (pool) upstreamPools.set(pool.id, { ...pool, workers: [...pool.workers, current.name] })
+        setWorker({ ...findWorker(current.id)!, upstream_pool: body.upstream_pool || undefined })
       }
       if (body.port !== undefined && body.port !== current.port) {
         const worker = { ...findWorker(current.id)!, port: body.port }
@@ -690,6 +753,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     replaceDashboardData(next: {
       workers: HarnessWorker[]
       upstreams: HarnessUpstream[]
+      upstreamPools?: UpstreamPool[]
       hostedSessions: HostedSessionSummary[]
     }) {
       providers.clear()
@@ -706,6 +770,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           upstream_id: upstreamID,
           upstream: { ...worker.upstream, id: worker.upstream.id ?? upstreamID },
         })
+      }
+      if (next.upstreamPools) {
+        upstreamPools.clear()
+        for (const pool of next.upstreamPools) {
+          upstreamPools.set(pool.id, { ...pool, upstreams: [...pool.upstreams], workers: [...pool.workers], readiness: [...pool.readiness] })
+        }
       }
       hostedSessions.splice(0, hostedSessions.length, ...next.hostedSessions)
     },
@@ -829,6 +899,7 @@ export async function openUpstreamManager(app: ProxyApp) {
 
 export async function openUpstreamEditor(app: ProxyApp, name: string) {
   await openUpstreamManager(app)
+  await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.submit")
