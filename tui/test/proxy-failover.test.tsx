@@ -1,7 +1,106 @@
 import { expect, test } from "bun:test"
-import { TextareaRenderable } from "@opentui/core"
+import { InputRenderable, TextareaRenderable } from "@opentui/core"
 import { mountProxyApp, openUpstreamEditor, openUpstreamManager, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 import { mergePoolReadiness } from "../src/context/sync"
+import type { UpstreamPool } from "../src/proxy/backend"
+
+test("pool editor shows runtime status and adaptive intervals", async () => {
+  const pool: UpstreamPool = {
+    id: "codex-ha",
+    name: "codex-ha",
+    mode: "active",
+    probe: { stable_interval_seconds: 900, alert_interval_seconds: 60 },
+    probe_state: "stable",
+    next_probe_at: "2026-07-13T02:45:00Z",
+    upstreams: ["openai", "anthropic"],
+    circuit_breaker: {
+      failure_threshold: 3,
+      recovery_success_threshold: 2,
+      recovery_wait_seconds: 60,
+    },
+    active_upstream: "openai",
+    workers: ["app"],
+    readiness: [],
+  }
+  const app = await mountProxyApp({ upstreamPools: [pool], height: 80 })
+  try {
+    await runCommand(app, "proxy.pools")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Edit Pool: codex-ha")
+    })
+    const frame = app.frame()
+    const order = ["Status", "Automatic Failover", "Members", "Probe Policy", "Circuit Breaker", "Actions"].map((value) => frame.indexOf(value))
+    expect({
+      order: order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1]!)),
+      runtime: ["Automatic Failover active", "Probe State stable", "Next Probe 2026-07-13T02:45:00Z"].every((value) => frame.includes(value)),
+      intervals: ["Stable Interval 900 seconds", "Alert Interval 60 seconds"].every((value) => frame.includes(value)),
+    }).toEqual({
+      order: true,
+      runtime: true,
+      intervals: true,
+    })
+
+    await wait(() => app.setup.renderer.currentFocusedRenderable instanceof InputRenderable)
+    await app.mockInput.typeText("Alert Interval")
+    await app.render()
+    expect(app.frame()).toContain("Alert Interval")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    let editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected alert interval prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("59")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.setup.renderer.currentFocusedRenderable instanceof InputRenderable)
+    await app.render()
+    const alertValidation = app.lines().join(" ").replace(/\s+/g, " ")
+    expect(alertValidation).toContain("alert_interval_seconds must")
+    expect(alertValidation).toContain("be at least 60")
+    expect(app.calls.patchUpstreamPool).toEqual([])
+
+    let filter = app.setup.renderer.currentFocusedRenderable
+    if (!(filter instanceof InputRenderable)) throw new Error("expected pool editor filter")
+    filter.selectAll()
+    await app.mockInput.typeText("Alert Interval")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected alert interval prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("1200")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.setup.renderer.currentFocusedRenderable instanceof InputRenderable)
+    await app.render()
+    const stableValidation = app.lines().join(" ").replace(/\s+/g, " ")
+    expect(stableValidation).toContain("stable_interval_seconds must")
+    expect(stableValidation).toContain("be greater than or equal to alert_interval_seconds")
+    expect(app.calls.patchUpstreamPool).toEqual([])
+
+    filter = app.setup.renderer.currentFocusedRenderable
+    if (!(filter instanceof InputRenderable)) throw new Error("expected pool editor filter")
+    filter.selectAll()
+    await app.mockInput.typeText("Alert Interval")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.setup.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    editor = app.setup.renderer.currentFocusedEditor
+    if (!(editor instanceof TextareaRenderable)) throw new Error("expected alert interval prompt")
+    editor.selectAll()
+    await app.mockInput.typeText("120")
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.patchUpstreamPool.length === 1)
+    expect(app.calls.patchUpstreamPool).toEqual([
+      {
+        id: "codex-ha",
+        body: { probe: { stable_interval_seconds: 900, alert_interval_seconds: 120 } },
+      },
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
 
 test("upstream manager renders protocol, reachability, unknown, and mixed pool readiness", async () => {
   const cases = [
