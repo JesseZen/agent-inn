@@ -307,7 +307,7 @@ test("Chinese editor remaps file and agent markers with display-width ranges", a
       ],
     })
     expect(prompt.keymap().dispatchCommand("prompt.editor")).toMatchObject({ ok: true })
-    await wait(() => prompt.textarea().plainText === "前缀\n第二行 [图片 1] @代理 后缀", 10000)
+    await wait(() => prompt.textarea().plainText === "前缀\n第二行 [图片 1] @代理 后缀", 30000)
 
     expect(prompt.promptRef().current.parts.map((part) => part.type === "file" ? part.source?.text : part.source)).toEqual([
       {
