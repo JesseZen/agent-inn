@@ -8,6 +8,7 @@ import { DialogWorkers } from "./dialog-workers"
 import { DialogLaunch } from "./dialog-launch"
 import { DialogBatch, type BatchSessionLauncher } from "./dialog-batch"
 import { DialogStatus } from "./dialog-status"
+import { DialogPool } from "./dialog-pool"
 
 export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSessionLauncher?: BatchSessionLauncher } = {}) {
   return api.keymap.registerLayer({
@@ -30,6 +31,16 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
         slashName: "workers",
         run() {
           api.ui.dialog.replace(() => <DialogWorkers />)
+        },
+      },
+      {
+        namespace: "palette",
+        name: "proxy.pools",
+        title: "Manage pools",
+        category: "Proxy",
+        slashName: "pools",
+        run() {
+          api.ui.dialog.replace(() => <DialogPool />)
         },
       },
       {

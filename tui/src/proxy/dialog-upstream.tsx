@@ -8,8 +8,9 @@ import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
 import type { RedactedUpstream, UpstreamProbeResult } from "./backend"
+import { DialogPool } from "./dialog-pool"
 
-type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" }
+type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" } | { type: "pools" }
 type FieldKey = "name" | "base_url" | "api_key" | "api_format" | "protocol_probe_model"
 
 export type Draft = {
@@ -52,6 +53,7 @@ export function DialogUpstream() {
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
     { title: "Create New Upstream", value: { type: "create" }, description: "Add a relay endpoint", category: "Actions" },
     { title: "Test All Upstreams", value: { type: "test-all" as const }, description: "Probe every configured upstream", category: "Actions" },
+    { title: "Manage Pools", value: { type: "pools" as const }, description: "Configure ordered fallback routes", category: "Actions" },
     ...sync.data.upstreams.map((upstream) => {
       const probe = sync.data.upstreamProbes[upstream.id]
       return {
@@ -93,6 +95,11 @@ export function DialogUpstream() {
           } catch (err) {
             toast.error(err)
           }
+          return
+        }
+
+        if (value.type === "pools") {
+          dialog.replace(() => <DialogPool />)
           return
         }
 

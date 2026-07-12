@@ -11,6 +11,7 @@ import { DialogLogs } from "./dialog-logs"
 import { DialogModulePicker } from "./dialog-module"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogPrompt } from "../ui/dialog-prompt"
+import { DialogPoolPicker } from "./dialog-pool-picker"
 
 const LOG_LEVELS = ["simple", "detail"] as const
 type LogLevel = (typeof LOG_LEVELS)[number]
@@ -28,6 +29,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   const sdk = useSDK()
   const sync = useSync()
   const toast = useToast()
+  const currentWorker = createMemo(() => sync.data.workers.find((item) => item.id === props.worker.id) ?? props.worker)
   const modules = createMemo(() => Object.entries(props.worker.modules ?? {}))
   const hooks = createMemo(() => Object.entries(props.worker.hooks ?? {}))
   const hookStatusSummary = createMemo(() =>
@@ -109,6 +111,13 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
     value: "switch",
     description: upstreamLabel(props.worker),
     onSelect: () => dialog.push(() => <DialogUpstreamPicker worker={props.worker} />),
+  }
+
+  const poolAction: DialogSelectOption<string> = {
+    title: "Fallback Pool",
+    value: "pool",
+    description: props.worker.upstream_pool || "none",
+    onSelect: () => dialog.push(() => <DialogPoolPicker worker={currentWorker()} />),
   }
 
   const logsAction: DialogSelectOption<string> = {
@@ -280,21 +289,22 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
 
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [renameAction, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, restartAction, stopAction, deleteAction]
+      ? [renameAction, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, { ...poolAction, description: currentWorker().upstream_pool || "none" }, restartAction, stopAction, deleteAction]
       : [switchAction, logsAction, modulesAction],
   )
 
   return (
     <DialogSelect
-      title={`${props.worker.name} (:${props.worker.port})`}
+      title={`${currentWorker().name} (:${currentWorker().port})`}
       options={actions()}
       placeholder="Worker actions..."
       footer={
         <box flexDirection="column">
-          <text fg={theme.textMuted}>status: {props.worker.status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
-          <text fg={theme.textMuted}>upstream: {upstreamLabel(props.worker)} • protocol: {props.worker.protocol ?? "responses"}</text>
-          <text fg={theme.textMuted}>launcher: {props.worker.launcher ?? "codex"} • log level: {props.worker.log_level}</text>
-          <text fg={theme.textMuted}>proxy: {props.worker.proxy_url || "direct"} • modules: {modules().length} req / {hooks().length} hook</text>
+          <text fg={theme.textMuted}>status: {currentWorker().status}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
+          <text fg={theme.textMuted}>upstream: {upstreamLabel(currentWorker())} • protocol: {currentWorker().protocol ?? "responses"}</text>
+          <text fg={theme.textMuted}>fallback pool: {currentWorker().upstream_pool || "none"}</text>
+          <text fg={theme.textMuted}>launcher: {currentWorker().launcher ?? "codex"} • log level: {currentWorker().log_level}</text>
+          <text fg={theme.textMuted}>proxy: {currentWorker().proxy_url || "direct"} • modules: {modules().length} req / {hooks().length} hook</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>modules: none</text>}>
             <box flexDirection="column">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>
