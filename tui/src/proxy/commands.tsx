@@ -10,11 +10,12 @@ import { DialogBatch, type BatchSessionLauncher } from "./dialog-batch"
 import { DialogStatus } from "./dialog-status"
 import { DialogPool } from "./dialog-pool"
 import { useLanguage } from "../context/language"
+import { createMemo } from "solid-js"
+import { useBindings } from "../keymap"
 
 export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSessionLauncher?: BatchSessionLauncher } = {}) {
   const { t } = useLanguage()
-  return api.keymap.registerLayer({
-    commands: [
+  const commands = createMemo(() => [
       {
         namespace: "palette",
         name: "proxy.upstreams",
@@ -119,7 +120,7 @@ export function registerProxyCommands(api: TuiPluginApi, dependencies: { batchSe
           api.ui.dialog.replace(() => <DialogDashboard snapshot={snapshot} />)
         },
       },
-    ],
-    bindings: [],
-  })
+    ])
+
+  useBindings(() => ({ commands: commands() }))
 }

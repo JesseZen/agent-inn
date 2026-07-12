@@ -1,5 +1,5 @@
 import { createMemo, createSignal, onMount } from "solid-js"
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from "../ui/dialog-select"
 import { useSDK } from "../context/sdk"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
@@ -253,6 +253,81 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     }
   }
 
+  const actions = createMemo<NonNullable<DialogSelectProps<HostedTerminalOption>["actions"]>>(() => [
+    {
+      command: "session.change_worker",
+      title: t("proxy.hosted.actionWorker"),
+      hidden: (option) => {
+        if (option?.value.type !== "session") return true
+        const session = option.value.session
+        return session.turn_state === "running"
+      },
+      onTrigger: (option) => {
+        if (option.value.type !== "session") return
+        changeSessionWorker(option.value.session)
+      },
+    },
+    {
+      command: "session.rename",
+      title: t("proxy.hosted.actionRename"),
+      hidden: (option) => option?.value.type !== "session",
+      onTrigger: (option) => {
+        if (option.value.type !== "session") return
+        void renameSession(option.value.session)
+      },
+    },
+    {
+      command: "session.duplicate",
+      title: t("proxy.hosted.actionDuplicate"),
+      hidden: (option) => option?.value.type !== "session",
+      onTrigger: (option) => {
+        if (option.value.type !== "session") return
+        void duplicateSession(option.value.session)
+      },
+    },
+    {
+      command: "session.mark_unread",
+      title: t("proxy.hosted.actionUnread"),
+      hidden: (option) => {
+        if (option?.value.type !== "session") return true
+        const session = option.value.session
+        const terminal =
+          session.turn_state === "done" ||
+          session.turn_state === "failed" ||
+          session.turn_state === "interrupted"
+        if (!terminal || !session.turn_generation) return true
+        return (session.turn_acknowledged_generation ?? 0) < session.turn_generation
+      },
+      onTrigger: (option) => {
+        if (option.value.type !== "session") return
+        void markSessionUnread(option.value.session)
+      },
+    },
+    {
+      command: "session.delete",
+      title: t("proxy.hosted.actionDelete"),
+      hidden: (option) => option?.value.type !== "session",
+      onTrigger: (option) => {
+        if (option.value.type !== "session") return
+        void deleteHostedTerminalSession({
+          sdk,
+          dialog,
+          session: option.value.session,
+          refreshSessions,
+          t,
+          onDeleted: (session) => {
+            const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
+            if (mode === "popup") {
+              setSessions(nextSessions)
+              return
+            }
+            dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
+          },
+        })
+      },
+    },
+  ])
+
   return (
     <DialogSelect
       title={t("proxy.hosted.title")}
@@ -260,80 +335,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       locked={mode === "popup" && dialog.stack.length > 0}
       options={options()}
       placeholder={t("proxy.hosted.search")}
-      actions={[
-        {
-          command: "session.change_worker",
-          title: t("proxy.hosted.actionWorker"),
-          hidden: (option) => {
-            if (option?.value.type !== "session") return true
-            const session = option.value.session
-            return session.turn_state === "running"
-          },
-          onTrigger: (option) => {
-            if (option.value.type !== "session") return
-            changeSessionWorker(option.value.session)
-          },
-        },
-        {
-          command: "session.rename",
-          title: t("proxy.hosted.actionRename"),
-          hidden: (option) => option?.value.type !== "session",
-          onTrigger: (option) => {
-            if (option.value.type !== "session") return
-            void renameSession(option.value.session)
-          },
-        },
-        {
-          command: "session.duplicate",
-          title: t("proxy.hosted.actionDuplicate"),
-          hidden: (option) => option?.value.type !== "session",
-          onTrigger: (option) => {
-            if (option.value.type !== "session") return
-            void duplicateSession(option.value.session)
-          },
-        },
-        {
-          command: "session.mark_unread",
-          title: t("proxy.hosted.actionUnread"),
-          hidden: (option) => {
-            if (option?.value.type !== "session") return true
-            const session = option.value.session
-            const terminal =
-              session.turn_state === "done" ||
-              session.turn_state === "failed" ||
-              session.turn_state === "interrupted"
-            if (!terminal || !session.turn_generation) return true
-            return (session.turn_acknowledged_generation ?? 0) < session.turn_generation
-          },
-          onTrigger: (option) => {
-            if (option.value.type !== "session") return
-            void markSessionUnread(option.value.session)
-          },
-        },
-        {
-          command: "session.delete",
-          title: t("proxy.hosted.actionDelete"),
-          hidden: (option) => option?.value.type !== "session",
-          onTrigger: (option) => {
-            if (option.value.type !== "session") return
-            void deleteHostedTerminalSession({
-              sdk,
-              dialog,
-              session: option.value.session,
-              refreshSessions,
-              t,
-              onDeleted: (session) => {
-                const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
-                if (mode === "popup") {
-                  setSessions(nextSessions)
-                  return
-                }
-                dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
-              },
-            })
-          },
-        },
-      ]}
+      actions={actions()}
       onSelect={(option) => {
         if (option.value.type === "refresh") {
           void refreshSessions()

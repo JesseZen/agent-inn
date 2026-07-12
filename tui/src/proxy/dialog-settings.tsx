@@ -29,7 +29,7 @@ export function DialogSettings() {
   const dialog = useDialog()
   const toast = useToast()
   const { t } = useLanguage()
-  const fields: SettingsField[] = [
+  const fields = createMemo<SettingsField[]>(() => [
     { key: "state_dir", title: t("proxy.settings.stateDir"), category: t("category.paths"), value: (settings) => settings.state_dir, patch: (value) => ({ state_dir: value }) },
     { key: "log_dir", title: t("proxy.settings.logDir"), category: t("category.paths"), value: (settings) => settings.log_dir, patch: (value) => ({ log_dir: value }) },
     { key: "launch.default_mode", title: t("proxy.settings.defaultLaunchMode"), category: t("category.launch"), value: (settings) => settings.launch.default_mode, patch: (value) => ({ launch: { default_mode: value } }), choices: [
@@ -52,7 +52,7 @@ export function DialogSettings() {
       { title: t("common.disabled"), value: "disabled", description: t("proxy.settings.disableHooksDescription") },
     ] },
     { key: "metrics.retention_days", title: t("proxy.settings.metricsRetention"), category: t("category.metrics"), value: (settings) => String(settings.metrics.retention_days), patch: (value) => ({ metrics: { retention_days: Number(value) } } as Partial<ProxySettings>) },
-  ]
+  ])
   const status = () => sync.data.config_status
   const [settings, setSettings] = createSignal<ProxySettings>()
 
@@ -88,7 +88,7 @@ export function DialogSettings() {
     const c = status()
     const current = settings()
     const items: DialogSelectOption<string>[] = [
-      ...fields.map((field) => ({
+      ...fields().map((field) => ({
         title: field.title,
         value: field.key,
         description: current ? field.value(current) || "—" : t("common.loading"),

@@ -151,7 +151,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
     FIELDS.map((field) => ({
       title: t(field.title),
       value: field.key,
-      description: describe(field, draft()),
+      description: describe(field, draft(), t),
       category: t("proxy.upstream.fields"),
       onSelect: async () => {
         const patch = await editField(dialog, field, draft(), t)
@@ -205,8 +205,8 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
   return <DialogSelect title={t("proxy.upstream.editTitle", { name: draft().name })} options={[...options(), testAction, deleteAction]} placeholder={t("proxy.upstream.selectField")} footer={<EscHint dialog={dialog} />} />
 }
 
-function describe(field: Field, draft: Draft) {
-  if (field.hidden) return draft.has_api_key ? "******" : "none"
+function describe(field: Field, draft: Draft, t: Translate) {
+  if (field.hidden) return draft.has_api_key ? "******" : t("common.none")
   return draft[field.key] || "—"
 }
 

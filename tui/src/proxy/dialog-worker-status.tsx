@@ -45,7 +45,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       .join(" • "),
   )
 
-  const renameAction: DialogSelectOption<string> = {
+  const renameAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.rename"),
     value: "rename",
     description: props.worker.id,
@@ -70,9 +70,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.error(err)
       }
     },
-  }
+  }))
 
-  const logLevelAction: DialogSelectOption<string> = {
+  const logLevelAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.logLevel"),
     value: "log_level",
     description: props.worker.log_level || "—",
@@ -108,30 +108,30 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.error(err)
       }
     },
-  }
+  }))
 
-  const switchAction: DialogSelectOption<string> = {
+  const switchAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.switchUpstream"),
     value: "switch",
     description: upstreamLabel(props.worker, t),
     onSelect: () => dialog.push(() => <DialogUpstreamPicker worker={props.worker} />),
-  }
+  }))
 
-  const poolAction: DialogSelectOption<string> = {
+  const poolAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.fallbackPool"),
     value: "pool",
-    description: props.worker.upstream_pool || "none",
+    description: props.worker.upstream_pool || t("common.none"),
     onSelect: () => dialog.push(() => <DialogPoolPicker worker={currentWorker()} />),
-  }
+  }))
 
-  const logsAction: DialogSelectOption<string> = {
+  const logsAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.viewLogs"),
     value: "logs",
     description: `:${props.worker.port}`,
     onSelect: () => dialog.push(() => <DialogLogs worker={props.worker} />),
-  }
+  }))
 
-  const modulesAction: DialogSelectOption<string> = {
+  const modulesAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.manageModules"),
     value: "modules",
     description: t("proxy.worker.moduleCount", { modules: modules().length, hooks: hooks().length }),
@@ -139,9 +139,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       const worker = await sdk.client.getWorker(props.worker.id)
       dialog.push(() => <DialogModulePicker worker={worker} />)
     },
-  }
+  }))
 
-  const restartAction: DialogSelectOption<string> = {
+  const restartAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.restart"),
     value: "restart",
     description: `:${props.worker.port}`,
@@ -155,9 +155,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       }
       dialog.clear()
     },
-  }
+  }))
 
-  const stopAction: DialogSelectOption<string> = {
+  const stopAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.stop"),
     value: "stop",
     description: `:${props.worker.port}`,
@@ -171,9 +171,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       }
       dialog.clear()
     },
-  }
+  }))
 
-  const deleteAction: DialogSelectOption<string> = {
+  const deleteAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.delete"),
     value: "delete",
     description: `:${props.worker.port}`,
@@ -196,9 +196,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
       }
       dialog.clear()
     },
-  }
+  }))
 
-  const launcherAction: DialogSelectOption<string> = {
+  const launcherAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.launcher"),
     value: "launcher",
     description: props.worker.launcher || "codex",
@@ -235,9 +235,9 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.error(err)
       }
     },
-  }
+  }))
 
-  const portAction: DialogSelectOption<string> = {
+  const portAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.port"),
     value: "port",
     description: `:${props.worker.port}`,
@@ -261,12 +261,12 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.error(err)
       }
     },
-  }
+  }))
 
-  const proxyAction: DialogSelectOption<string> = {
+  const proxyAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.proxyUrl"),
     value: "proxy_url",
-    description: props.worker.proxy_url || "direct",
+    description: props.worker.proxy_url || t("common.direct"),
     onSelect: async () => {
       const current = props.worker.proxy_url ?? ""
       const redacted = props.worker.proxy_url_redacted === true
@@ -289,12 +289,12 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         toast.error(err)
       }
     },
-  }
+  }))
 
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [{ ...renameAction, description: currentWorker().name }, logLevelAction, switchAction, modulesAction, logsAction, launcherAction, portAction, proxyAction, { ...poolAction, description: currentWorker().upstream_pool || "none" }, restartAction, stopAction, deleteAction]
-      : [switchAction, logsAction, modulesAction],
+      ? [{ ...renameAction(), description: currentWorker().name }, logLevelAction(), switchAction(), modulesAction(), logsAction(), launcherAction(), portAction(), proxyAction(), { ...poolAction(), description: currentWorker().upstream_pool || t("common.none") }, restartAction(), stopAction(), deleteAction()]
+      : [switchAction(), logsAction(), modulesAction()],
   )
 
   return (

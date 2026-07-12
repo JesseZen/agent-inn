@@ -20,7 +20,7 @@ export async function showNewWorkerDialog(dialog: ReturnType<typeof import("../u
 function LauncherStep(props: { name: string }) {
   const dialog = useDialog()
   const { t } = useLanguage()
-  const options: DialogSelectOption<Launcher>[] = [
+  const options = createMemo<DialogSelectOption<Launcher>[]>(() => [
     {
       title: "Codex CLI",
       value: "codex",
@@ -46,12 +46,12 @@ function LauncherStep(props: { name: string }) {
       value: "pi",
       description: t("proxy.worker.piDescription"),
     },
-  ]
+  ])
 
   return (
     <DialogSelect
       title={t("proxy.worker.selectLauncher", { name: props.name })}
-      options={options}
+      options={options()}
       placeholder={t("proxy.worker.searchLaunchers")}
       onSelect={async (opt) => {
         dialog.replace(() => <UpstreamStep name={props.name} launcher={opt.value} />)

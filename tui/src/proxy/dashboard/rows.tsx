@@ -11,21 +11,21 @@ export function DashboardSummary(props: { model: DashboardModel; theme: Theme })
   const { t } = useLanguage()
   const items = () =>
     [
-      [t("proxy.dashboard.summaryPools"), props.model.summary.pools],
-      [t("proxy.dashboard.summaryUpstreams"), props.model.summary.upstreams],
-      [t("proxy.dashboard.summaryWorkers"), props.model.summary.workers],
-      [t("proxy.dashboard.summarySessions"), props.model.summary.sessions],
-      [t("proxy.dashboard.unbound"), props.model.summary.unbound],
+      { label: t("proxy.dashboard.summaryPools"), value: props.model.summary.pools, warning: false },
+      { label: t("proxy.dashboard.summaryUpstreams"), value: props.model.summary.upstreams, warning: false },
+      { label: t("proxy.dashboard.summaryWorkers"), value: props.model.summary.workers, warning: false },
+      { label: t("proxy.dashboard.summarySessions"), value: props.model.summary.sessions, warning: false },
+      { label: t("proxy.dashboard.unbound"), value: props.model.summary.unbound, warning: true },
     ] as const
   return (
     <box flexDirection="row" gap={3} paddingTop={1} paddingBottom={1}>
       <For each={items()}>
-        {([label, value]) => (
+        {({ label, value, warning }) => (
           <box flexDirection="row" gap={1}>
             <text fg={props.theme.textMuted} selectable={false}>
               {label}
             </text>
-            <text fg={value > 0 && label === "UNBOUND" ? props.theme.warning : props.theme.text} attributes={TextAttributes.BOLD} selectable={false}>
+            <text fg={value > 0 && warning ? props.theme.warning : props.theme.text} attributes={TextAttributes.BOLD} selectable={false}>
               {value}
             </text>
           </box>
