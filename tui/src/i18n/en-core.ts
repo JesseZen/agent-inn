@@ -1,5 +1,7 @@
 export const coreEn = {
   "category.dialog": "Dialog",
+  "category.prompt": "Prompt",
+  "category.question": "Question",
 
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
@@ -103,6 +105,8 @@ export const coreEn = {
   "prompt.agents": "agents",
   "prompt.commands": "commands",
   "prompt.exitShell": "exit shell mode",
+  "prompt.shellMode": "Shell mode",
+  "prompt.exitShellAction": "Exit shell mode",
   "prompt.connectProvider": "Connect a provider to send prompts",
   "prompt.runCommand": "Run a command... {{example}}",
   "prompt.placeholderExample": "Ask anything... {{example}}",
@@ -150,6 +154,9 @@ export const coreEn = {
   "dialog.helpConfirm": "ok",
   "dialog.help.close": "Close help",
   "dialog.help.description": "Press {{shortcut}} to see all available actions and commands in any context.",
+  "dialog.close": "Close dialog",
+  "dialog.nextAction": "Next dialog action",
+  "dialog.previousAction": "Previous dialog action",
 
   "permission.noDiff": "No diff provided",
   "permission.allowPatterns": "This will allow the following patterns until Ainn is restarted",
@@ -252,4 +259,12 @@ export const coreEn = {
   "question.submit": "submit",
   "question.toggle": "toggle",
   "question.dismiss": "dismiss",
+  "question.cancelEdit": "Cancel answer edit",
+  "question.submitEdit": "Submit answer edit",
+  "question.previousQuestion": "Previous question",
+  "question.nextQuestion": "Next question",
+  "question.submitAnswer": "Submit answer",
+  "question.previousAnswer": "Previous answer",
+  "question.nextAnswer": "Next answer",
+  "question.selectAnswer": "Select answer",
 } as const satisfies Record<string, string>

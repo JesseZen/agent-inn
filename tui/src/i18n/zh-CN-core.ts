@@ -1,5 +1,7 @@
 export const coreZhCN = {
   "category.dialog": "对话框",
+  "category.prompt": "提示词",
+  "category.question": "问题",
 
   "session.notFound": "未找到会话：{{sessionID}}",
   "session.retryError": "重试错误",
@@ -103,6 +105,8 @@ export const coreZhCN = {
   "prompt.agents": "智能体",
   "prompt.commands": "命令",
   "prompt.exitShell": "退出 Shell 模式",
+  "prompt.shellMode": "Shell 模式",
+  "prompt.exitShellAction": "退出 Shell 模式",
   "prompt.connectProvider": "连接服务商以发送提示词",
   "prompt.runCommand": "运行命令... {{example}}",
   "prompt.placeholderExample": "请输入内容... {{example}}",
@@ -150,6 +154,9 @@ export const coreZhCN = {
   "dialog.helpConfirm": "确定",
   "dialog.help.close": "关闭帮助",
   "dialog.help.description": "按 {{shortcut}} 可在任何上下文中查看所有可用操作和命令。",
+  "dialog.close": "关闭对话框",
+  "dialog.nextAction": "下一个对话框操作",
+  "dialog.previousAction": "上一个对话框操作",
 
   "permission.noDiff": "未提供差异",
   "permission.allowPatterns": "AINN 重启前将允许以下模式",
@@ -252,4 +259,12 @@ export const coreZhCN = {
   "question.submit": "提交",
   "question.toggle": "切换",
   "question.dismiss": "忽略",
+  "question.cancelEdit": "取消回答编辑",
+  "question.submitEdit": "提交回答编辑",
+  "question.previousQuestion": "上一个问题",
+  "question.nextQuestion": "下一个问题",
+  "question.submitAnswer": "提交回答",
+  "question.previousAnswer": "上一个回答",
+  "question.nextAnswer": "下一个回答",
+  "question.selectAnswer": "选择回答",
 } as const satisfies Record<string, string>
