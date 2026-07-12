@@ -36,6 +36,7 @@ type probeSpec struct {
 	Generation            int
 	Fingerprint           string
 	Pools                 []string
+	ManualPools           []string
 	Due                   bool
 	Reason                ProbeScheduleReason
 }
@@ -80,6 +81,7 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 		if !exists || previous.Fingerprint != spec.Fingerprint || !slices.Equal(previous.Pools, spec.Pools) {
 			m.probeGenerations[spec.Key]++
 			spec.Generation = m.probeGenerations[spec.Key]
+			delete(m.manualProbes, spec.Key)
 			delete(m.pendingProbes, spec.Key)
 			for _, poolName := range previous.Pools {
 				m.invalidatePoolReadinessLocked(poolName, previous.Upstream)
@@ -97,6 +99,7 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 			continue
 		}
 		m.probeGenerations[key]++
+		delete(m.manualProbes, key)
 		for _, poolName := range previous.Pools {
 			m.invalidatePoolReadinessLocked(poolName, previous.Upstream)
 		}
@@ -107,6 +110,13 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 		spec := m.desiredProbes[listed.Key]
 		if inFlight, exists := m.inFlightProbes[spec.Key]; exists {
 			if spec.Due && (spec.Reason == ProbeScheduleManual || inFlight.Generation != spec.Generation || inFlight.Fingerprint != spec.Fingerprint) {
+				if pending, ok := m.pendingProbes[spec.Key]; ok && pending.Generation == spec.Generation && pending.Fingerprint == spec.Fingerprint {
+					for _, poolName := range pending.ManualPools {
+						if !slices.Contains(spec.ManualPools, poolName) {
+							spec.ManualPools = append(spec.ManualPools, poolName)
+						}
+					}
+				}
 				m.pendingProbes[spec.Key] = spec
 			}
 			continue

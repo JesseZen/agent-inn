@@ -214,12 +214,21 @@ func (m *Manager) resetPoolIdentityLocked(poolName string) {
 }
 
 func (m *Manager) invalidatePoolProbeIdentityLocked(poolName string) {
+	keys := map[probeExecutionKey]struct{}{}
 	for key, spec := range m.desiredProbes {
-		if !slices.Contains(spec.Pools, poolName) {
-			continue
+		if slices.Contains(spec.Pools, poolName) {
+			keys[key] = struct{}{}
 		}
+	}
+	for key, spec := range m.manualProbes {
+		if slices.Contains(spec.ManualPools, poolName) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range keys {
 		m.probeGenerations[key]++
 		delete(m.desiredProbes, key)
+		delete(m.manualProbes, key)
 		delete(m.pendingProbes, key)
 	}
 }

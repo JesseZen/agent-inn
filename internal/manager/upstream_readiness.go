@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"slices"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/logging"
@@ -89,11 +90,34 @@ func (m *Manager) poolReadinessLocked(poolName string, upstreamName string) Pool
 func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.ProbeResult) {
 	m.failoverMu.Lock()
 	desired, exists := m.desiredProbes[spec.Key]
-	if !exists || desired.Generation != spec.Generation || desired.Fingerprint != spec.Fingerprint {
+	scheduled := exists && desired.Generation == spec.Generation && desired.Fingerprint == spec.Fingerprint
+	manual, exists := m.manualProbes[spec.Key]
+	manualAuthority := exists && manual.Generation == spec.Generation && manual.Fingerprint == spec.Fingerprint
+	scheduledPools := make([]string, 0, len(spec.Pools))
+	if scheduled {
+		for _, poolName := range spec.Pools {
+			if slices.Contains(desired.Pools, poolName) {
+				scheduledPools = append(scheduledPools, poolName)
+			}
+		}
+	}
+	manualPools := make([]string, 0, len(spec.ManualPools))
+	if manualAuthority {
+		for _, poolName := range spec.ManualPools {
+			if slices.Contains(manual.ManualPools, poolName) {
+				manualPools = append(manualPools, poolName)
+			}
+		}
+	}
+	if len(scheduledPools) == 0 && len(manualPools) == 0 {
 		m.failoverMu.Unlock()
 		return
 	}
 	if !result.Authoritative {
+		pending := m.pendingProbes[spec.Key]
+		if len(manualPools) > 0 && (pending.Generation != spec.Generation || pending.Fingerprint != spec.Fingerprint || len(pending.ManualPools) == 0) {
+			delete(m.manualProbes, spec.Key)
+		}
 		m.failoverMu.Unlock()
 		return
 	}
@@ -102,9 +126,9 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 		readiness  PoolReadiness
 		probeState PoolProbeState
 		next       *time.Time
-	}, 0, len(spec.Pools))
-	probeErrors := make([]error, 0, len(spec.Pools))
-	for _, poolName := range spec.Pools {
+	}, 0, len(scheduledPools)+len(manualPools))
+	probeErrors := make([]error, 0, len(scheduledPools))
+	for _, poolName := range scheduledPools {
 		key := poolCircuitKey(poolName, spec.Upstream)
 		m.readiness[key] = readinessObservation{
 			Result:      result,
@@ -158,9 +182,42 @@ func (m *Manager) recordScheduledProbeResult(spec probeSpec, result upstream.Pro
 			next       *time.Time
 		}{m.poolReadinessLocked(poolName, spec.Upstream), m.poolProbeStateLocked(poolName), m.poolNextProbeAtLocked(poolName)})
 	}
+	for _, poolName := range manualPools {
+		m.mu.RLock()
+		pool := m.config.UpstreamPools[poolName]
+		m.mu.RUnlock()
+		key := poolCircuitKey(poolName, spec.Upstream)
+		expiresAt := checkedAt.Add(time.Duration(pool.Probe.StableIntervalSeconds)*time.Second + defaultUpstreamProbeInterval)
+		m.readiness[key] = readinessObservation{
+			Result: result, CheckedAt: checkedAt, ExpiresAt: expiresAt,
+			Reason: ProbeScheduleManual, Generation: spec.Generation, Fingerprint: spec.Fingerprint,
+		}
+		if timer := m.readinessTimers[key]; timer != nil {
+			timer.Stop()
+		}
+		timerPool := poolName
+		upstreamName := spec.Upstream
+		generation := spec.Generation
+		m.readinessTimers[key] = time.AfterFunc(expiresAt.Sub(checkedAt), func() {
+			m.expirePoolReadiness(timerPool, upstreamName, generation, checkedAt)
+		})
+		probeEvents = append(probeEvents, struct {
+			readiness  PoolReadiness
+			probeState PoolProbeState
+			next       *time.Time
+		}{m.poolReadinessLocked(poolName, spec.Upstream), m.poolProbeStateLocked(poolName), m.poolNextProbeAtLocked(poolName)})
+	}
+	pending := m.pendingProbes[spec.Key]
+	if len(manualPools) > 0 && (pending.Generation != spec.Generation || pending.Fingerprint != spec.Fingerprint || len(pending.ManualPools) == 0) {
+		delete(m.manualProbes, spec.Key)
+	}
 	m.failoverMu.Unlock()
-	for _, event := range probeEvents {
-		m.publishEvent(EventUpstreamProbed, poolReadinessPayload(event.readiness, event.probeState, event.next, spec.Reason))
+	for index, event := range probeEvents {
+		reason := spec.Reason
+		if index >= len(scheduledPools) {
+			reason = ProbeScheduleManual
+		}
+		m.publishEvent(EventUpstreamProbed, poolReadinessPayload(event.readiness, event.probeState, event.next, reason))
 	}
 	for _, err := range probeErrors {
 		m.logger.Error(logging.EventUpstreamFailover, "upstream", spec.Upstream, "err", redactedErrorMessage(err))

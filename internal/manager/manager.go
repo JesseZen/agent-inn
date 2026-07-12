@@ -73,6 +73,7 @@ type Manager struct {
 	metricsStatusSem   chan struct{}
 	circuits           *circuitBreaker
 	desiredProbes      map[probeExecutionKey]probeSpec
+	manualProbes       map[probeExecutionKey]probeSpec
 	inFlightProbes     map[probeExecutionKey]probeSpec
 	pendingProbes      map[probeExecutionKey]probeSpec
 	probeGenerations   map[probeExecutionKey]int
@@ -219,6 +220,7 @@ func New(cfg Config) *Manager {
 		pendingMetrics:     map[string]*pendingMetricsUpdate{},
 		metricsStatusSem:   make(chan struct{}, metricsHydrationConcurrencyLimit),
 		desiredProbes:      map[probeExecutionKey]probeSpec{},
+		manualProbes:       map[probeExecutionKey]probeSpec{},
 		inFlightProbes:     map[probeExecutionKey]probeSpec{},
 		pendingProbes:      map[probeExecutionKey]probeSpec{},
 		probeGenerations:   map[probeExecutionKey]int{},

@@ -130,6 +130,144 @@ func TestManagerPoolRefreshQueuesBehindInFlightProbe(t *testing.T) {
 	}
 }
 
+func TestManagerPoolRefreshDisabledRecordsReadinessOnly(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 8, 9, 10, 0, time.UTC)
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeDisabled, []string{"primary", "backup"}, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	pool := m.config.UpstreamPools["coding-ha"]
+	for failure := 0; failure < pool.CircuitBreaker.FailureThreshold; failure++ {
+		m.circuits.RecordFailure(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker)
+	}
+	m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}] = poolProbeSchedule{NextProbeAt: now.Add(time.Hour), ConsecutiveFailures: 2, Reason: ProbeScheduleRecovery}
+	m.exhaustedPools["coding-ha"] = "primary"
+	wantCircuits := []CircuitStatus{
+		m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker),
+		m.circuits.Status(poolCircuitKey("coding-ha", "backup"), pool.CircuitBreaker),
+	}
+	wantSchedules := maps.Clone(m.probeSchedules)
+	wantExhaustion := maps.Clone(m.exhaustedPools)
+	m.mu.RLock()
+	wantWorkers := map[string]config.WorkerConfig{"app": cloneWorkerConfig(m.config.Workers["app"])}
+	m.mu.RUnlock()
+	calls := make(chan probeSpec, 2)
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		calls <- spec
+		return readinessTestSuccess(4)
+	}
+
+	response := requestManager(t, m, http.MethodPost, "/api/upstream-pools/coding-ha/probe", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected refresh status %d: %s", response.Code, response.Body.String())
+	}
+	executions := make([]probeSpec, 0, 2)
+	for len(executions) < 2 {
+		select {
+		case spec := <-calls:
+			executions = append(executions, spec)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("disabled refresh started %d probe executions, want 2", len(executions))
+		}
+	}
+	m.probeWait.Wait()
+	gotExecutions := poolRefreshExecutions(executions)
+	m.mu.RLock()
+	gotWorkers := map[string]config.WorkerConfig{"app": cloneWorkerConfig(m.config.Workers["app"])}
+	m.mu.RUnlock()
+	m.failoverMu.Lock()
+	expiresAt := []time.Time{
+		m.readiness[poolCircuitKey("coding-ha", "primary")].ExpiresAt,
+		m.readiness[poolCircuitKey("coding-ha", "backup")].ExpiresAt,
+	}
+	m.failoverMu.Unlock()
+	got := struct {
+		Status     int
+		Executions []poolRefreshExecution
+		Readiness  []PoolReadiness
+		ExpiresAt  []time.Time
+		Circuits   []CircuitStatus
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Exhaustion map[string]string
+		Workers    map[string]config.WorkerConfig
+	}{response.Code, gotExecutions, []PoolReadiness{
+		m.poolReadiness("coding-ha", "primary"), m.poolReadiness("coding-ha", "backup"),
+	}, expiresAt, []CircuitStatus{
+		m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker),
+		m.circuits.Status(poolCircuitKey("coding-ha", "backup"), pool.CircuitBreaker),
+	}, maps.Clone(m.probeSchedules), maps.Clone(m.exhaustedPools), gotWorkers}
+	checkedAt := now
+	wantExpiresAt := now.Add(16 * time.Minute)
+	want := struct {
+		Status     int
+		Executions []poolRefreshExecution
+		Readiness  []PoolReadiness
+		ExpiresAt  []time.Time
+		Circuits   []CircuitStatus
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Exhaustion map[string]string
+		Workers    map[string]config.WorkerConfig
+	}{http.StatusOK, []poolRefreshExecution{
+		{probeExecutionKey{Upstream: "backup", ProxyURL: "http://proxy.example"}, "backup", "http://proxy.example", nil, ProbeScheduleManual},
+		{probeExecutionKey{Upstream: "primary", ProxyURL: "http://proxy.example"}, "primary", "http://proxy.example", nil, ProbeScheduleManual},
+	}, []PoolReadiness{
+		{Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true, Readiness: ReadinessStateReady, CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 4},
+		{Upstream: "backup", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true, Readiness: ReadinessStateReady, Eligible: true, CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 4},
+	}, []time.Time{wantExpiresAt, wantExpiresAt}, wantCircuits, wantSchedules, wantExhaustion, wantWorkers}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("disabled refresh changed managed state:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPoolRefreshRejectsStaleIdentityResult(t *testing.T) {
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeDisabled, []string{"primary"}, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+	})
+	defer m.Close()
+	started := make(chan probeSpec, 1)
+	release := make(chan struct{})
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		started <- spec
+		<-release
+		return readinessTestSuccess(9)
+	}
+
+	probeResponse := requestManager(t, m, http.MethodPost, "/api/upstream-pools/coding-ha/probe", "")
+	if probeResponse.Code != http.StatusOK {
+		t.Fatalf("unexpected refresh status %d: %s", probeResponse.Code, probeResponse.Body.String())
+	}
+	var stale probeSpec
+	select {
+	case stale = <-started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("disabled refresh did not start a manual probe")
+	}
+	patchResponse := requestManager(t, m, http.MethodPatch, "/api/upstreams/primary", `{"protocol_probe":{"model":"model-new"}}`)
+	close(release)
+	m.probeWait.Wait()
+	got := struct {
+		Statuses   []int
+		StaleModel string
+		Readiness  PoolReadiness
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Events     []map[string]any
+	}{[]int{probeResponse.Code, patchResponse.Code}, stale.Model, m.poolReadiness("coding-ha", "primary"), maps.Clone(m.probeSchedules), poolRoutingEvents(m, EventUpstreamProbed)}
+	want := struct {
+		Statuses   []int
+		StaleModel string
+		Readiness  PoolReadiness
+		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Events     []map[string]any
+	}{[]int{http.StatusOK, http.StatusOK}, "model-primary", PoolReadiness{
+		Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol,
+		Authoritative: true, Readiness: ReadinessStateUnknown,
+	}, map[poolProbeScheduleKey]poolProbeSchedule{}, nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stale manual result changed readiness:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func poolRefreshExecutions(specs []probeSpec) []poolRefreshExecution {
 	slices.SortFunc(specs, func(a probeSpec, b probeSpec) int {
 		if a.Upstream < b.Upstream {
