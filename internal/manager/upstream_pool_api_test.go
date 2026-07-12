@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 )
@@ -29,6 +30,8 @@ func TestManagerUpstreamPoolCRUD(t *testing.T) {
 	}})
 	m.cancelProbes()
 	defer m.Close()
+	now := time.Date(2026, time.July, 13, 1, 2, 3, 0, time.UTC)
+	m.clock = func() time.Time { return now }
 
 	response := requestManager(t, m, http.MethodGet, "/api/upstream-pools", "")
 	var listed struct {
@@ -40,10 +43,14 @@ func TestManagerUpstreamPoolCRUD(t *testing.T) {
 	wantListed := []upstreamPoolSummary{{
 		ID:             "coding-ha",
 		Name:           "coding-ha",
+		Mode:           config.UpstreamPoolModeActive,
 		Upstreams:      []string{"primary", "backup"},
+		Probe:          config.PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60},
 		CircuitBreaker: config.CircuitBreakerConfig{FailureThreshold: 3, RecoverySuccessThreshold: 2, RecoveryWaitSeconds: 60},
 		ActiveUpstream: "primary",
 		Workers:        []string{"app"},
+		ProbeState:     PoolProbeStateAlert,
+		NextProbeAt:    &now,
 		Readiness: []PoolReadiness{
 			{Upstream: "primary", Pool: "coding-ha", Mode: "protocol", Authoritative: true, Readiness: ReadinessStateUnknown},
 			{Upstream: "backup", Pool: "coding-ha", Mode: "protocol", Authoritative: true, Readiness: ReadinessStateUnknown},
@@ -64,7 +71,9 @@ func TestManagerUpstreamPoolCRUD(t *testing.T) {
 	gotPool := m.store.Config().UpstreamPools["research-ha"]
 	wantPool := config.UpstreamPool{
 		Name:      "research-ha",
+		Mode:      config.UpstreamPoolModeActive,
 		Upstreams: []string{"tertiary", "backup"},
+		Probe:     config.PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60},
 		CircuitBreaker: config.CircuitBreakerConfig{
 			FailureThreshold: 5, RecoverySuccessThreshold: 4, RecoveryWaitSeconds: 30,
 		},

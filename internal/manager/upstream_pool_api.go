@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 )
@@ -12,10 +13,14 @@ import (
 type upstreamPoolSummary struct {
 	ID             string                      `json:"id"`
 	Name           string                      `json:"name"`
+	Mode           config.UpstreamPoolMode     `json:"mode"`
 	Upstreams      []string                    `json:"upstreams"`
+	Probe          config.PoolProbeConfig      `json:"probe"`
 	CircuitBreaker config.CircuitBreakerConfig `json:"circuit_breaker"`
 	ActiveUpstream string                      `json:"active_upstream,omitempty"`
 	Workers        []string                    `json:"workers"`
+	ProbeState     PoolProbeState              `json:"probe_state"`
+	NextProbeAt    *time.Time                  `json:"next_probe_at,omitempty"`
 	Readiness      []PoolReadiness             `json:"readiness"`
 }
 
@@ -179,6 +184,7 @@ func (m *Manager) upstreamPoolSummaries() []upstreamPoolSummary {
 }
 
 func (m *Manager) upstreamPoolSummary(name string) upstreamPoolSummary {
+	m.failoverMu.Lock()
 	m.mu.RLock()
 	pool := m.config.UpstreamPools[name]
 	workers := make([]string, 0)
@@ -191,19 +197,26 @@ func (m *Manager) upstreamPoolSummary(name string) upstreamPoolSummary {
 	sort.Strings(workers)
 	readiness := make([]PoolReadiness, 0, len(pool.Upstreams))
 	for _, upstreamName := range pool.Upstreams {
-		readiness = append(readiness, m.poolReadiness(name, upstreamName))
+		readiness = append(readiness, m.poolReadinessLocked(name, upstreamName))
 	}
+	probeState := m.poolProbeStateLocked(name)
+	nextProbeAt := m.poolNextProbeAtLocked(name)
 	active := ""
 	if len(workers) > 0 {
 		active = m.poolActiveUpstream(name)
 	}
+	m.failoverMu.Unlock()
 	return upstreamPoolSummary{
 		ID:             name,
 		Name:           name,
+		Mode:           pool.Mode,
 		Upstreams:      append([]string(nil), pool.Upstreams...),
+		Probe:          pool.Probe,
 		CircuitBreaker: pool.CircuitBreaker,
 		ActiveUpstream: active,
 		Workers:        workers,
+		ProbeState:     probeState,
+		NextProbeAt:    nextProbeAt,
 		Readiness:      readiness,
 	}
 }
