@@ -5,6 +5,8 @@
 > **日志位置**
 > - 主进程：`~/.ainn/logs/ainn.log`（可通过 `config.yaml` 的 `settings.log_dir` 修改）
 > - Worker：`~/.ainn/logs/worker-<port>.log`（同一 log_dir）
+> - 崩溃证据：`~/.ainn/logs/crashes/root-<UTC>-<run>.log`（同一 log_dir）
+> - 未完成运行标记：`~/.ainn/logs/crashes/active-root.json`
 > - 实时流：TUI 中按 `l` 进入日志面板，或通过 `/api/workers/<port>/logs` SSE 接口
 
 ---
@@ -39,6 +41,7 @@
 | component | 来源 | 日志文件 |
 |---|---|---|
 | `root` | 主进程启停 | `ainn.log` |
+| `root.supervisor` | root 子进程 stderr、信号和实际退出状态 | `crashes/root-*.log` |
 | `manager.super` | Worker 生命周期 | `ainn.log` |
 | `manager.health` | 健康探测循环 | `ainn.log` |
 | `manager.api` | 配置 PATCH API | `ainn.log` |
@@ -47,21 +50,114 @@
 
 ---
 
+## 闪退排查第一步
+
+不要先从业务请求日志猜原因。先打开最新 crash artifact，再用其中的
+`run=<id>` 关联主进程和 worker 日志：
+
+```bash
+LOG_DIR="$HOME/.ainn/logs" # 使用自定义 settings.log_dir 时替换这里
+CRASH="$(find "$LOG_DIR/crashes" -name 'root-*.log' -type f 2>/dev/null | sort -r | head -1)"
+echo "crash=$CRASH"
+tail -200 "$CRASH"
+
+RUN="$(grep -Eo 'run=[0-9a-f]+' "$CRASH" | head -1 | cut -d= -f2)"
+grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -300
+```
+
+### 事件组合判定
+
+| 证据 | 结论 |
+|---|---|
+| `root.panic`，随后 crash artifact 有 Go stack | root 主 goroutine panic；按 stack 第一条项目内路径定位 |
+| crash artifact 有 `panic:` / `fatal error:`，但 `ainn.log` 没有 `root.panic` | 后台 goroutine panic 或 Go runtime fatal；以 artifact 的 all-goroutine stack 为准 |
+| `root.supervisor.exit reason=signal signal=killed` | root 子进程收到 `SIGKILL`；不是 TUI 正常退出 |
+| `root.signal` + `root.stop reason=signal` | root 收到并完成了 `SIGINT/SIGTERM/SIGHUP` 的有序关闭 |
+| `tui.exit reason=tui_exit exit_code!=0` + `root.stop` | Bun/TUI 子进程失败，root 仍完成了清理；查看同一 artifact 中 TUI stderr |
+| `root.previous_unclean` | 上一次连 supervisor 都没能记录退出，常见于 supervisor 自身被 `SIGKILL`、tmux server 被杀或断电 |
+| `worker.exit exit_code!=0` 或 `signal` 非空 | worker 真实异常退出；用同一 `run` 和 `worker` 查看对应 `worker-<port>.log` |
+| 只有请求 `503`，同一时间没有 root/worker 日志 | 先确认 root 是否已退出；整个 manager 消失时 pool 无法执行故障转移 |
+
+`SIGKILL` 无法由被杀进程自己处理。AINN 通过外层 supervisor 的 wait status
+记录 root 子进程的 `SIGKILL`；若 supervisor 也被同时杀掉，则下一次启动通过
+遗留的 `active-root.json` 产生 `root.previous_unclean`。
+
+---
+
 ## 事件索引
 
-### root（主进程）
+### root.supervisor（进程边界）
+
+#### `root.supervisor.start`
+- **触发**：外层 supervisor 已建立本次 crash artifact 和 active marker
+- **字段**：`run`，`pid`（supervisor PID），`started_at`，`version`，`go`，`os`，`arch`，`config_dir`，`port`，`artifact`
+- **位置**：仅 `crashes/root-*.log`
+- **用途**：确定运行身份、构建版本、平台和所有后续日志的关联 ID
+
+#### `root.supervisor.child`
+- **触发**：真实 root 子进程启动成功
+- **字段**：`run`，`child_pid`
+- **用途**：区分 supervisor PID 与实际 manager/TUI PID
+
+#### `root.supervisor.signal`
+- **触发**：supervisor 收到 `SIGINT/SIGTERM/SIGHUP` 并转发给 root 子进程
+- **字段**：`run`，`signal`，`child_pid`，转发失败时有 `err`
+- **LEVEL**：WARN；转发失败为 ERROR
+- **用途**：确认信号是否先到 supervisor，以及信号是否成功转发
+
+#### `root.supervisor.exit`
+- **触发**：supervisor 已 `Wait` 到 root 子进程的真实退出状态
+- **字段**：`run`，`child_pid`，`exit_code`，`reason`（`clean/exit_code/signal/start_error/wait_error`），`error`，`signal`，`forwarded_signal`，`duration_ms`，`completed_at`
+- **用途**：这是判断 root 为什么消失的权威事件；`signal` 非空优先于 exit code
+- **进程清理**：root 退出后 supervisor 会终止同组残留的 TUI 后代，再完成 stderr 落盘；残留后代不会卡住退出事件
+
+#### `root.previous_unclean`
+- **触发**：新一轮启动发现上一轮遗留 `active-root.json`
+- **字段**：`run`（当前），`previous_run`，`previous_pid`，`previous_started_at`，`previous_artifact`
+- **LEVEL**：WARN
+- **用途**：说明上一轮 supervisor 未执行到退出记录；直接打开 `previous_artifact`
+
+### root（主进程与 TUI）
 
 #### `root.start`
-- **触发**：主进程 rootRunner 启动，已获取实例锁
-- **字段**：`port`（manager HTTP 端口）
+- **触发**：真实 root 子进程已打开 `ainn.log`
+- **字段**：`run`，`pid`，`ppid`，`version`，`go`，`os`，`arch`，`config_dir`，`port`，`crash_path`
 - **grep**：`grep root.start ~/.ainn/logs/ainn.log`
-- **用途**：确认进程何时启动；多行 root.start 表示进程在短时间内反复重启
+- **用途**：确认 manager/TUI 实际启动；用 `run` 关联 crash 和 worker 日志
+
+#### `root.signal`
+- **触发**：root 收到 `SIGINT/SIGTERM/SIGHUP`，或检测到 supervisor pipe 关闭
+- **字段**：`run`，`reason`（`signal/supervisor_lost`），`signal`
+- **LEVEL**：WARN
+- **用途**：区分有序信号关闭和 supervisor 异常消失；`SIGHUP` 后紧跟 `root.stack`
+
+#### `root.stack`
+- **触发**：root 收到 `SIGHUP`
+- **字段**：`run`，`reason=hangup`
+- **用途**：事件后完整 goroutine stack 写入同一 crash artifact
+
+#### `root.panic`
+- **触发**：root 主 goroutine panic，被记录后立即重新 panic
+- **字段**：`run`，`panic`，`pid`
+- **LEVEL**：ERROR
+- **用途**：不恢复执行；完整 stack 在 `crash_path` 指向的 artifact
+
+#### `tui.start`
+- **触发**：root 即将启动 Bun TUI
+- **字段**：`run`，`command`
+- **用途**：确认 manager 已进入 TUI 阶段
+
+#### `tui.exit`
+- **触发**：Bun TUI 返回或被 root 取消
+- **字段**：`run`，`reason`（`tui_exit/root_signal/server_error`），`exit_code`，`signal`，失败时有 `err`
+- **LEVEL**：正常为 INFO，非零退出为 ERROR
+- **用途**：区分 TUI 自身崩溃与 root/manager 崩溃
 
 #### `root.stop`
-- **触发**：rootRunner 正常退出（TUI 关闭、SIGTERM）
-- **字段**：无
+- **触发**：root 已完成明确的有序返回路径；panic/fatal 不写此事件
+- **字段**：`run`，`reason`（`tui_exit/signal/supervisor_lost/server_error`），信号退出有 `signal`，错误退出有 `err`
 - **grep**：`grep root.stop ~/.ainn/logs/ainn.log`
-- **用途**：确认进程退出是否干净；如果只有 root.start 没有 root.stop，说明进程崩溃
+- **用途**：`root.start` 无对应 `root.stop` 表示 root 没走完清理；再以 supervisor artifact 确认原因
 
 ---
 
@@ -75,9 +171,33 @@
 
 #### `worker.exit`
 - **触发**：worker 进程停止（StopWorker 调用完成）
-- **字段**：`worker`，`status`（stopped/stopped_forced/failed）
+- **字段**：`run`，`worker`，`status`（stopped/stopped_forced/failed），`exit_code`，`signal`，`forced`，`process_error`
 - **grep**：`grep worker.exit ~/.ainn/logs/ainn.log`
 - **用途**：追踪 worker 是正常停止还是被强制杀掉
+
+---
+
+### worker.life（Worker 进程边界）
+
+这些低频生命周期 INFO 即使在 `simple` 模式也会保留。
+
+#### `worker.start`
+- **触发**：worker 已解析运行时配置并开始构建模块
+- **字段**：`run`，`worker`，`pid`，`port`，`generation`
+
+#### `worker.ready`
+- **触发**：模块和 hooks 已构建，worker 即将进入 HTTP Serve
+- **字段**：同 `worker.start`
+
+#### `worker.signal`
+- **触发**：worker 收到 `SIGINT/SIGTERM`
+- **字段**：同 `worker.start`，另有 `signal`
+- **LEVEL**：WARN
+
+#### `worker.stop`
+- **触发**：worker server 返回并完成 defer
+- **字段**：同 `worker.start`，`reason=clean/error`，错误时有 `err`
+- **用途**：缺少此事件但 worker log 尾部有 panic/runtime stack，说明 worker 非有序退出
 
 #### `worker.restart`
 - **触发**：worker 被重启（RestartWorker 完成 stop+start）
@@ -166,7 +286,7 @@
 | `log_level` 配置值 | simple 模式（默认） | detail 模式 |
 |---|---|---|
 | 对应 slog 级别 | INFO+ | DEBUG+ |
-| 过滤说明 | 只保留 WARN/ERROR；INFO 的 request.start/done 被过滤 | 全量保留 |
+| 过滤说明 | 保留 WARN/ERROR、未知原始输出及 `worker.life`；INFO 的 request.start/done 被过滤 | 全量保留 |
 | 适用场景 | 生产/日常使用，日志量小 | 排查特定请求路径、模块行为 |
 
 **修改 worker 日志级别**：在 `config.yaml` 的 `workers.<name>.log_level` 设置为 `detail`，TUI 重载配置后即时生效（无需重启 worker）。
@@ -185,6 +305,20 @@ grep -E "worker.spawn|worker.exit|health.fail" ~/.ainn/logs/ainn.log | tail -40
 
 # 2. 看 worker 自身日志（进程起来了但出错）
 tail -100 ~/.ainn/logs/worker-<port>.log
+```
+
+### AINN 整体闪退 / 远程看到 503
+
+```bash
+# 1. 先看 root 子进程真实退出状态和 stderr/stack
+find ~/.ainn/logs/crashes -name 'root-*.log' -type f | sort -r | head
+tail -200 "$(find ~/.ainn/logs/crashes -name 'root-*.log' -type f | sort -r | head -1)"
+
+# 2. 看是否走完 root 清理
+grep -E 'root\.(start|signal|panic|stack|stop)|tui\.(start|exit)' ~/.ainn/logs/ainn.log | tail -80
+
+# 3. 看 worker 是被 root 有序停止，还是自身先崩溃
+grep -E 'worker\.(spawn|exit)|health.fail' ~/.ainn/logs/ainn.log | tail -80
 ```
 
 ### 请求报错 / 上游 401
@@ -250,8 +384,9 @@ grep -E "worker.restart|health.fail" ~/.ainn/logs/ainn.log | tail -20
 
 - `ainn.log` 超过 10MB 时轮转为 `ainn.log.1`，最多保留 3 个备份（`ainn.log.1`、`.2`、`.3`）
 - `worker-<port>.log` 同上（每个 worker 独立计算）
+- 每次 root 运行有独立 `crashes/root-<UTC>-<run>.log`，单文件 10MB、2 个备份，保留最近 10 个 run 组
 - 内存环形缓冲区保留最近 1000 行（供 TUI 日志面板展示）
 
 ---
 
-*最后更新：2026-07-07*
+*最后更新：2026-07-12*
