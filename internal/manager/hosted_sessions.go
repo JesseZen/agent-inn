@@ -403,6 +403,10 @@ func (r *HostedSessionRegistry) MarkTurnStateWithWatch(sessionID string, state s
 		if !ok {
 			return fmt.Errorf("hosted session %q not found", sessionID)
 		}
+		if state == HostedTurnStateIdle && session.TurnState == HostedTurnStateRunning {
+			updated = session
+			return nil
+		}
 		if state == HostedTurnStateRunning {
 			session.TurnGeneration++
 			session.TurnStateReason = ""

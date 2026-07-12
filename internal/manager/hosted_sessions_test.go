@@ -173,6 +173,34 @@ func TestHostedSessionRegistryMarkTurnStateAdvancesRunningAndPreservesFailure(t 
 	}
 }
 
+func TestHostedSessionRegistryMarkTurnStatePreservesRunningFromLateSessionStart(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(""))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "goal-thread", "/tmp/codex.jsonl", "turn_2", HostedTurnWatchKindCodexGoal)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := registry.MarkTurnState(created.SessionID, HostedTurnStateIdle, "", "goal-thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, running) {
+		t.Fatalf("late session start got %#v, want %#v", got, running)
+	}
+}
+
 func TestHostedSessionRegistryMarkTurnStatePreservesInterrupted(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

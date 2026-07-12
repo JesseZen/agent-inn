@@ -30,9 +30,9 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 		sort.Strings(bindings[upstreamName])
 	}
 	for name, profile := range m.upstreamProfileSnapshot() {
-		runtime, _ := upstream.Resolve(name, profile)
+		runtime, _ := upstream.ResolveWithDisplayName(name, profile.Name, profile)
 		entry := map[string]any{
-			"name": name, "base_url": profile.BaseURL, "has_api_key": runtime.APIKey != "", "api_format": profile.APIFormat,
+			"id": name, "name": runtime.Name, "base_url": profile.BaseURL, "has_api_key": runtime.APIKey != "", "api_format": profile.APIFormat,
 		}
 		if profile.ProtocolProbe.Model != "" {
 			entry["protocol_probe"] = profile.ProtocolProbe
@@ -101,11 +101,7 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 		return
 	}
-	current, ok := m.upstreamProfileSnapshot()[name]
-	if !ok {
-		http.NotFound(rw, r)
-		return
-	}
+	current := m.upstreamProfileSnapshot()[name]
 	profile := current
 	if patch.Name != nil {
 		profile.Name = strings.TrimSpace(*patch.Name)

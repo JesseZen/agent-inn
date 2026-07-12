@@ -105,6 +105,47 @@ func TestManagerAPIListsWorkersAndProvidersWithoutSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerAPIListsUpstreamsWithStableIDs(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-secret")
+	m := New(Config{Config: config.Config{
+		Upstreams: map[string]config.UpstreamProfile{
+			"openai": {
+				Name:      "OpenAI Main",
+				BaseURL:   "https://api.openai.com/v1",
+				APIFormat: "chat_completions",
+			},
+		},
+	}})
+
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "http://manager.local/api/upstreams", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got struct {
+		Upstreams map[string]upstream.RedactedUpstream `json:"upstreams"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := struct {
+		Upstreams map[string]upstream.RedactedUpstream `json:"upstreams"`
+	}{
+		Upstreams: map[string]upstream.RedactedUpstream{
+			"openai": {
+				ID:        "openai",
+				Name:      "OpenAI Main",
+				BaseURL:   "https://api.openai.com/v1",
+				HasAPIKey: true,
+				APIFormat: "chat_completions",
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected upstreams: got %#v want %#v", got, want)
+	}
+}
+
 func TestManagerAPIMetricsReturnsLiveSnapshotsAndTotals(t *testing.T) {
 	stateDir := t.TempDir()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.Local)
@@ -4306,6 +4347,38 @@ func TestManagerPatchUpstreamRenamesDisplayNameWithoutChangingID(t *testing.T) {
 	}
 	if profiles["openai"].Name != "OpenAI Main" {
 		t.Fatalf("bad upstream profile: %#v", profiles["openai"])
+	}
+}
+
+func TestManagerPatchUpstreamCreatesMissingUpstream(t *testing.T) {
+	m := New(Config{Config: config.Config{}})
+	body := strings.NewReader(`{"base_url":"https://api.groq.com/openai/v1","api_format":"chat_completions"}`)
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/groq", body))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	var got upstream.RedactedUpstream
+	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := upstream.RedactedUpstream{
+		ID:        "groq",
+		Name:      "groq",
+		BaseURL:   "https://api.groq.com/openai/v1",
+		APIFormat: "chat_completions",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected upstream: got %#v want %#v", got, want)
+	}
+	if !reflect.DeepEqual(m.upstreamProfileSnapshot(), map[string]config.UpstreamProfile{
+		"groq": {
+			Name:      "groq",
+			BaseURL:   "https://api.groq.com/openai/v1",
+			APIFormat: "chat_completions",
+		},
+	}) {
+		t.Fatalf("unexpected profiles: %#v", m.upstreamProfileSnapshot())
 	}
 }
 
