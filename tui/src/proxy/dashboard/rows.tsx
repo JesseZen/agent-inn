@@ -107,7 +107,7 @@ export function DashboardRows(props: {
             <text fg={foreground()} attributes={selected() ? TextAttributes.BOLD : undefined} selectable={false}>
               {selected() ? "›" : " "}{" ".repeat(row.depth * 3)}
             </text>
-            <Show when={row.expandable} fallback={<text fg={foreground()} selectable={false}>{label()}</text>}>
+            <Show when={row.expandable} fallback={<text fg={foreground()} selectable={false}>{"  "}{label()}</text>}>
               <text
                 fg={foreground()}
                 attributes={selected() ? TextAttributes.BOLD : undefined}

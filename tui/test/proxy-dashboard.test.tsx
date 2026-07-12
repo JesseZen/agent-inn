@@ -109,6 +109,53 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
   }
 })
 
+test("dashboard keeps sibling workers aligned when only one has sessions", async () => {
+  const app = await mountProxyApp({
+    upstreams: [{ id: "fastapi", name: "fastapi", base_url: "https://example.com/v1", has_api_key: true }],
+    workers: [
+      {
+        id: "worker-0p02",
+        name: "0p02",
+        upstream_id: "fastapi",
+        port: 57380,
+        upstream: { id: "fastapi", name: "fastapi", has_api_key: true },
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+      {
+        id: "worker-10dolloars",
+        name: "10dolloars",
+        upstream_id: "fastapi",
+        port: 50137,
+        upstream: { id: "fastapi", name: "fastapi", has_api_key: true },
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+    ],
+    hostedSessions: [{
+      ...activeSession,
+      session_id: "hs-10dolloars",
+      session_label: "0p02 1",
+      worker_id: "worker-10dolloars",
+      worker_name: "10dolloars",
+      worker_port: 50137,
+    }],
+  })
+  try {
+    app.api.keymap.dispatchCommand("proxy.dashboard")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("10dolloars")
+    })
+    const frame = app.frame()
+    expect(framePoint(frame, "0p02").x).toBe(framePoint(frame, "10dolloars").x)
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("dashboard shows fixed keys and contextual actions for selected rows", async () => {
   const app = await mountProxyApp({ hostedSessions: [activeSession, staleSession] })
   try {

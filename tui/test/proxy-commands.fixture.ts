@@ -392,8 +392,8 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       } else {
         calls.patchWorker.push({
           port: current.port,
-          upstream: body.upstream_id ?? body.upstream,
-          log_level: body.log_level,
+          upstream: body.upstream_id ?? body.upstream ?? current.upstream_id,
+          log_level: body.log_level ?? current.log_level,
           ...(body.port !== undefined && body.port !== current.port ? { next_port: body.port } : {}),
           ...(body.launcher ? { launcher: body.launcher } : {}),
           ...(body.proxy_url !== undefined ? { proxy_url: body.proxy_url } : {}),
