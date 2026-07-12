@@ -35,7 +35,9 @@ func (m *Manager) handleUpstreamPools(rw http.ResponseWriter, r *http.Request) {
 	}
 	var payload struct {
 		Name           string                       `json:"name"`
+		Mode           *config.UpstreamPoolMode     `json:"mode"`
 		Upstreams      []string                     `json:"upstreams"`
+		Probe          *config.PoolProbeConfig      `json:"probe"`
 		CircuitBreaker *config.CircuitBreakerConfig `json:"circuit_breaker"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -56,6 +58,12 @@ func (m *Manager) handleUpstreamPools(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pool := config.UpstreamPool{Name: name, Upstreams: normalizedPoolMembers(payload.Upstreams)}
+	if payload.Mode != nil {
+		pool.Mode = *payload.Mode
+	}
+	if payload.Probe != nil {
+		pool.Probe = *payload.Probe
+	}
 	if payload.CircuitBreaker != nil {
 		pool.CircuitBreaker = *payload.CircuitBreaker
 	}
@@ -116,16 +124,34 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 	var patch struct {
+		Mode           *config.UpstreamPoolMode     `json:"mode"`
 		Upstreams      *[]string                    `json:"upstreams"`
+		Probe          *config.PoolProbeConfig      `json:"probe"`
 		CircuitBreaker *config.CircuitBreakerConfig `json:"circuit_breaker"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 		return
 	}
+	m.failoverMu.Lock()
+	m.mu.RLock()
+	current, exists = m.config.UpstreamPools[name]
+	candidate = cloneConfig(m.config)
+	m.mu.RUnlock()
+	if !exists {
+		m.failoverMu.Unlock()
+		http.NotFound(rw, r)
+		return
+	}
 	next := current
+	if patch.Mode != nil {
+		next.Mode = *patch.Mode
+	}
 	if patch.Upstreams != nil {
 		next.Upstreams = normalizedPoolMembers(*patch.Upstreams)
+	}
+	if patch.Probe != nil {
+		next.Probe = *patch.Probe
 	}
 	if patch.CircuitBreaker != nil {
 		next.CircuitBreaker = *patch.CircuitBreaker
@@ -133,13 +159,22 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 	candidate.UpstreamPools[name] = next
 	candidate.ApplyDefaults()
 	if err := candidate.Validate(); err != nil {
+		m.failoverMu.Unlock()
 		writeJSON(rw, http.StatusConflict, map[string]any{"error": redactedErrorMessage(err)})
 		return
 	}
 	next = candidate.UpstreamPools[name]
 
-	m.failoverMu.Lock()
 	m.updateConfig(func(cfgRoot *config.Config) { cfgRoot.UpstreamPools[name] = next })
+	attached := false
+	m.mu.RLock()
+	for _, worker := range m.config.Workers {
+		if worker.UpstreamPool == name {
+			attached = true
+			break
+		}
+	}
+	m.mu.RUnlock()
 	currentMembers := make(map[string]struct{}, len(current.Upstreams))
 	for _, upstreamName := range current.Upstreams {
 		currentMembers[upstreamName] = struct{}{}
@@ -161,8 +196,32 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 			m.circuits.Reset(poolCircuitKey(name, upstreamName))
 		}
 	}
+	if current.Mode != next.Mode {
+		for key := range m.probeSchedules {
+			if key.Pool == name {
+				delete(m.probeSchedules, key)
+			}
+		}
+		if next.Mode == config.UpstreamPoolModeActive {
+			for _, upstreamName := range next.Upstreams {
+				m.invalidatePoolReadinessLocked(name, upstreamName)
+				m.circuits.Reset(poolCircuitKey(name, upstreamName))
+				if attached {
+					m.probeSchedules[poolProbeScheduleKey{Pool: name, Upstream: upstreamName}] = poolProbeSchedule{
+						NextProbeAt: m.clock(),
+						Reason:      ProbeScheduleConfig,
+					}
+				}
+			}
+		}
+	}
 	m.invalidatePoolProbeIdentityLocked(name)
 	delete(m.exhaustedPools, name)
+	if current.Mode != next.Mode {
+		m.publishEvent(EventUpstreamPoolModeChanged, map[string]any{
+			"pool": name, "previous_mode": current.Mode, "mode": next.Mode,
+		})
+	}
 	m.failoverMu.Unlock()
 	m.probeAllUpstreams(m.probeContext)
 	writeJSON(rw, http.StatusOK, m.upstreamPoolSummary(name))

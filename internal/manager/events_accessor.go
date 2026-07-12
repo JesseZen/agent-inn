@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 
+	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/worker"
 )
 
@@ -162,6 +163,26 @@ func (e Event) AsUpstreamPoolSwitched() (pool string, previous string, upstream 
 	previous, _ = e.Payload["previous_upstream"].(string)
 	upstream, _ = e.Payload["upstream"].(string)
 	return pool, previous, upstream, true
+}
+
+func (e Event) AsUpstreamPoolModeChanged() (pool string, previous config.UpstreamPoolMode, mode config.UpstreamPoolMode, ok bool) {
+	if e.Type != EventUpstreamPoolModeChanged {
+		return "", "", "", false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	switch value := e.Payload["previous_mode"].(type) {
+	case config.UpstreamPoolMode:
+		previous = value
+	case string:
+		previous = config.UpstreamPoolMode(value)
+	}
+	switch value := e.Payload["mode"].(type) {
+	case config.UpstreamPoolMode:
+		mode = value
+	case string:
+		mode = config.UpstreamPoolMode(value)
+	}
+	return pool, previous, mode, true
 }
 
 // AsConfigStatusChanged 解析 config.status.changed 事件。ok=false 表示类型不匹配。
