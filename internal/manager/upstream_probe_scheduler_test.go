@@ -2,13 +2,21 @@ package manager
 
 import (
 	"context"
+	"maps"
 	"net/http"
+	"net/url"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/upstream"
+)
+
+const (
+	schedulerTestCredentialFingerprint = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	schedulerTestModelAFingerprint     = "49d290629f361cb17e64877a9d91e0d5e6efead3bf08ac5c9561b6544f83b8d3"
+	schedulerTestModelBFingerprint     = "3ee7c54efe5bcf8ee9bb79db5df8d90900b449f8af2a4b0b4ec707e3bd39fb4c"
 )
 
 func TestRunProtocolProbeInvalidProxyIsNonAuthoritative(t *testing.T) {
@@ -57,28 +65,31 @@ func TestManagerRejectsStaleProbeGeneration(t *testing.T) {
 	}
 	close(releaseA)
 	second := <-calls
+	m.failoverMu.Lock()
+	schedules := maps.Clone(m.probeSchedules)
+	m.failoverMu.Unlock()
 	got := struct {
 		First     probeSpec
 		Second    probeSpec
 		Circuit   CircuitStatus
 		Readiness PoolReadiness
-		Schedules []poolProbeSchedule
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
 	}{
 		First:     first,
 		Second:    second,
 		Circuit:   m.circuits.Status(poolCircuitKey("coding-ha", "primary"), pool.CircuitBreaker),
 		Readiness: m.poolReadiness("coding-ha", "primary"),
-		Schedules: []poolProbeSchedule{},
+		Schedules: schedules,
 	}
 	want := struct {
 		First     probeSpec
 		Second    probeSpec
 		Circuit   CircuitStatus
 		Readiness PoolReadiness
-		Schedules []poolProbeSchedule
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
 	}{
-		First:   first,
-		Second:  second,
+		First:   schedulerTestExpectedProbe(t, "model-a", schedulerTestModelAFingerprint, 1, []string{"coding-ha"}, ProbeScheduleStartup),
+		Second:  schedulerTestExpectedProbe(t, "model-b", schedulerTestModelBFingerprint, 2, []string{"coding-ha"}, ProbeScheduleStartup),
 		Circuit: wantCircuit,
 		Readiness: PoolReadiness{
 			Upstream:      "primary",
@@ -87,9 +98,9 @@ func TestManagerRejectsStaleProbeGeneration(t *testing.T) {
 			Authoritative: true,
 			Readiness:     ReadinessStateUnknown,
 		},
-		Schedules: []poolProbeSchedule{},
+		Schedules: map[poolProbeScheduleKey]poolProbeSchedule{},
 	}
-	if first.Model != "model-a" || second.Model != "model-b" || second.Generation <= first.Generation || !reflect.DeepEqual(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("stale probe changed Manager state:\n got %#v\nwant %#v", got, want)
 	}
 	close(releaseB)
@@ -164,13 +175,10 @@ func TestManagerAdaptiveProbeCadence(t *testing.T) {
 		return readinessTestSuccess(1)
 	}
 	key := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}
-	executionKey := probeExecutionKey{Upstream: "primary"}
 
 	m.probeAllUpstreams(t.Context())
 	m.probeWait.Wait()
-	wantStartup := m.desiredProbes[executionKey]
-	wantStartup.Due = true
-	wantStartup.Reason = ProbeScheduleStartup
+	wantStartup := schedulerTestExpectedProbe(t, "model-a", schedulerTestModelAFingerprint, 1, []string{"coding-ha"}, ProbeScheduleStartup)
 	wantSchedule := poolProbeSchedule{
 		NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second),
 		Reason:      ProbeScheduleStable,
@@ -226,7 +234,6 @@ func TestManagerProbeFailureBackoffCapsAtStableInterval(t *testing.T) {
 		return upstream.ProbeResult{Error: "protocol_error", Mode: upstream.ProbeModeProtocol, Authoritative: true}
 	}
 	key := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}
-	executionKey := probeExecutionKey{Upstream: "primary"}
 	wantExecutions := make([]probeSpec, 0, 6)
 
 	for failure, wantDelay := range []time.Duration{
@@ -239,12 +246,11 @@ func TestManagerProbeFailureBackoffCapsAtStableInterval(t *testing.T) {
 	} {
 		m.probeAllUpstreams(t.Context())
 		m.probeWait.Wait()
-		wantSpec := m.desiredProbes[executionKey]
-		wantSpec.Due = true
-		wantSpec.Reason = ProbeScheduleRecovery
+		wantReason := ProbeScheduleRecovery
 		if failure == 0 {
-			wantSpec.Reason = ProbeScheduleStartup
+			wantReason = ProbeScheduleStartup
 		}
+		wantSpec := schedulerTestExpectedProbe(t, "model-a", schedulerTestModelAFingerprint, 1, []string{"coding-ha"}, wantReason)
 		wantExecutions = append(wantExecutions, wantSpec)
 		wantSchedule := poolProbeSchedule{
 			NextProbeAt:         now.Add(wantDelay),
@@ -326,9 +332,7 @@ func TestManagerSharedProbeUsesEarliestPoolDeadline(t *testing.T) {
 
 	m.probeAllUpstreams(t.Context())
 	m.probeWait.Wait()
-	wantSpec := m.desiredProbes[probeExecutionKey{Upstream: "primary"}]
-	wantSpec.Due = true
-	wantSpec.Reason = ProbeScheduleRecovery
+	wantSpec := schedulerTestExpectedProbe(t, "model-a", schedulerTestModelAFingerprint, 1, []string{"coding-ha", "research-ha"}, ProbeScheduleRecovery)
 	wantSchedules := []poolProbeSchedule{
 		{NextProbeAt: stableDeadline, Reason: ProbeScheduleStable},
 		{NextProbeAt: stableDeadline, Reason: ProbeScheduleStable},
@@ -373,9 +377,7 @@ func TestManagerOpenCircuitWaitsForRecoveryWindow(t *testing.T) {
 
 	m.probeAllUpstreams(t.Context())
 	m.probeWait.Wait()
-	wantSpec := m.desiredProbes[probeExecutionKey{Upstream: "primary"}]
-	wantSpec.Due = true
-	wantSpec.Reason = ProbeScheduleStartup
+	wantSpec := schedulerTestExpectedProbe(t, "model-a", schedulerTestModelAFingerprint, 1, []string{"coding-ha"}, ProbeScheduleStartup)
 	recoveryDeadline := opened.OpenedAt.Add(time.Duration(pool.CircuitBreaker.RecoveryWaitSeconds) * time.Second)
 	wantSchedule := poolProbeSchedule{NextProbeAt: recoveryDeadline, ConsecutiveFailures: 1, Reason: ProbeScheduleRecovery}
 	got := struct {
@@ -421,6 +423,7 @@ func TestManagerOpenCircuitWaitsForRecoveryWindow(t *testing.T) {
 
 func newSchedulerTestManager(t *testing.T) *Manager {
 	t.Helper()
+	t.Setenv("PRIMARY_API_KEY", "")
 	return New(Config{Config: config.Config{
 		Settings: config.Settings{StateDir: t.TempDir()},
 		Workers: map[string]config.WorkerConfig{
@@ -440,4 +443,24 @@ func newSchedulerTestManager(t *testing.T) *Manager {
 			},
 		},
 	}})
+}
+
+func schedulerTestExpectedProbe(t *testing.T, model string, fingerprint string, generation int, pools []string, reason ProbeScheduleReason) probeSpec {
+	t.Helper()
+	baseURL, err := url.Parse("https://primary.example/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return probeSpec{
+		Key:                   probeExecutionKey{Upstream: "primary"},
+		Upstream:              "primary",
+		Compiled:              upstream.Compiled{ID: "primary", BaseURL: baseURL},
+		CredentialFingerprint: schedulerTestCredentialFingerprint,
+		Model:                 model,
+		Generation:            generation,
+		Fingerprint:           fingerprint,
+		Pools:                 pools,
+		Due:                   true,
+		Reason:                reason,
+	}
 }

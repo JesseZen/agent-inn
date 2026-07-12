@@ -290,6 +290,7 @@ func TestManagerRecoveredProbeEventUsesFinalEligibility(t *testing.T) {
 	m.circuits.RecordFailure(key, pool.CircuitBreaker)
 	now = now.Add(30 * time.Second)
 	authorityObserve(t, m, "primary", readinessTestSuccess(2))
+	checkedAt := now
 	events := m.events.Replay(0)
 	got := struct {
 		Circuit   CircuitStatus
@@ -316,7 +317,11 @@ func TestManagerRecoveredProbeEventUsesFinalEligibility(t *testing.T) {
 			"latency_ms": int64(2), "probe_state": PoolProbeStateAlert,
 			"next_probe_at": now.Format(time.RFC3339), "reason": ProbeScheduleStartup,
 		},
-		Readiness: m.poolReadiness("coding-ha", "primary"),
+		Readiness: PoolReadiness{
+			Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol,
+			Authoritative: true, Readiness: ReadinessStateReady, Eligible: true,
+			CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 2,
+		},
 		Schedule: poolProbeSchedule{
 			NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second),
 			Reason:      ProbeScheduleStable,
