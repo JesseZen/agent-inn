@@ -206,19 +206,20 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if current.UpstreamPool == next.UpstreamPool && next.UpstreamPool != "" && upstreamChanged {
-				forced := patch.Force != nil && *patch.Force
-				if !forced && !m.poolReadinessLocked(next.UpstreamPool, next.UpstreamID).Eligible {
-					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusConflict, map[string]any{"error": "target upstream is not eligible"})
-					return
-				}
 				mode := poolSwitchNormal
-				if forced {
+				if patch.Force != nil && *patch.Force {
 					mode = poolSwitchForced
 				}
-				if err := m.switchUpstreamPoolMode(next.UpstreamPool, workerUpstreamID(current), next.UpstreamID, mode); err != nil {
+				if err := m.switchPoolActiveLocked(next.UpstreamPool, next.UpstreamID, mode); err != nil {
 					m.failoverMu.Unlock()
-					writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
+					status := http.StatusInternalServerError
+					if err == errPoolTargetNotMember {
+						status = http.StatusBadRequest
+					}
+					if err == errPoolHasNoWorkers || err == errPoolTargetIneligible {
+						status = http.StatusConflict
+					}
+					writeJSON(rw, status, map[string]any{"error": redactedErrorMessage(err)})
 					return
 				}
 				m.failoverMu.Unlock()

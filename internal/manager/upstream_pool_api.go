@@ -86,16 +86,26 @@ func (m *Manager) handleUpstreamPools(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/api/upstream-pools/")
-	if name == "" || strings.Contains(name, "/") {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/upstream-pools/")
+	parts := strings.Split(suffix, "/")
+	if len(parts) > 2 || parts[0] == "" || (len(parts) == 2 && parts[1] == "") {
 		http.NotFound(rw, r)
 		return
 	}
+	name := parts[0]
 	m.mu.RLock()
 	current, exists := m.config.UpstreamPools[name]
 	candidate := cloneConfig(m.config)
 	m.mu.RUnlock()
 	if !exists {
+		http.NotFound(rw, r)
+		return
+	}
+	if len(parts) == 2 {
+		if r.Method == http.MethodPost && parts[1] == "switch" {
+			m.handleUpstreamPoolSwitch(rw, r, name)
+			return
+		}
 		http.NotFound(rw, r)
 		return
 	}

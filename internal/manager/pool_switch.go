@@ -20,6 +20,12 @@ const (
 	poolSwitchForced
 )
 
+var (
+	errPoolTargetNotMember  = errors.New("target upstream is not a pool member")
+	errPoolHasNoWorkers     = errors.New("upstream pool has no attached workers")
+	errPoolTargetIneligible = errors.New("target upstream is not eligible")
+)
+
 func (m *Manager) poolActiveUpstream(poolName string) string {
 	m.mu.RLock()
 	names := make([]string, 0, len(m.config.Workers))
@@ -98,6 +104,39 @@ func (m *Manager) validatePoolAttachmentLocked(workerName string, worker config.
 
 func (m *Manager) switchUpstreamPool(poolName string, previous string, next string) error {
 	return m.switchUpstreamPoolMode(poolName, previous, next, poolSwitchNormal)
+}
+
+func (m *Manager) switchPoolActiveLocked(poolName string, next string, mode poolSwitchMode) error {
+	m.mu.RLock()
+	pool, exists := m.config.UpstreamPools[poolName]
+	workers := make(map[string]config.WorkerConfig)
+	for name, worker := range m.config.Workers {
+		if worker.UpstreamPool == poolName {
+			workers[name] = cloneWorkerConfig(worker)
+		}
+	}
+	m.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("upstream pool %q not found", poolName)
+	}
+	if !slices.Contains(pool.Upstreams, next) {
+		return errPoolTargetNotMember
+	}
+	if len(workers) == 0 {
+		return errPoolHasNoWorkers
+	}
+	for name, worker := range workers {
+		worker.Upstream = next
+		worker.UpstreamID = next
+		if err := m.validateWorkerRuntime(name, worker); err != nil {
+			return err
+		}
+	}
+	if mode == poolSwitchNormal && !m.poolReadinessLocked(poolName, next).Eligible {
+		return errPoolTargetIneligible
+	}
+	previous := m.poolActiveUpstream(poolName)
+	return m.switchUpstreamPoolMode(poolName, previous, next, mode)
 }
 
 func (m *Manager) switchUpstreamPoolMode(poolName string, previous string, next string, mode poolSwitchMode) error {
