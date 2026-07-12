@@ -133,9 +133,11 @@ func TestManagerRejectsStaleWorkerMetricGeneration(t *testing.T) {
 	m.mu.Unlock()
 	key := poolCircuitKey("coding-ha", "primary")
 	wantCircuit := m.circuits.Status(key, pool.CircuitBreaker)
-	m.handleWorkerMetricEvent("app", authorityMetric(1, http.StatusBadGateway, &worker.UpstreamFailure{
+	metric := authorityMetric(1, http.StatusBadGateway, &worker.UpstreamFailure{
 		Kind: worker.UpstreamFailureTransport, BeforeFirstByte: true,
-	}))
+	})
+	metric.Timestamp = now
+	m.handleWorkerMetricEvent("app", metric)
 	response, err := m.metricsStore.Query(MetricsQuery{Range: MetricsRangeToday}, []WorkerSummary{{Name: "app", Port: 6767}})
 	if err != nil {
 		t.Fatal(err)
