@@ -33,6 +33,7 @@ test("proxy status opens metrics console with today's totals", async () => {
       return frame.includes("Worker Metrics") && frame.includes("Today") && frame.includes("app") && frame.includes("RPM")
     })
     expect(app.calls.getMetrics).toEqual(["today"])
+    expect(app.api.ui.dialog.size).toBe("large")
     expect(app.frame()).toContain("20 tok")
   } finally {
     await app.cleanup()

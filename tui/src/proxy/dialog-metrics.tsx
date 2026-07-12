@@ -79,6 +79,7 @@ export function DialogMetrics() {
   }
 
   onMount(() => {
+    dialog.setSize("large")
     loadMetrics("today")
   })
 
