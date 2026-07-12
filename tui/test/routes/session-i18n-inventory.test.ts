@@ -2,9 +2,9 @@ import { expect, test } from "bun:test"
 import { en } from "../../src/i18n/en"
 import { zhCN } from "../../src/i18n/zh-CN"
 
-// TICKET-002 inventory: these user-facing core-session strings have no typed
-// dictionary key yet. Keep the values exact so TICKET-001 can add parity
-// entries without re-discovering the source text.
+// TICKET-002 inventory: these user-facing core-session strings define the
+// required typed dictionary coverage. Keep the values exact so parity remains
+// tied to the source text.
 const missingCoreKeys = {
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
