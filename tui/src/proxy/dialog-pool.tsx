@@ -87,8 +87,10 @@ export function DialogPoolEditor(props: { id: string }) {
       await sdk.client.patchUpstreamPool(props.id, patch)
       await sync.bootstrap({ fatal: false })
       toast.show({ message, variant: "success" })
+      return true
     } catch (error) {
       toast.error(error)
+      return false
     }
   }
 
@@ -96,29 +98,7 @@ export function DialogPoolEditor(props: { id: string }) {
     const current = pool()
     if (!current) return []
     const status: DialogSelectOption<string>[] = [
-      {
-        title: "Automatic Failover",
-        value: "mode",
-        description: current.mode,
-        category: "Status",
-        onSelect: () => dialog.push(() => (
-          <DialogSelect
-            title={`Automatic Failover: ${current.name}`}
-            options={[
-              { title: "Active", value: "active" as const },
-              { title: "Disabled", value: "disabled" as const },
-            ].map((option) => ({
-              ...option,
-              onSelect: async () => {
-                await patchPool({ mode: option.value }, `Saved ${current.name}`)
-                dialog.pop()
-              },
-            }))}
-            current={current.mode}
-            placeholder="Select automatic failover mode..."
-          />
-        )),
-      },
+      { title: "Mode", value: "status-mode", description: current.mode, category: "Status" },
       { title: "Probe State", value: "probe-state", description: current.probe_state, category: "Status" },
       {
         title: "Next Probe",
@@ -127,6 +107,29 @@ export function DialogPoolEditor(props: { id: string }) {
         category: "Status",
       },
     ]
+    const mode: DialogSelectOption<string> = {
+      title: "Automatic Failover",
+      value: "mode",
+      description: current.mode,
+      category: "Mode",
+      onSelect: () => dialog.push(() => (
+        <DialogSelect
+          title={`Automatic Failover: ${current.name}`}
+          options={[
+            { title: "Active", value: "active" as const },
+            { title: "Disabled", value: "disabled" as const },
+          ].map((option) => ({
+            ...option,
+            onSelect: async () => {
+              const saved = await patchPool({ mode: option.value }, `Saved ${current.name}`)
+              if (saved) dialog.pop()
+            },
+          }))}
+          current={current.mode}
+          placeholder="Select automatic failover mode..."
+        />
+      )),
+    }
     const probeFields: DialogSelectOption<string>[] = PROBE_FIELDS.map((field) => ({
       title: field.title,
       value: `probe:${field.key}`,
@@ -232,6 +235,7 @@ export function DialogPoolEditor(props: { id: string }) {
     }
     return [
       ...status,
+      mode,
       ...members,
       { title: "Add Upstream", value: "add", description: "Append a fallback member", category: "Members", onSelect: async () => {
         const available = sync.data.upstreams.map((item) => item.id).filter((id) => !current.upstreams.includes(id))

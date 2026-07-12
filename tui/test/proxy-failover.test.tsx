@@ -22,7 +22,7 @@ test("pool editor shows runtime status and adaptive intervals", async () => {
     workers: ["app"],
     readiness: [],
   }
-  const app = await mountProxyApp({ upstreamPools: [pool], height: 80 })
+  const app = await mountProxyApp({ upstreamPools: [pool], height: 100 })
   try {
     await runCommand(app, "proxy.pools")
     await runCommand(app, "dialog.select.next")
@@ -32,14 +32,24 @@ test("pool editor shows runtime status and adaptive intervals", async () => {
       return app.frame().includes("Edit Pool: codex-ha")
     })
     const frame = app.frame()
-    const order = ["Status", "Automatic Failover", "Members", "Probe Policy", "Circuit Breaker", "Actions"].map((value) => frame.indexOf(value))
+    const lines = frame.split("\n").map((line) => line.trim())
+    const status = lines.indexOf("Status")
+    const statusMode = lines.findIndex((line) => line.includes("Mode active"))
+    const probeState = lines.findIndex((line) => line.includes("Probe State stable"))
+    const nextProbe = lines.findIndex((line) => line.includes("Next Probe 2026-07-13T02:45:00Z"))
+    const mode = lines.indexOf("Mode", statusMode + 1)
+    const automaticFailover = lines.findIndex((line) => line.includes("Automatic Failover active"))
+    const members = lines.indexOf("Members")
+    const categories = lines.filter((line) => ["Status", "Mode", "Members", "Probe Policy", "Circuit Breaker", "Actions"].includes(line))
     expect({
-      order: order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1]!)),
-      runtime: ["Automatic Failover active", "Probe State stable", "Next Probe 2026-07-13T02:45:00Z"].every((value) => frame.includes(value)),
+      statusRows: status >= 0 && status < statusMode && statusMode < probeState && probeState < nextProbe,
+      categories,
+      modeControl: mode < automaticFailover && automaticFailover < members,
       intervals: ["Stable Interval 900 seconds", "Alert Interval 60 seconds"].every((value) => frame.includes(value)),
     }).toEqual({
-      order: true,
-      runtime: true,
+      statusRows: true,
+      categories: ["Status", "Mode", "Members", "Probe Policy", "Circuit Breaker", "Actions"],
+      modeControl: true,
       intervals: true,
     })
 

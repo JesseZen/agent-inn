@@ -109,6 +109,7 @@ test("pool editor disables and re-enables automatic failover", async () => {
       await app.render()
       return app.frame().includes("Edit Pool: codex-ha")
     })
+    await selectPoolEditorOption(app, "Automatic Failover")
     await runCommand(app, "dialog.select.submit")
     await runCommand(app, "dialog.select.prev")
     await runCommand(app, "dialog.select.submit")
@@ -119,6 +120,53 @@ test("pool editor disables and re-enables automatic failover", async () => {
     ])
   } finally {
     await app.cleanup()
+  }
+})
+
+test("pool editor keeps mode picker open when saving fails", async () => {
+  const app = await mountProxyApp({ upstreamPools: [pool], patchUpstreamPoolError: "save failed" })
+  try {
+    await openPoolEditor(app)
+    await selectPoolEditorOption(app, "Automatic Failover")
+    await runCommand(app, "dialog.select.submit")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(() => app.calls.patchUpstreamPool.length === 1)
+    await wait(async () => {
+      await app.render()
+      return app.lines().join(" ").includes("save failed")
+    })
+    expect({
+      calls: app.calls.patchUpstreamPool,
+      picker: app.frame().includes("Automatic Failover: codex-ha"),
+    }).toEqual({
+      calls: [{ id: "codex-ha", body: { mode: "disabled" } }],
+      picker: true,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("pool editor renders paused and none without deadlines", async () => {
+  const cases: Array<{ pool: UpstreamPool; nextProbe: string }> = [
+    {
+      pool: { ...pool, mode: "disabled", probe_state: "paused", next_probe_at: undefined },
+      nextProbe: "Next Probe paused",
+    },
+    {
+      pool: { ...pool, mode: "active", probe_state: "idle", next_probe_at: undefined },
+      nextProbe: "Next Probe none",
+    },
+  ]
+  for (const item of cases) {
+    const app = await mountProxyApp({ upstreamPools: [item.pool], height: 80 })
+    try {
+      await openPoolEditor(app)
+      expect(app.frame()).toContain(item.nextProbe)
+    } finally {
+      await app.cleanup()
+    }
   }
 })
 
@@ -179,6 +227,20 @@ test("pool editor confirms force for an ineligible member", async () => {
       return app.frame().includes("Force switch")
     })
     expect(app.calls.switchUpstreamPool).toEqual([])
+    app.mockInput.pressArrow("left")
+    app.mockInput.pressEnter()
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Switch Active Upstream: codex-ha") && !app.frame().includes("Force switch")
+    })
+    expect(app.calls.switchUpstreamPool).toEqual([])
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Force switch")
+    })
+    expect(app.calls.switchUpstreamPool).toEqual([])
     app.mockInput.pressEnter()
     await wait(() => app.calls.switchUpstreamPool.length === 1)
     expect(app.calls.switchUpstreamPool).toEqual([
@@ -211,18 +273,21 @@ test("pool editor fits status and actions at narrow width", async () => {
   try {
     await openPoolEditor(app)
     const lines = app.frame().split("\n")
-    const status = lines.filter((line) => ["Automatic Failover", "Probe State", "Next Probe"].some((value) => line.includes(value)))
+    const status = lines.filter((line) => ["Mode active", "Probe State", "Next Probe"].some((value) => line.includes(value)))
+    const mode = lines.filter((line) => line.includes("Automatic Failover"))
     const actions = lines.filter((line) => ["Switch Active Upstream", "Refresh Readiness", "Delete Pool"].some((value) => line.includes(value)))
     expect({
       status: status.map((line) => line.trim()),
+      mode: mode.map((line) => line.trim()),
       actions: actions.map((line) => line.trim()),
-      withinWidth: [...status, ...actions].every((line) => Bun.stringWidth(line) <= 44),
+      withinWidth: [...status, ...mode, ...actions].every((line) => Bun.stringWidth(line) <= 44),
     }).toEqual({
       status: [
-        expect.stringContaining("Automatic Failover active"),
+        expect.stringContaining("Mode active"),
         expect.stringContaining("Probe State stable"),
         expect.stringContaining("Next Probe 2026-07-13T02:45:00Z"),
       ],
+      mode: [expect.stringContaining("Automatic Failover active")],
       actions: [
         expect.stringContaining("Switch Active Upstream"),
         expect.stringContaining("Refresh Readiness"),

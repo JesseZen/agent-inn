@@ -80,6 +80,7 @@ type ProxyHarnessInput = {
   hostedSessionsError?: string
   patchWorkerDelayMs?: number
   patchUpstreamError?: string
+  patchUpstreamPoolError?: string
   strictModuleWorkerIDs?: boolean
   metricsResponder?: (range: MetricsRangeName) => MetricsResponse | Promise<MetricsResponse>
   settings?: ProxySettingsPatch
@@ -446,6 +447,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         Pick<UpstreamPool, "mode" | "probe" | "upstreams" | "circuit_breaker">
       >
       calls.patchUpstreamPool.push({ id, body })
+      if (input.patchUpstreamPoolError) return json({ error: input.patchUpstreamPoolError }, { status: 409 })
       const current = upstreamPools.get(id)!
       const pool = {
         ...current,
