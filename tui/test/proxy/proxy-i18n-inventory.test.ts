@@ -8,6 +8,7 @@ const expectedProxyEn = {
   "proxy.dashboard.empty": "No pools, workers, upstreams, or sessions configured",
   "proxy.dashboard.inspect": "Select a relationship to inspect",
   "proxy.dashboard.move": "Move From {{source}} To {{target}}",
+  "proxy.dashboard.rebound": "Rebound {{session}} -> {{worker}}",
   "proxy.dashboard.hint": "↑↓ select ←→ collapse/expand enter open type to filter esc close",
   "proxy.dashboard.enterEditPool": "enter edit pool",
   "proxy.dashboard.enterEditUpstream": "enter edit upstream",
@@ -43,12 +44,14 @@ const expectedProxyEn = {
   "proxy.dashboard.command.pageDown": "Dashboard page down",
   "proxy.dashboard.command.open": "Open dashboard row",
   "proxy.worker.manage": "Manage Workers",
+  "proxy.worker.search": "Search workers...",
   "proxy.worker.rename": "Rename Worker",
   "proxy.worker.displayName": "Worker display name",
   "proxy.worker.logLevel": "Log Level",
   "proxy.worker.logLevelTitle": "Log Level: {{name}}",
   "proxy.worker.logLevelPlaceholder": "Select log level...",
   "proxy.worker.switchUpstream": "Switch Upstream",
+  "proxy.worker.switchUpstreamTitle": "Switch Upstream: {{name}}",
   "proxy.worker.fallbackPool": "Fallback Pool",
   "proxy.worker.manageModules": "Manage Modules",
   "proxy.worker.viewLogs": "View Logs",
@@ -56,6 +59,7 @@ const expectedProxyEn = {
   "proxy.worker.stop": "Stop Worker",
   "proxy.worker.delete": "Delete Worker",
   "proxy.worker.deleteConfirmTitle": "Delete worker",
+  "proxy.worker.deleteConfirm": "Delete {{name}}? This will remove the worker config and stop the process.",
   "proxy.worker.launcher": "Launcher",
   "proxy.worker.launcherTitle": "Launcher: {{name}}",
   "proxy.worker.launcherPlaceholder": "Select launcher...",
@@ -243,6 +247,25 @@ const expectedProxyEn = {
   "proxy.launch.commandTitle": "Launch Command",
   "proxy.launch.opened": "Opened a new worker session.",
   "proxy.launch.failed": "Launch failed",
+  "proxy.dashboard.missing": "missing",
+  "proxy.dashboard.missingKey": "missing key",
+  "proxy.worker.renameTitle": "Rename: {{name}}",
+  "proxy.worker.moduleCount": "{{modules}} req • {{hooks}} hook",
+  "proxy.upstream.noKey": "(no key)",
+  "proxy.upstream.fallbackLabel": "upstream",
+  "proxy.upstream.poolCount": "{{ready}}/{{total}} pools",
+  "proxy.pool.summary": "active: {{active}} • {{count}} workers • {{status}}",
+  "proxy.pool.activeUpstream": "active: {{upstream}}",
+  "proxy.pool.degraded": "degraded",
+  "proxy.pool.healthy": "healthy",
+  "proxy.module.fieldTitle": "{{field}}: {{module}}",
+  "proxy.hosted.labelExists": "Session label \"{{label}}\" already exists.",
+  "proxy.hosted.deleteActiveConfirm": "Delete {{session}}? This will remove the AINN session record and close its tmux window.",
+  "proxy.hosted.deleteSelectedConfirm": "Delete {{count}} selected hosted session{{plural}}?",
+  "proxy.hosted.toggleLabel": "toggle",
+  "proxy.metrics.persistenceCount": "{{count}} manager-session persistence error{{plural}}",
+  "proxy.settings.selectField": "Select {{field}}...",
+  "proxy.batch.summary": "{{worker}} • {{count}} variants",
 } as const
 
 function placeholders(value: string) {
@@ -250,7 +273,7 @@ function placeholders(value: string) {
 }
 
 test("Proxy dictionaries match the frozen static inventory", () => {
-  expect(Object.keys(proxyEn)).toHaveLength(240)
+  expect(Object.keys(proxyEn)).toHaveLength(263)
   expect(Object.keys(proxyEn).sort()).toEqual(Object.keys(expectedProxyEn).sort())
   expect(proxyEn).toEqual(expectedProxyEn)
   expect(Object.keys(proxyZhCN).sort()).toEqual(Object.keys(expectedProxyEn).sort())
