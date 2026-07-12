@@ -134,8 +134,9 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	if loaded, err := config.LoadFile(filepath.Join(resolvedConfigDir, config.ConfigFileName)); err == nil {
 		cfg = loaded
 		configLoaded = true
-		if workerCfg, ok := workerConfigByPort(cfg, port); ok {
+		if workerID, workerCfg, ok := workerConfigByPort(cfg, port); ok {
 			launcher = workerCfg.Launcher
+			*profile = workerID
 		}
 	} else {
 		configLoadErr = err
@@ -149,8 +150,6 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		WorkerPort: port,
 		Model:      *model,
 	}
-	cmd := manager.BuildLaunchCommand(opts)
-
 	if *mode == modeHostedTerminal {
 		if !configLoaded {
 			fmt.Fprintf(stderr, "failed to load config: %v\n", configLoadErr)
@@ -159,6 +158,11 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedTerminalLaunch(cfg, opts, resolvedConfigDir, *profile, *sessionID, *sessionLabel, stdout, stderr, *noAttach)
 	}
 
+	cmd, err := manager.BuildLaunchCommand(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to build launch command: %v\n", err)
+		return 1
+	}
 	if err := runTerminalLaunchCommand(cmd, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "failed to launch: %v\n", err)
 		return 1
@@ -166,13 +170,13 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func workerConfigByPort(cfg config.Config, port int) (config.WorkerConfig, bool) {
-	for _, worker := range cfg.Workers {
+func workerConfigByPort(cfg config.Config, port int) (string, config.WorkerConfig, bool) {
+	for workerID, worker := range cfg.Workers {
 		if worker.Port == port {
-			return worker, true
+			return workerID, worker, true
 		}
 	}
-	return config.WorkerConfig{}, false
+	return "", config.WorkerConfig{}, false
 }
 
 func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) error {
@@ -195,6 +199,15 @@ func runTerminalLaunchCommand(cmd []string, stdout io.Writer, stderr io.Writer) 
 // When noAttach is true, the setup runs but the attach step is skipped so the
 // caller (TUI) can decide whether to open a new terminal.
 func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, configDir string, workerName string, sessionID string, sessionLabel string, stdout io.Writer, stderr io.Writer, noAttach bool) int {
+	var freshCommand []string
+	if sessionID == "" {
+		var err error
+		freshCommand, err = manager.BuildLaunchCommand(opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to build launch command: %v\n", err)
+			return 1
+		}
+	}
 	runner := launchRunnerFactory(stdout, stderr)
 	settings := cfg.Settings
 
@@ -313,7 +326,12 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			reopenOpts.LauncherSessionID = session.LauncherSessionID
 			reopenOpts.LauncherSessionMode = manager.LauncherSessionModeResume
 		}
-		launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(reopenOpts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
+		command, err := manager.BuildLaunchCommand(reopenOpts)
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to build launch command: %v\n", err)
+			return 1
+		}
+		launchCmd := hostedSessionLaunchCommand(command, configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 		windowID, err := runner.Run(manager.TmuxCreateWindowCommandForSettings(settings, session.SessionLabel, session.Workspace, launchCmd))
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to reopen tmux window: %v\n", err)
@@ -345,7 +363,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		}
 	}
 	windowName := session.SessionLabel
-	launchCmd := hostedSessionLaunchCommand(manager.BuildLaunchCommand(opts), configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
+	launchCmd := hostedSessionLaunchCommand(freshCommand, configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
 		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, opts.Workspace, launchCmd))

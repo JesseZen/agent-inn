@@ -249,7 +249,12 @@ func TestLaunchRunnerBuffersTmuxControlOutput(t *testing.T) {
 	}
 }
 
-func TestRunLaunchRunsBuiltCommand(t *testing.T) {
+func TestRunLaunchRunsBuiltCommandWithEncodedProfile(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	writeLaunchConfig(t, configDir, filepath.Join(dir, "state"), "ainn", "ainn-host", "new-window")
+	replaceLaunchWorkerID(t, configDir, "0.02")
+
 	var got []string
 	restore := func() func() {
 		previous := launchRunnerFactory
@@ -263,15 +268,40 @@ func TestRunLaunchRunsBuiltCommand(t *testing.T) {
 	}()
 	defer restore()
 
-	code := runLaunch([]string{"--worker", "11199", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5"}, &bytes.Buffer{}, &bytes.Buffer{})
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "Codex Main", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("expected success, got %d", code)
 	}
 	if len(got) == 0 || got[0] != "codex" {
 		t.Fatalf("unexpected command: %#v", got)
 	}
-	if strings.Join(got, " ") != strings.Join([]string{"codex", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5"}, " ") {
+	if strings.Join(got, " ") != strings.Join([]string{"codex", "--profile", "ainn-x-302e3032", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5"}, " ") {
 		t.Fatalf("unexpected launch args: %#v", got)
+	}
+}
+
+func TestRunLaunchRejectsLongCodexProfileBeforeSpawn(t *testing.T) {
+	spawned := false
+	previous := launchRunnerFactory
+	launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+		return launchRunnerFunc(func(args []string) (string, error) {
+			spawned = true
+			return "", nil
+		})
+	}
+	defer func() { launchRunnerFactory = previous }()
+
+	var stderr bytes.Buffer
+	workerID := strings.Repeat("a", 244)
+	code := runLaunch([]string{"--worker", "11199", "--profile", workerID}, &bytes.Buffer{}, &stderr)
+	if code == 0 {
+		t.Fatal("expected long profile to fail")
+	}
+	if spawned {
+		t.Fatal("Codex must not be spawned for an invalid derived profile")
+	}
+	if !strings.Contains(stderr.String(), "244 bytes; limit is 243 bytes") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 }
 
@@ -651,11 +681,14 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	codexCmd := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{
+	codexCmd, err := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{
 		Profile:    "cli-openai",
 		Workspace:  "/tmp/work",
 		WorkerPort: 11199,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	launchCmd := hostedTestLaunchCommand(t, configDir, "hs_1", codexCmd...)
 	want := [][]string{
 		manager.TmuxDetectCommand(),
@@ -2224,11 +2257,12 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	}
 }
 
-func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
+func TestRunLaunchHostedTerminalReopensStaleCodexSessionWithEncodedProfile(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
+	replaceLaunchWorkerID(t, configDir, "0.02")
 
 	var got [][]string
 	restore := func() func() {
@@ -2255,7 +2289,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel:      "solve problem A",
-		WorkerID:          "cli-openai",
+		WorkerID:          "0.02",
 		WorkerName:        "Codex Main",
 		WorkerPort:        9999,
 		Workspace:         "/tmp/work",
@@ -2271,7 +2305,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "0.02", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected success, got %d: %s", code, stderr.String())
 	}
@@ -2310,7 +2344,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "resume", "--profile", "ainn-x-302e3032", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5", "019e7c18-0ee7-7ff2-bc82-9c410511ede3")...),
 		manager.TmuxAttachCommand(),
 	)
 	if !reflect.DeepEqual(got, want) {
@@ -2318,11 +2352,12 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSession(t *testing.T) {
 	}
 }
 
-func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) {
+func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSessionWithEncodedProfile(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn", "ainn-host", "new-window")
+	replaceLaunchWorkerID(t, configDir, "0.02")
 
 	var got [][]string
 	restore := func() func() {
@@ -2349,7 +2384,8 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
 	created, err := registry.Create(manager.HostedSessionRecord{
 		SessionLabel: "solve problem A",
-		WorkerName:   "cli-openai",
+		WorkerID:     "0.02",
+		WorkerName:   "Codex Main",
 		WorkerPort:   11199,
 		Workspace:    "/tmp/work",
 		AddDirs:      []string{"/tmp/shared"},
@@ -2363,7 +2399,7 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 	}
 
 	var stderr bytes.Buffer
-	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "cli-openai", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199", "--profile", "0.02", "--mode", "hosted-terminal", "--session-id", created.SessionID}, &bytes.Buffer{}, &stderr)
 	if code != 0 {
 		t.Fatalf("expected success, got %d: %s", code, stderr.String())
 	}
@@ -2405,7 +2441,7 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSession(t *testing.T) 
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
-		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "--profile", "cli-openai", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5")...),
+		append([]string{"tmux", "-L", "ainn", "new-window", "-t", "ainn-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, created.SessionID, "codex", "--profile", "ainn-x-302e3032", "--cd", "/tmp/work", "--add-dir", "/tmp/shared", "--model", "gpt-5.5")...),
 		manager.TmuxAttachCommand(),
 	)
 	if !reflect.DeepEqual(got, want) {
@@ -3122,6 +3158,19 @@ upstreams:
 	}
 }
 
+func replaceLaunchWorkerID(t *testing.T, configDir string, workerID string) {
+	t.Helper()
+	path := filepath.Join(configDir, config.ConfigFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := strings.Replace(string(data), "  cli-openai:\n", "  \""+workerID+"\":\n", 1)
+	if err := os.WriteFile(path, []byte(next), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func appendHostedPopupKeyToLaunchConfig(t *testing.T, configDir string, keyLine string) {
 	t.Helper()
 	path := filepath.Join(configDir, "config.yaml")
@@ -3136,7 +3185,10 @@ func appendHostedPopupKeyToLaunchConfig(t *testing.T, configDir string, keyLine 
 }
 
 func TestRenderCodexLaunchCommand(t *testing.T) {
-	got := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{Profile: "11199", WorkerPort: 11199})
+	got, err := manager.BuildCodexLaunchCommand(manager.CodexLaunchOptions{Profile: "11199", WorkerPort: 11199})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("unexpected launch command: %#v", got)
 	}

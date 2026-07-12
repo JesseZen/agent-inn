@@ -7,6 +7,8 @@ import (
 	"github.com/jesse/agent-inn/internal/constants"
 )
 
+const claudeCodeLauncherName = "claudecode"
+
 type CodexLaunchOptions struct {
 	Profile             string
 	Workspace           string
@@ -35,12 +37,16 @@ type LaunchOptions struct {
 	LauncherSessionMode LauncherSessionMode
 }
 
-func buildCodexLaunchCommand(opts CodexLaunchOptions) []string {
+func buildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
+	profile, err := CodexProfileName(opts.Profile)
+	if err != nil {
+		return nil, err
+	}
 	cmd := []string{"codex"}
 	if opts.LauncherSessionMode == LauncherSessionModeResume {
 		cmd = append(cmd, "resume")
 	}
-	cmd = append(cmd, "--profile", opts.Profile)
+	cmd = append(cmd, "--profile", profile)
 	if opts.Workspace != "" {
 		cmd = append(cmd, "--cd", opts.Workspace)
 	}
@@ -56,15 +62,15 @@ func buildCodexLaunchCommand(opts CodexLaunchOptions) []string {
 	if opts.LauncherSessionMode == LauncherSessionModeResume {
 		cmd = append(cmd, opts.LauncherSessionID)
 	}
-	return cmd
+	return cmd, nil
 }
 
-func BuildCodexLaunchCommand(opts CodexLaunchOptions) []string {
+func BuildCodexLaunchCommand(opts CodexLaunchOptions) ([]string, error) {
 	return buildCodexLaunchCommand(opts)
 }
 
-func BuildLaunchCommand(opts LaunchOptions) []string {
-	if opts.Launcher == "claudecode" {
+func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
+	if opts.Launcher == claudeCodeLauncherName {
 		cmd := []string{
 			"env",
 			"ANTHROPIC_BASE_URL=http://" + constants.LocalhostAddr + ":" + strconv.Itoa(opts.WorkerPort),
@@ -84,7 +90,7 @@ func BuildLaunchCommand(opts LaunchOptions) []string {
 		if opts.Model != "" {
 			cmd = append(cmd, "--model", opts.Model)
 		}
-		return cmd
+		return cmd, nil
 	}
 	return buildCodexLaunchCommand(CodexLaunchOptions{
 		Profile:             opts.Profile,

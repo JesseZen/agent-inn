@@ -2332,6 +2332,7 @@ func TestManagerSyncsCodexProfilesOnStartup(t *testing.T) {
 			Plugins: testPluginDefinitions(),
 			Workers: map[string]config.WorkerConfig{
 				"cli-openai": {Port: 11199, Upstream: "openai"},
+				"0.02":       {Port: 11200, Upstream: "openai"},
 			},
 			Upstreams: map[string]config.UpstreamProfile{
 				"openai": {BaseURL: "https://api.openai.com/v1", APIFormat: "responses"},
@@ -2351,6 +2352,45 @@ func TestManagerSyncsCodexProfilesOnStartup(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `base_url = 'http://127.0.0.1:11199'`) {
 		t.Fatalf("unexpected profile file: %s", data)
+	}
+	encoded, err := os.ReadFile(filepath.Join(home, ".codex", "ainn-x-302e3032.config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `base_url = 'http://127.0.0.1:11200'`) {
+		t.Fatalf("unexpected encoded profile file: %s", encoded)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "0.02.config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("raw invalid profile file must not be written, stat error: %v", err)
+	}
+}
+
+func TestManagerReportsLongCodexProfileWithoutWriting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workerID := strings.Repeat("a", 244)
+	m := New(Config{
+		Config: config.Config{
+			Plugins: testPluginDefinitions(),
+			Workers: map[string]config.WorkerConfig{
+				workerID: {Port: 11199, Upstream: "openai", Launcher: "codex"},
+			},
+			Upstreams: map[string]config.UpstreamProfile{
+				"openai": {BaseURL: "https://api.openai.com/v1", APIFormat: "responses"},
+			},
+		},
+	})
+
+	type statusView struct {
+		LastSaveError string
+	}
+	got := statusView{LastSaveError: m.configStatus.LastSaveError}
+	want := statusView{LastSaveError: `worker "` + workerID + `" derived Codex profile "` + workerID + `" is 244 bytes; limit is 243 bytes`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
+		t.Fatalf("profile directory must not be created, stat error: %v", err)
 	}
 }
 

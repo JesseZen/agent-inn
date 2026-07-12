@@ -7,13 +7,16 @@ import (
 )
 
 func TestBuildCodexLaunchCommandUsesOpenAIBaseURLOutput(t *testing.T) {
-	cmd := buildCodexLaunchCommand(CodexLaunchOptions{
+	cmd, err := buildCodexLaunchCommand(CodexLaunchOptions{
 		Profile:    "ainn-proxy",
 		Workspace:  "/tmp/work",
 		AddDirs:    []string{"/tmp/shared"},
 		WorkerPort: 11199,
 		Model:      "gpt-5.5",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := strings.Join(cmd, " ")
 	if !strings.Contains(got, "--profile ainn-proxy") {
 		t.Fatalf("missing profile flag: %s", got)
@@ -29,6 +32,31 @@ func TestBuildCodexLaunchCommandUsesOpenAIBaseURLOutput(t *testing.T) {
 	}
 }
 
+func TestBuildCodexLaunchCommandEncodesWorkerID(t *testing.T) {
+	cmd, err := BuildCodexLaunchCommand(CodexLaunchOptions{Profile: "0.02", WorkerPort: 11199})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"codex", "--profile", "ainn-x-302e3032"}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("got %#v, want %#v", cmd, want)
+	}
+}
+
+func TestBuildCodexLaunchCommandRejectsLongProfile(t *testing.T) {
+	workerID := strings.Repeat("a", 244)
+	cmd, err := BuildCodexLaunchCommand(CodexLaunchOptions{Profile: workerID, WorkerPort: 11199})
+	if err == nil {
+		t.Fatalf("expected long profile to fail, got %#v", cmd)
+	}
+	if cmd != nil {
+		t.Fatalf("failed command must be nil, got %#v", cmd)
+	}
+	if !strings.Contains(err.Error(), "244 bytes; limit is 243 bytes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRenderCodexLaunchCommandQuotesArguments(t *testing.T) {
 	got := renderCodexLaunchCommand([]string{"codex", "--cd", "/tmp/my work"})
 	if !strings.Contains(got, `"\/tmp/my work"`) && !strings.Contains(got, `"/tmp/my work"`) {
@@ -37,12 +65,15 @@ func TestRenderCodexLaunchCommandQuotesArguments(t *testing.T) {
 }
 
 func TestBuildClaudeCodeLaunchCommandInjectsManagedAnthropicEnv(t *testing.T) {
-	cmd := BuildLaunchCommand(LaunchOptions{
+	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:   "claudecode",
 		AddDirs:    []string{"/tmp/shared"},
 		WorkerPort: 11199,
 		Model:      "claude-opus-4-8",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"env",
 		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
@@ -60,7 +91,10 @@ func TestBuildClaudeCodeLaunchCommandInjectsManagedAnthropicEnv(t *testing.T) {
 }
 
 func TestBuildClaudeCodeExternalLaunchKeepsAgentView(t *testing.T) {
-	cmd := BuildLaunchCommand(LaunchOptions{Launcher: "claudecode", WorkerPort: 11199})
+	cmd, err := BuildLaunchCommand(LaunchOptions{Launcher: "claudecode", Profile: "中文", WorkerPort: 11199})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"env",
 		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",
@@ -74,9 +108,9 @@ func TestBuildClaudeCodeExternalLaunchKeepsAgentView(t *testing.T) {
 }
 
 func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
-	cmd := BuildLaunchCommand(LaunchOptions{
+	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "codex",
-		Profile:             "cli-openai",
+		Profile:             "0.02",
 		Workspace:           "/tmp/work",
 		AddDirs:             []string{"/tmp/shared"},
 		WorkerPort:          11199,
@@ -84,11 +118,14 @@ func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 		LauncherSessionID:   "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
 		LauncherSessionMode: LauncherSessionModeResume,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"codex",
 		"resume",
 		"--profile",
-		"cli-openai",
+		"ainn-x-302e3032",
 		"--cd",
 		"/tmp/work",
 		"--add-dir",
@@ -103,7 +140,7 @@ func TestBuildLaunchCommandResumesCodexSession(t *testing.T) {
 }
 
 func TestBuildLaunchCommandResumesClaudeCodeSession(t *testing.T) {
-	cmd := BuildLaunchCommand(LaunchOptions{
+	cmd, err := BuildLaunchCommand(LaunchOptions{
 		Launcher:            "claudecode",
 		AddDirs:             []string{"/tmp/shared"},
 		WorkerPort:          11199,
@@ -111,6 +148,9 @@ func TestBuildLaunchCommandResumesClaudeCodeSession(t *testing.T) {
 		LauncherSessionID:   "9e98a56c-7224-4bf2-9263-b4e470e9673d",
 		LauncherSessionMode: LauncherSessionModeResume,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []string{
 		"env",
 		"ANTHROPIC_BASE_URL=http://127.0.0.1:11199",

@@ -1,9 +1,12 @@
 package manager
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/constants"
@@ -13,7 +16,11 @@ import (
 const (
 	codexLaunchProviderName = "OpenAI"
 	codexLaunchWireAPI      = "responses"
+	codexProfilePrefix      = "ainn-x-"
+	codexProfileMaxBytes    = 243
 )
+
+var codexPassthroughProfilePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 
 type codexProfileFile struct {
 	ModelProvider  string                       `toml:"model_provider"`
@@ -24,6 +31,20 @@ type codexProfileEntry struct {
 	Name    string `toml:"name"`
 	BaseURL string `toml:"base_url"`
 	WireAPI string `toml:"wire_api,omitempty"`
+}
+
+func CodexProfileName(workerID string) (string, error) {
+	if workerID == "" {
+		return "", fmt.Errorf("Codex worker ID is empty")
+	}
+	profile := workerID
+	if !codexPassthroughProfilePattern.MatchString(workerID) || strings.HasPrefix(workerID, codexProfilePrefix) {
+		profile = codexProfilePrefix + hex.EncodeToString([]byte(workerID))
+	}
+	if len(profile) > codexProfileMaxBytes {
+		return profile, fmt.Errorf("worker %q derived Codex profile %q is %d bytes; limit is %d bytes", workerID, profile, len(profile), codexProfileMaxBytes)
+	}
+	return profile, nil
 }
 
 func writeCodexProfileFile(name string, profile config.UpstreamProfile) error {
@@ -48,11 +69,23 @@ func codexProfilePath(name string) string {
 }
 
 func syncCodexProfileFiles(cfg config.Config) error {
+	profileNames := make(map[string]string, len(cfg.Workers))
+	for name, worker := range cfg.Workers {
+		profileName := name
+		if worker.Launcher != claudeCodeLauncherName {
+			var err error
+			profileName, err = CodexProfileName(name)
+			if err != nil {
+				return err
+			}
+		}
+		profileNames[name] = profileName
+	}
 	for name, worker := range cfg.Workers {
 		profile := cfg.Upstreams[worker.Upstream]
 		profile.BaseURL = fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, worker.Port)
-		if err := writeCodexProfileFile(name, profile); err != nil {
-			return fmt.Errorf("write profile %s: %w", name, err)
+		if err := writeCodexProfileFile(profileNames[name], profile); err != nil {
+			return fmt.Errorf("write profile %s: %w", profileNames[name], err)
 		}
 	}
 	return nil
