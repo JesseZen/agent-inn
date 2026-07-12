@@ -20,3 +20,29 @@ func TestRedactSecretQueryParameters(t *testing.T) {
 		t.Fatalf("query secret leaked after redaction: %s", got)
 	}
 }
+
+func TestRedactCommonCredentialForms(t *testing.T) {
+	cases := []struct {
+		name   string
+		line   string
+		secret string
+	}{
+		{name: "environment api key", line: "OPENAI_API_KEY=sk-env", secret: "sk-env"},
+		{name: "header api key", line: "X-Api-Key: sk-header", secret: "sk-header"},
+		{name: "basic authorization", line: "Authorization: Basic dXNlcjpwYXNz", secret: "dXNlcjpwYXNz"},
+		{name: "json access token", line: `{"access_token":"access-secret"}`, secret: "access-secret"},
+		{name: "url password", line: "https://user:password-secret@example.com/v1", secret: "password-secret"},
+		{name: "cookie", line: "Cookie: session=secret-cookie", secret: "secret-cookie"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Redact(tc.line)
+			if strings.Contains(got, tc.secret) {
+				t.Fatalf("secret leaked: %q", got)
+			}
+			if !strings.Contains(got, "***REDACTED***") {
+				t.Fatalf("redaction marker missing: %q", got)
+			}
+		})
+	}
+}
