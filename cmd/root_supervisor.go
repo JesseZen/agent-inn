@@ -22,6 +22,7 @@ const (
 	rootCrashPathEnvVar    = "AINN_CRASH_PATH"
 	rootSupervisorFDEnvVar = "AINN_SUPERVISOR_FD"
 	rootSupervisorFD       = 3
+	rootStderrBufferBytes  = 32 * 1024
 )
 
 var (
@@ -50,6 +51,13 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 		return logging.RootRunExit{}, fmt.Errorf("create root supervisor pipe: %w", err)
 	}
 	defer supervisorWrite.Close()
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		_ = supervisorRead.Close()
+		return logging.RootRunExit{}, fmt.Errorf("create root stderr pipe: %w", err)
+	}
+	defer stderrRead.Close()
+	defer stderrWrite.Close()
 
 	logDir := expandHome(opts.Config.Settings.LogDir)
 	artifact, _, err := logging.OpenCrashArtifact(logDir, logging.RootRunMetadata{
@@ -75,8 +83,9 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 	cmd := exec.Command(executable, opts.ProcessArgs...)
 	cmd.Stdin = opts.Stdin
 	cmd.Stdout = opts.Stdout
-	cmd.Stderr = io.MultiWriter(artifact.Writer(), terminalStderr)
+	cmd.Stderr = stderrWrite
 	cmd.ExtraFiles = []*os.File{supervisorRead}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = rootProcessEnvironment(os.Environ(), map[string]string{
 		rootProcessEnvVar:      "1",
 		rootRunIDEnvVar:        runID,
@@ -103,7 +112,30 @@ func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {
 		return exit, err
 	}
 	_ = supervisorRead.Close()
+	_ = stderrWrite.Close()
 	artifact.Logger().Info(logging.EventRootSupervisorChild, "child_pid", cmd.Process.Pid)
+	stderrResult := make(chan error, 1)
+	go func() {
+		defer stderrRead.Close()
+		buffer := make([]byte, rootStderrBufferBytes)
+		for {
+			n, readErr := stderrRead.Read(buffer)
+			if n > 0 {
+				if _, err := artifact.Writer().Write(buffer[:n]); err != nil {
+					stderrResult <- err
+					return
+				}
+				_, _ = terminalStderr.Write(buffer[:n])
+			}
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					readErr = nil
+				}
+				stderrResult <- readErr
+				return
+			}
+		}
+	}()
 
 	waitResult := make(chan error, 1)
 	go func() {
@@ -124,12 +156,31 @@ waitForChild:
 				forwardedSignal = signalName
 			}
 			artifact.Logger().Warn(logging.EventRootSupervisorSignal, "signal", signalName, "child_pid", cmd.Process.Pid)
-			if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			signalValue := sig.(syscall.Signal)
+			if err := syscall.Kill(-cmd.Process.Pid, signalValue); err != nil && !errors.Is(err, syscall.ESRCH) {
 				artifact.Logger().Error(logging.EventRootSupervisorSignal, "signal", signalName, "child_pid", cmd.Process.Pid, "err", err.Error())
 			}
 		case waitErr = <-waitResult:
 			break waitForChild
 		}
+	}
+	groupErr := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if errors.Is(groupErr, syscall.ESRCH) {
+		groupErr = nil
+	}
+	if groupErr != nil {
+		_ = stderrRead.Close()
+	}
+	stderrErr := <-stderrResult
+	if errors.Is(stderrErr, os.ErrClosed) && groupErr != nil {
+		stderrErr = nil
+	}
+	runErr := waitErr
+	if groupErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("terminate root process group: %w", groupErr))
+	}
+	if stderrErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("capture root stderr: %w", stderrErr))
 	}
 
 	completedAt := rootSupervisorNow()
@@ -141,10 +192,10 @@ waitForChild:
 		DurationMilliseconds: completedAt.Sub(startedAt).Milliseconds(),
 		CompletedAt:          completedAt,
 	}
-	if waitErr != nil {
+	if runErr != nil {
 		exit.ExitCode = -1
 		exit.Reason = logging.RootRunExitReasonWaitError
-		exit.Error = waitErr.Error()
+		exit.Error = runErr.Error()
 		var exitError *exec.ExitError
 		if errors.As(waitErr, &exitError) && exitError.ProcessState != nil {
 			exit.ExitCode = exitError.ProcessState.ExitCode()
@@ -163,7 +214,7 @@ waitForChild:
 	if err := artifact.Close(); err != nil {
 		return exit, err
 	}
-	return exit, waitErr
+	return exit, runErr
 }
 
 func rootProcessEnvironment(current []string, values map[string]string) []string {

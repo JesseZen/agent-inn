@@ -18,11 +18,17 @@ import (
 )
 
 const rootSupervisorHelperEnv = "AINN_TEST_ROOT_SUPERVISOR_HELPER"
+const rootSupervisorDescendantPIDEnv = "AINN_TEST_ROOT_SUPERVISOR_DESCENDANT_PID"
 
 func TestRootSupervisorHelperProcess(t *testing.T) {
 	mode := os.Getenv(rootSupervisorHelperEnv)
 	if mode == "" {
 		return
+	}
+	if mode == "hold-stderr" {
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 	fmtPID := strconv.Itoa(os.Getpid()) + "\n"
 	_, _ = os.Stdout.WriteString(fmtPID)
@@ -33,6 +39,19 @@ func TestRootSupervisorHelperProcess(t *testing.T) {
 	case "exit23":
 		os.Exit(23)
 	case "sigkill":
+		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		select {}
+	case "sigkill-with-descendant":
+		descendant := exec.Command(os.Args[0], "-test.run=TestRootSupervisorHelperProcess", "--")
+		descendant.Env = rootProcessEnvironment(os.Environ(), map[string]string{rootSupervisorHelperEnv: "hold-stderr"})
+		descendant.Stderr = os.Stderr
+		if err := descendant.Start(); err != nil {
+			os.Exit(96)
+		}
+		pidPath := os.Getenv(rootSupervisorDescendantPIDEnv)
+		if err := os.WriteFile(pidPath, []byte(strconv.Itoa(descendant.Process.Pid)), 0600); err != nil {
+			os.Exit(95)
+		}
 		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
 		select {}
 	default:
@@ -132,6 +151,84 @@ func TestRootSupervisorRecordsSignaledChild(t *testing.T) {
 		t.Fatalf("root exit mismatch:\n got %#v\nwant %#v", exit, want)
 	}
 	assertSupervisorEvidence(t, rootSupervisorLogDir(t), stderr.String(), "reason=signal", "signal=killed", "exit_code=-1")
+}
+
+func TestRootSupervisorDoesNotWaitForDescendantStderr(t *testing.T) {
+	startedAt := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(3 * time.Second)
+	restoreClock := setRootSupervisorClockForTest(startedAt, completedAt)
+	defer restoreClock()
+	t.Setenv(rootSupervisorHelperEnv, "sigkill-with-descendant")
+	descendantPIDPath := filepath.Join(t.TempDir(), "descendant.pid")
+	t.Setenv(rootSupervisorDescendantPIDEnv, descendantPIDPath)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	opts := rootSupervisorTestOptions(t, &stdout, &stderr)
+	type result struct {
+		exit logging.RootRunExit
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		exit, err := runSupervisedRoot(opts)
+		resultCh <- result{exit: exit, err: err}
+	}()
+
+	var descendantPID int
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(descendantPIDPath)
+		if err == nil {
+			descendantPID, err = strconv.Atoi(string(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if descendantPID == 0 {
+		t.Fatal("helper did not record descendant pid")
+	}
+
+	select {
+	case got := <-resultCh:
+		if got.err == nil {
+			t.Fatal("expected signaled child error")
+		}
+		childPID, err := strconv.Atoi(strings.TrimSpace(stdout.String()))
+		if err != nil {
+			t.Fatalf("parse helper pid %q: %v", stdout.String(), err)
+		}
+		want := logging.RootRunExit{
+			ChildPID:             childPID,
+			ExitCode:             -1,
+			Reason:               logging.RootRunExitReasonSignal,
+			Error:                "signal: killed",
+			Signal:               "killed",
+			DurationMilliseconds: 3000,
+			CompletedAt:          completedAt,
+		}
+		if !reflect.DeepEqual(got.exit, want) {
+			t.Fatalf("root exit mismatch:\n got %#v\nwant %#v", got.exit, want)
+		}
+	case <-time.After(time.Second):
+		_ = syscall.Kill(descendantPID, syscall.SIGKILL)
+		<-resultCh
+		t.Fatal("supervisor waited for stderr held by a descendant")
+	}
+
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(descendantPID, 0); errors.Is(err, syscall.ESRCH) {
+			assertSupervisorEvidence(t, rootSupervisorLogDir(t), stderr.String(), "reason=signal", "signal=killed", "exit_code=-1")
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = syscall.Kill(descendantPID, syscall.SIGKILL)
+	t.Fatal("supervisor left the root descendant running")
 }
 
 func rootSupervisorTestOptions(t *testing.T, stdout *bytes.Buffer, stderr *bytes.Buffer) RootOptions {
