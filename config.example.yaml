@@ -82,6 +82,10 @@ upstreams:
 # every worker using the pool when its current upstream circuit opens.
 upstream_pools:
     codex-ha:
+        mode: active
+        probe:
+            stable_interval_seconds: 900
+            alert_interval_seconds: 60
         upstreams:
             - joycode
             - openrouter

@@ -30,7 +30,20 @@ const (
 	DefaultCircuitFailureThreshold         = 3
 	DefaultCircuitRecoverySuccessThreshold = 2
 	DefaultCircuitRecoveryWaitSeconds      = 60
+
+	UpstreamPoolModeActive   UpstreamPoolMode = "active"
+	UpstreamPoolModeDisabled UpstreamPoolMode = "disabled"
+
+	DefaultPoolProbeStableIntervalSeconds = 900
+	DefaultPoolProbeAlertIntervalSeconds  = 60
 )
+
+type UpstreamPoolMode string
+
+type PoolProbeConfig struct {
+	StableIntervalSeconds int `yaml:"stable_interval_seconds" json:"stable_interval_seconds"`
+	AlertIntervalSeconds  int `yaml:"alert_interval_seconds" json:"alert_interval_seconds"`
+}
 
 type CircuitBreakerConfig struct {
 	FailureThreshold         int `yaml:"failure_threshold" json:"failure_threshold"`
@@ -40,7 +53,9 @@ type CircuitBreakerConfig struct {
 
 type UpstreamPool struct {
 	Name           string               `yaml:"name,omitempty" json:"name,omitempty"`
+	Mode           UpstreamPoolMode     `yaml:"mode" json:"mode"`
 	Upstreams      []string             `yaml:"upstreams" json:"upstreams"`
+	Probe          PoolProbeConfig      `yaml:"probe" json:"probe"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
 }
 
@@ -269,6 +284,15 @@ func (c *Config) ApplyDefaults() {
 		if pool.Name == "" {
 			pool.Name = name
 		}
+		if pool.Mode == "" {
+			pool.Mode = UpstreamPoolModeActive
+		}
+		if pool.Probe.StableIntervalSeconds == 0 {
+			pool.Probe.StableIntervalSeconds = DefaultPoolProbeStableIntervalSeconds
+		}
+		if pool.Probe.AlertIntervalSeconds == 0 {
+			pool.Probe.AlertIntervalSeconds = DefaultPoolProbeAlertIntervalSeconds
+		}
 		if pool.CircuitBreaker.FailureThreshold == 0 {
 			pool.CircuitBreaker.FailureThreshold = DefaultCircuitFailureThreshold
 		}
@@ -304,6 +328,15 @@ func (c Config) Validate() error {
 	sort.Strings(poolNames)
 	for _, name := range poolNames {
 		pool := c.UpstreamPools[name]
+		if pool.Mode != UpstreamPoolModeActive && pool.Mode != UpstreamPoolModeDisabled {
+			return fmt.Errorf("upstream pool %q mode must be active or disabled", name)
+		}
+		if pool.Probe.AlertIntervalSeconds < DefaultPoolProbeAlertIntervalSeconds {
+			return fmt.Errorf("upstream pool %q alert_interval_seconds must be at least %d", name, DefaultPoolProbeAlertIntervalSeconds)
+		}
+		if pool.Probe.StableIntervalSeconds < pool.Probe.AlertIntervalSeconds {
+			return fmt.Errorf("upstream pool %q stable_interval_seconds must be greater than or equal to alert_interval_seconds", name)
+		}
 		if len(pool.Upstreams) == 0 {
 			return fmt.Errorf("upstream pool %q requires at least one upstream", name)
 		}

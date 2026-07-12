@@ -102,6 +102,10 @@ workers:
     upstream_pool: coding-ha
 upstream_pools:
   coding-ha:
+    mode: active
+    probe:
+      stable_interval_seconds: 900
+      alert_interval_seconds: 60
     upstreams:
       - primary
       - backup
@@ -147,7 +151,12 @@ upstreams:
 	}{
 		Pool: UpstreamPool{
 			Name:      "coding-ha",
+			Mode:      UpstreamPoolModeActive,
 			Upstreams: []string{"primary", "backup"},
+			Probe: PoolProbeConfig{
+				StableIntervalSeconds: 900,
+				AlertIntervalSeconds:  60,
+			},
 			CircuitBreaker: CircuitBreakerConfig{
 				FailureThreshold:         5,
 				RecoverySuccessThreshold: 3,
@@ -176,6 +185,52 @@ upstreams:
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected pool routing config:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestPoolProbeDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+upstream_pools:
+  coding-ha:
+    upstreams:
+      - primary
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_success_threshold: 3
+      recovery_wait_seconds: 90
+upstreams:
+  primary:
+    base_url: https://primary.example/v1
+    protocol_probe:
+      model: gpt-5-mini
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := cfg.UpstreamPools["coding-ha"]
+	want := UpstreamPool{
+		Name:      "coding-ha",
+		Mode:      UpstreamPoolModeActive,
+		Upstreams: []string{"primary"},
+		Probe: PoolProbeConfig{
+			StableIntervalSeconds: 900,
+			AlertIntervalSeconds:  60,
+		},
+		CircuitBreaker: CircuitBreakerConfig{
+			FailureThreshold:         5,
+			RecoverySuccessThreshold: 3,
+			RecoveryWaitSeconds:      90,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pool defaults:\n got %#v\nwant %#v", got, want)
 	}
 }
 
@@ -581,6 +636,34 @@ func TestPoolMemberRequiresProtocolProbeModel(t *testing.T) {
 	want := []string{`upstream pool "coding-ha" member "backup" requires protocol_probe.model`}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected validation errors:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestPoolProbeValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		pool UpstreamPool
+		want string
+	}{
+		{"invalid mode", UpstreamPool{Mode: "paused", Probe: PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 60}}, `upstream pool "coding-ha" mode must be active or disabled`},
+		{"alert below scheduler", UpstreamPool{Mode: UpstreamPoolModeActive, Probe: PoolProbeConfig{StableIntervalSeconds: 900, AlertIntervalSeconds: 59}}, `upstream pool "coding-ha" alert_interval_seconds must be at least 60`},
+		{"stable below alert", UpstreamPool{Mode: UpstreamPoolModeActive, Probe: PoolProbeConfig{StableIntervalSeconds: 60, AlertIntervalSeconds: 120}}, `upstream pool "coding-ha" stable_interval_seconds must be greater than or equal to alert_interval_seconds`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.pool.Upstreams = []string{"primary"}
+			cfg := Config{
+				Upstreams: map[string]UpstreamProfile{
+					"primary": {ProtocolProbe: ProtocolProbeConfig{Model: "probe-primary"}},
+				},
+				UpstreamPools: map[string]UpstreamPool{"coding-ha": test.pool},
+			}
+			cfg.ApplyDefaults()
+			got := cfg.Validate()
+			if got == nil || got.Error() != test.want {
+				t.Fatalf("unexpected validation error: got %v want %q", got, test.want)
+			}
+		})
 	}
 }
 
