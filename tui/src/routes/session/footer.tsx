@@ -6,6 +6,7 @@ import { useConnected } from "../../component/use-connected"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
 import { useLanguage } from "../../context/language"
+import { Locale } from "../../util/locale"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -20,7 +21,8 @@ export function Footer() {
   })
   const directory = useDirectory()
   const connected = useConnected()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
 
   const [store, setStore] = createStore({
     welcome: false,
@@ -66,14 +68,14 @@ export function Footer() {
               <text fg={theme.warning}>
                 <span style={{ fg: theme.warning }}>△</span>{" "}
                 {t("session.permissionCount", {
-                  count: permissions().length,
+                  count: Locale.number(permissions().length, language.locale),
                   plural: permissions().length > 1 ? "s" : "",
                 })}
               </text>
             </Show>
             <text fg={theme.text}>
               <span style={{ fg: lsp().length > 0 ? theme.success : theme.textMuted }}>•</span>{" "}
-              {t("session.lspCount", { count: lsp().length })}
+              {t("session.lspCount", { count: Locale.number(lsp().length, language.locale) })}
             </text>
             <Show when={mcp()}>
               <text fg={theme.text}>
@@ -85,7 +87,7 @@ export function Footer() {
                     <span style={{ fg: theme.success }}>⊙ </span>
                   </Match>
                 </Switch>
-                {t("session.mcpCount", { count: mcp() })}
+                {t("session.mcpCount", { count: Locale.number(mcp(), language.locale) })}
               </text>
             </Show>
             <text fg={theme.textMuted}>/status</text>

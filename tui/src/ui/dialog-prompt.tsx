@@ -168,7 +168,7 @@ export function DialogPrompt(props: DialogPromptProps) {
           }}
         />
         <Show when={props.busy}>
-          <Spinner color={theme.textMuted}>{props.busyText ?? "Working..."}</Spinner>
+          <Spinner color={theme.textMuted}>{props.busyText ?? t("dialog.working")}</Spinner>
         </Show>
         <Show when={props.directoryCompletion}>
           <box flexDirection="column">

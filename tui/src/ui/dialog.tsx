@@ -246,7 +246,8 @@ export function useDialog() {
 
 export function EscHint(props: { dialog: DialogContext }) {
   const { theme } = useTheme()
-  const label = () => (props.dialog.stack.length > 1 ? "back" : "close")
+  const { t } = useLanguage()
+  const label = () => (props.dialog.stack.length > 1 ? t("dialog.backHint") : t("dialog.closeHint"))
   return (
     <box onMouseUp={() => props.dialog.pop()}>
       <text fg={theme.textMuted}>

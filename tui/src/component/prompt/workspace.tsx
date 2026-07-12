@@ -42,7 +42,7 @@ export function usePromptWorkspace(sessionID?: string) {
       setCreating(false)
       toast.show({
         title: t("workspace.createFailed"),
-        message: errorMessage(result.error ?? "no response"),
+        message: errorMessage(result.error ?? t("workspace.noResponse")),
         variant: "error",
       })
       return
@@ -75,7 +75,7 @@ export function usePromptWorkspace(sessionID?: string) {
 
     const workspace =
       selection.type === "none"
-        ? { id: null, name: "local project" }
+        ? { id: null, name: t("workspace.localProject") }
         : selection.type === "existing"
           ? { id: selection.workspaceID, name: selection.workspaceName }
           : await create(selection)

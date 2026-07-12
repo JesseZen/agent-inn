@@ -171,7 +171,7 @@ export function Prompt(props: PromptProps) {
   const { theme, syntax } = useTheme()
   const kv = useKV()
   const language = useLanguage()
-  const money = createMemo(() => new Intl.NumberFormat(language.locale, { style: "currency", currency: "USD" }))
+  const money = createMemo(() => (value: number) => Locale.currency(value, language.locale))
   const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -276,8 +276,8 @@ export function Prompt(props: PromptProps) {
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = session?.cost ?? 0
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money().format(cost) : undefined,
+      context: pct ? `${Locale.number(tokens, language.locale)} (${pct})` : Locale.number(tokens, language.locale),
+      cost: cost > 0 ? money()(cost) : undefined,
     }
   })
 
@@ -1044,7 +1044,7 @@ export function Prompt(props: PromptProps) {
         console.log("Creating a session failed:", res.error)
 
         toast.show({
-          message: "Creating a session failed. Open console for more details.",
+          message: language.t("prompt.createSessionFailed"),
           variant: "error",
         })
 
@@ -1216,7 +1216,7 @@ export function Prompt(props: PromptProps) {
       const attachment = await readLocalAttachment(filepath)
       const filename = path.basename(filepath)
       if (attachment?.type === "text") {
-        pasteText(attachment.content, `[SVG: ${filename ?? "image"}]`)
+        pasteText(attachment.content, language.t("prompt.pasteSvg", { filename: filename ?? "image" }))
         return
       }
       if (attachment?.type === "binary") {
@@ -1235,7 +1235,7 @@ export function Prompt(props: PromptProps) {
       (lineCount >= 3 || pastedContent.length > 150) &&
       kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary)
     ) {
-      pasteText(pastedContent, `[Pasted ~${lineCount} lines]`)
+      pasteText(pastedContent, language.t("prompt.pasteSummary", { lines: lineCount }))
       return
     }
 
@@ -1257,7 +1257,9 @@ export function Prompt(props: PromptProps) {
       if (pdf) return x.mime === "application/pdf"
       return x.mime.startsWith("image/")
     }).length
-    const virtualText = pdf ? `[PDF ${count + 1}]` : `[Image ${count + 1}]`
+    const virtualText = pdf
+      ? language.t("prompt.pastePdf", { count: count + 1 })
+      : language.t("prompt.pasteImage", { count: count + 1 })
     const extmarkEnd = extmarkStart + virtualText.length
     const textToInsert = virtualText + " "
 
@@ -1560,7 +1562,7 @@ export function Prompt(props: PromptProps) {
                         const r = retry()
                         if (!r) return
                         if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
-                          return "gemini is way too hot right now"
+                          return language.t("prompt.quotaHot")
                         if (r.message.length > 80) return r.message.slice(0, 80) + "..."
                         return r.message
                       })
@@ -1592,9 +1594,11 @@ export function Prompt(props: PromptProps) {
                         const r = retry()
                         if (!r) return ""
                         const baseMessage = message()
-                        const truncatedHint = isTruncated() ? " (click to expand)" : ""
+                        const truncatedHint = isTruncated() ? language.t("prompt.clickExpandHint") : ""
                         const duration = formatDuration(seconds())
-                        const retryInfo = ` [retrying ${duration ? `in ${duration} ` : ""}attempt #${r.attempt}]`
+                        const retryInfo = duration
+                          ? language.t("prompt.retryStatusWithDelay", { duration, attempt: r.attempt })
+                          : language.t("prompt.retryStatus", { attempt: r.attempt })
                         return baseMessage + truncatedHint + retryInfo
                       }
 
@@ -1611,7 +1615,7 @@ export function Prompt(props: PromptProps) {
                 <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
                   esc{" "}
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                    {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                    {store.interrupt > 0 ? language.t("prompt.interruptAgain") : language.t("prompt.interruptHint")}
                   </span>
                 </text>
               </box>

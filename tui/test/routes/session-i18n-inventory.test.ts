@@ -9,6 +9,8 @@ const missingCoreKeys = {
   "category.dialog": "Dialog",
   "category.prompt": "Prompt",
   "category.question": "Question",
+  "category.permission": "Permission",
+  "category.autocomplete": "Autocomplete",
   "session.notFound": "Session not found: {{sessionID}}",
   "session.retryError": "Retry Error",
   "session.copyShareLink": "Copy share link",
@@ -273,10 +275,43 @@ const missingCoreKeys = {
   "question.previousAnswer": "Previous answer",
   "question.nextAnswer": "Next answer",
   "question.selectAnswer": "Select answer",
+  "question.selectAnswerNumber": "Select answer {{number}}",
+  "dialog.working": "Working...",
+  "dialog.backHint": "back",
+  "dialog.closeHint": "close",
+  "prompt.createSessionFailed": "Creating a session failed. Open console for more details.",
+  "prompt.pasteSvg": "[SVG: {{filename}}]",
+  "prompt.pasteSummary": "[Pasted ~{{lines}} lines]",
+  "prompt.pastePdf": "[PDF {{count}}]",
+  "prompt.pasteImage": "[Image {{count}}]",
+  "prompt.quotaHot": "gemini is way too hot right now",
+  "prompt.clickExpandHint": " (click to expand)",
+  "prompt.retryStatusWithDelay": " [retrying in {{duration}} attempt #{{attempt}}]",
+  "prompt.retryStatus": " [retrying attempt #{{attempt}}]",
+  "prompt.interruptHint": "interrupt",
+  "prompt.interruptAgain": "again to interrupt",
+  "workspace.noResponse": "no response",
+  "workspace.noProjectCopyDirectory": "No project copy directory returned",
+  "workspace.localProject": "local project",
+  "session.subagentPosition": "{{index}} of {{total}}",
+  "tool.grep": "Grep \"{{pattern}}\"",
+  "tool.webFetch": "WebFetch {{url}}",
+  "tool.webSearch": "{{provider}} \"{{query}}\"",
+  "tool.webSearchResults": "({{count}} results)",
+  "tool.editHeader": "← Edit {{path}}",
+  "tool.patchDeleted": "# Deleted {{path}}",
+  "tool.patchCreated": "# Created {{path}}",
+  "tool.patchMoved": "# Moved {{from}} → {{to}}",
+  "tool.patchPatched": "← Patched {{path}}",
+  "tool.lineDeleted": "-{{count}} line",
+  "tool.linesDeleted": "-{{count}} lines",
+  "tool.todosHeading": "# Todos",
+  "tool.questionsHeading": "# Questions",
+  "tool.diagnosticsError": "Error [{{line}}:{{column}}] {{message}}",
 } as const
 
 test("core session inventory has dictionary parity before route migration", () => {
-  expect(Object.keys(missingCoreKeys)).toHaveLength(260)
+  expect(Object.keys(missingCoreKeys)).toHaveLength(295)
   const englishEntries: Record<string, string> = Object.fromEntries(Object.entries(en))
   const chineseEntries: Record<string, string> = Object.fromEntries(Object.entries(zhCN))
   const missing = Object.entries(missingCoreKeys).filter(

@@ -81,7 +81,7 @@ import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { AINN_BASE_MODE, useBindings, useCommandShortcut, useAinnKeymap } from "../../keymap"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
-import { useLanguage } from "../../context/language"
+import { translate, type Locale as LanguageLocale, useLanguage } from "../../context/language"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1391,7 +1391,8 @@ function UserMessage(props: {
   })
   const files = createMemo(() => props.parts.flatMap((x) => (x.type === "file" ? [x] : [])))
   const { theme } = useTheme()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
   const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => local.agent.color(props.message.agent))
@@ -1450,7 +1451,7 @@ function UserMessage(props: {
                 <Show when={ctx.showTimestamps()}>
                   <text fg={theme.textMuted}>
                     <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
+                      {Locale.todayTimeOrDateTime(props.message.time.created, language.locale)}
                     </span>
                   </text>
                 </Show>
@@ -2089,7 +2090,7 @@ function Shell(props: ToolProps) {
   })
 
   const title = createMemo(() => {
-    const desc = stringValue(props.input.description) ?? "Shell"
+    const desc = stringValue(props.input.description) ?? t("tool.shellCommand")
     const wd = workdirDisplay()
     if (!wd) return `# ${desc}`
     if (desc.includes(wd)) return `# ${desc}`
@@ -2226,10 +2227,12 @@ function Grep(props: ToolProps) {
   const { t } = useLanguage()
   return (
     <InlineTool icon="✱" pending={t("tool.searchingContent")} complete={stringValue(props.input.pattern)} part={props.part}>
-      Grep "{stringValue(props.input.pattern)}"{" "}
-      <Show when={stringValue(props.input.path)}>in {pathFormatter.format(stringValue(props.input.path))} </Show>
+      <Show when={stringValue(props.input.pattern)}>{(pattern) => t("tool.grep", { pattern: pattern() })}</Show>{" "}
+      <Show when={stringValue(props.input.path)}>
+        {t("tool.inPath", { path: pathFormatter.format(stringValue(props.input.path)) })}{" "}
+      </Show>
       <Show when={numberValue(props.metadata.matches)}>
-        ({numberValue(props.metadata.matches)} {numberValue(props.metadata.matches) === 1 ? "match" : "matches"})
+        {(value) => <>({t(value() === 1 ? "tool.match" : "tool.matches", { count: value() })})</>}
       </Show>
     </InlineTool>
   )
@@ -2239,7 +2242,7 @@ function WebFetch(props: ToolProps) {
   const { t } = useLanguage()
   return (
     <InlineTool icon="%" pending={t("tool.fetchingWeb")} complete={stringValue(props.input.url)} part={props.part}>
-      WebFetch {stringValue(props.input.url)}
+      <Show when={stringValue(props.input.url)}>{(url) => t("tool.webFetch", { url: url() })}</Show>
     </InlineTool>
   )
 }
@@ -2248,8 +2251,17 @@ function WebSearch(props: ToolProps) {
   const { t } = useLanguage()
   return (
     <InlineTool icon="◈" pending={t("tool.searchingWeb")} complete={stringValue(props.input.query)} part={props.part}>
-      {webSearchProviderLabel(props.metadata.provider)} "{stringValue(props.input.query)}"{" "}
-      <Show when={numberValue(props.metadata.numResults)}>({numberValue(props.metadata.numResults)} results)</Show>
+      <Show when={stringValue(props.input.query)}>
+        {(query) =>
+          t("tool.webSearch", {
+            provider: webSearchProviderLabel(props.metadata.provider),
+            query: query(),
+          })
+        }
+      </Show>{" "}
+      <Show when={numberValue(props.metadata.numResults)}>
+        {(value) => t("tool.webSearchResults", { count: value() })}
+      </Show>
     </InlineTool>
   )
 }
@@ -2365,21 +2377,26 @@ function Task(props: ToolProps) {
   )
 }
 
-export function formatSubagentToolcalls(count: number) {
-  return `${count} toolcall${count === 1 ? "" : "s"}`
+export function formatSubagentToolcalls(count: number, locale: LanguageLocale = "en") {
+  return translate(locale, count === 1 ? "session.toolcall" : "session.toolcalls", { count })
 }
 
-export function formatSubagentTitle(agent: string, description: string, background: boolean) {
-  return `${agent} Task${background ? " (background)" : ""} — ${description}`
+export function formatSubagentTitle(
+  agent: string,
+  description: string,
+  background: boolean,
+  locale: LanguageLocale = "en",
+) {
+  return translate(locale, background ? "session.backgroundTaskTitle" : "session.taskTitle", { agent, description })
 }
 
-export function formatSubagentRetry(attempt: number, message: string) {
-  return `Retrying (attempt ${attempt}) · ${message}`
+export function formatSubagentRetry(attempt: number, message: string, locale: LanguageLocale = "en") {
+  return translate(locale, "session.retrying", { attempt, message })
 }
 
-export function formatCompletedSubagentDetail(toolcalls: number, duration: string) {
+export function formatCompletedSubagentDetail(toolcalls: number, duration: string, locale: LanguageLocale = "en") {
   if (toolcalls === 0) return duration
-  return `${formatSubagentToolcalls(toolcalls)} · ${duration}`
+  return `${formatSubagentToolcalls(toolcalls, locale)} · ${duration}`
 }
 
 function Edit(props: ToolProps) {
@@ -2402,7 +2419,10 @@ function Edit(props: ToolProps) {
   return (
     <Switch>
       <Match when={stringValue(props.metadata.diff) !== undefined}>
-        <BlockTool title={"← Edit " + pathFormatter.format(stringValue(props.input.filePath))} part={props.part}>
+        <BlockTool
+          title={t("tool.editHeader", { path: pathFormatter.format(stringValue(props.input.filePath)) })}
+          part={props.part}
+        >
           <box paddingLeft={1}>
             <diff
               diff={diffContent()}
@@ -2429,7 +2449,8 @@ function Edit(props: ToolProps) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending={t("tool.preparingEdit")} complete={stringValue(props.input.filePath)} part={props.part}>
-          Edit {pathFormatter.format(stringValue(props.input.filePath))} {input({ replaceAll: props.input.replaceAll })}
+          {t("permission.edit", { path: pathFormatter.format(stringValue(props.input.filePath)) })}{" "}
+          {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
     </Switch>
@@ -2477,10 +2498,12 @@ function ApplyPatch(props: ToolProps) {
   }
 
   function title(file: { type: string; relativePath: string; filePath: string; deletions: number }) {
-    if (file.type === "delete") return "# Deleted " + file.relativePath
-    if (file.type === "add") return "# Created " + file.relativePath
-    if (file.type === "move") return "# Moved " + pathFormatter.format(file.filePath) + " → " + file.relativePath
-    return "← Patched " + file.relativePath
+    if (file.type === "delete") return t("tool.patchDeleted", { path: file.relativePath })
+    if (file.type === "add") return t("tool.patchCreated", { path: file.relativePath })
+    if (file.type === "move") {
+      return t("tool.patchMoved", { from: pathFormatter.format(file.filePath), to: file.relativePath })
+    }
+    return t("tool.patchPatched", { path: file.relativePath })
   }
 
   return (
@@ -2493,7 +2516,9 @@ function ApplyPatch(props: ToolProps) {
                 when={file.type !== "delete"}
                 fallback={
                   <text fg={theme.diffRemoved}>
-                    -{file.deletions} line{file.deletions !== 1 ? "s" : ""}
+                    {t(file.deletions === 1 ? "tool.lineDeleted" : "tool.linesDeleted", {
+                      count: file.deletions,
+                    })}
                   </text>
                 }
               >
@@ -2525,7 +2550,7 @@ function TodoWrite(props: ToolProps) {
   return (
     <Switch>
       <Match when={parseTodos(props.metadata.todos).length}>
-        <BlockTool title="# Todos" part={props.part}>
+        <BlockTool title={t("tool.todosHeading")} part={props.part}>
           <box>
             <For each={todos()}>{(todo) => <TodoItem status={todo.status} content={todo.content} />}</For>
           </box>
@@ -2561,7 +2586,7 @@ function Question(props: ToolProps) {
   return (
     <Switch>
       <Match when={answers()}>
-        <BlockTool title="# Questions" part={props.part}>
+        <BlockTool title={t("tool.questionsHeading")} part={props.part}>
           <box gap={1}>
             <For each={questions()}>
               {(q, i) => (
@@ -2595,6 +2620,7 @@ function Skill(props: ToolProps) {
 
 function Diagnostics(props: { diagnostics: unknown; filePath: string }) {
   const { theme } = useTheme()
+  const { t } = useLanguage()
   const terminalEnvironment = useTuiTerminalEnvironment()
   const errors = createMemo(() => {
     const normalized = normalizePath(
@@ -2610,7 +2636,11 @@ function Diagnostics(props: { diagnostics: unknown; filePath: string }) {
         <For each={errors()}>
           {(diagnostic) => (
             <text fg={theme.error}>
-              Error [{diagnostic.range.start.line + 1}:{diagnostic.range.start.character + 1}] {diagnostic.message}
+              {t("tool.diagnosticsError", {
+                line: diagnostic.range.start.line + 1,
+                column: diagnostic.range.start.character + 1,
+                message: diagnostic.message,
+              })}
             </text>
           )}
         </For>

@@ -268,7 +268,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
           : [
               ...Array.from({ length: max }, (_, index) => ({
                 key: String(index + 1),
-                desc: `Select answer ${index + 1}`,
+                desc: t("question.selectAnswerNumber", { number: index + 1 }),
                 group: t("category.question"),
                 cmd: () => {
                   moveTo(index)

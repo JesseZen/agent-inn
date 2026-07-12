@@ -1,18 +1,18 @@
 /** @jsxImportSource @opentui/solid */
-import { TextareaRenderable } from "@opentui/core"
+import { PasteEvent, TextareaRenderable } from "@opentui/core"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { onCleanup } from "solid-js"
+import { onCleanup, onMount } from "solid-js"
 import { ArgsProvider } from "../../../src/context/args"
 import { ClipboardProvider } from "../../../src/context/clipboard"
 import { DataProvider } from "../../../src/context/data"
 import { EditorContextProvider } from "../../../src/context/editor"
 import { ExitProvider } from "../../../src/context/exit"
 import { KVProvider } from "../../../src/context/kv"
-import { LanguageProvider } from "../../../src/context/language"
+import { LanguageProvider, type Locale as LanguageLocale, useLanguage } from "../../../src/context/language"
 import { LocalProvider } from "../../../src/context/local"
 import { ProjectProvider } from "../../../src/context/project"
 import { RouteProvider } from "../../../src/context/route"
@@ -31,6 +31,7 @@ import { Prompt, type PromptRef } from "../../../src/component/prompt"
 import { AinnKeymapProvider, registerAinnKeymap } from "../../../src/keymap"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { tmpdir } from "../../fixture/fixture"
+import { Locale } from "../../../src/util/locale"
 
 async function wait(fn: () => boolean, timeout = 2000) {
   const start = Date.now()
@@ -108,13 +109,27 @@ function createFetch(root: string): typeof fetch {
   }) as typeof fetch
 }
 
-async function mountPrompt(input: { root: string; keybinds?: Record<string, unknown> }) {
+async function mountPrompt(input: {
+  root: string
+  keybinds?: Record<string, unknown>
+  locale?: LanguageLocale
+  width?: number
+  height?: number
+}) {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
   const pluginRuntime = createPluginRuntime()
   let promptRef!: PromptRef
   let textarea!: TextareaRenderable
   let submitted = 0
+
+  function LocaleSetter() {
+    const language = useLanguage()
+    onMount(() => {
+      if (input.locale) language.setLocale(input.locale)
+    })
+    return <></>
+  }
 
   function Harness() {
     const renderer = useRenderer()
@@ -138,6 +153,7 @@ async function mountPrompt(input: { root: string; keybinds?: Record<string, unkn
                   <ExitProvider exit={() => {}}>
                     <KVProvider persist={false}>
                       <LanguageProvider>
+                        <LocaleSetter />
                         <ToastProvider>
                           <RouteProvider>
                           <TuiConfigProvider config={resolvedConfig}>
@@ -188,7 +204,11 @@ async function mountPrompt(input: { root: string; keybinds?: Record<string, unkn
     )
   }
 
-  const app = await testRender(() => <Harness />, { kittyKeyboard: true })
+  const app = await testRender(() => <Harness />, {
+    kittyKeyboard: true,
+    width: input.width,
+    height: input.height,
+  })
   await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
   textarea = app.renderer.currentFocusedEditor as TextareaRenderable
 
@@ -246,6 +266,41 @@ test("main prompt lets alt return submit when input_submit overrides the default
     expect({ submitted: prompt.submitted(), text: prompt.textarea().plainText }).toEqual({
       submitted: 1,
       text: "",
+    })
+  } finally {
+    prompt.cleanup()
+  }
+})
+
+test("Chinese prompt editing preserves selection, paste labels, truncation, and narrow wrapping", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({ root: tmp.path, locale: "zh-CN", width: 28, height: 12 })
+
+  try {
+    prompt.promptRef().set({ input: "你好世界", parts: [] })
+    const textarea = prompt.textarea()
+    textarea.setSelection(0, Bun.stringWidth("你好"))
+    expect(textarea.getSelectedText()).toBe("你好")
+    textarea.deleteSelection()
+    textarea.insertText("中文")
+    expect(textarea.plainText).toBe("中文世界")
+
+    textarea.cursorOffset = Bun.stringWidth(textarea.plainText)
+    await textarea.onPaste?.(new PasteEvent(new TextEncoder().encode("第一行\n第二行\n第三行")))
+    await wait(() => textarea.plainText.includes("[已粘贴约 3 行]"))
+    await prompt.app.renderOnce()
+
+    const frame = prompt.app.captureCharFrame()
+    expect({
+      text: textarea.plainText,
+      wrapped: textarea.virtualLineCount > 1,
+      frameContainsPaste: frame.includes("已粘贴约 3 行"),
+      truncatedWidth: Bun.stringWidth(Locale.truncateMiddle("非常长的中文文件路径.ts", 12)),
+    }).toEqual({
+      text: "中文世界[已粘贴约 3 行] ",
+      wrapped: true,
+      frameContainsPaste: true,
+      truncatedWidth: 12,
     })
   } finally {
     prompt.cleanup()

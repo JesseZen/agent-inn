@@ -45,14 +45,9 @@ export function SubagentFooter() {
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = session()?.cost ?? 0
 
-    const money = new Intl.NumberFormat(language.locale, {
-      style: "currency",
-      currency: "USD",
-    })
-
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      context: pct ? `${Locale.number(tokens, language.locale)} (${pct})` : Locale.number(tokens, language.locale),
+      cost: cost > 0 ? Locale.currency(cost, language.locale) : undefined,
     }
   })
 
@@ -84,7 +79,10 @@ export function SubagentFooter() {
             </text>
             <Show when={subagentInfo().total > 0}>
               <text style={{ fg: theme.textMuted }}>
-                ({subagentInfo().index} of {subagentInfo().total})
+                {language.t("session.subagentPosition", {
+                  index: subagentInfo().index,
+                  total: subagentInfo().total,
+                })}
               </text>
             </Show>
             <Show when={usage()}>

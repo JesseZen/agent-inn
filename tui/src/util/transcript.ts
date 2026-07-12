@@ -36,8 +36,8 @@ export function formatTranscript(
     translate(locale, key, params)
   let transcript = `# ${session.title}\n\n`
   transcript += `**${t("transcript.sessionId")}** ${session.id}\n`
-  transcript += `**${t("transcript.created")}** ${new Date(session.time.created).toLocaleString(locale)}\n`
-  transcript += `**${t("transcript.updated")}** ${new Date(session.time.updated).toLocaleString(locale)}\n\n`
+  transcript += `**${t("transcript.created")}** ${Locale.datetime(session.time.created, locale)}\n`
+  transcript += `**${t("transcript.updated")}** ${Locale.datetime(session.time.updated, locale)}\n\n`
   transcript += `---\n\n`
 
   for (const msg of messages) {

@@ -576,7 +576,7 @@ export function Autocomplete(props: {
       {
         name: "prompt.autocomplete.prev",
         title: t("prompt.autocomplete.previous"),
-        category: "Autocomplete",
+        category: t("category.autocomplete"),
         run() {
           setStore("input", "keyboard")
           move(-1)
@@ -585,7 +585,7 @@ export function Autocomplete(props: {
       {
         name: "prompt.autocomplete.next",
         title: t("prompt.autocomplete.next"),
-        category: "Autocomplete",
+        category: t("category.autocomplete"),
         run() {
           setStore("input", "keyboard")
           move(1)
@@ -594,7 +594,7 @@ export function Autocomplete(props: {
       {
         name: "prompt.autocomplete.hide",
         title: t("prompt.autocomplete.hide"),
-        category: "Autocomplete",
+        category: t("category.autocomplete"),
         run() {
           hide()
         },
@@ -602,7 +602,7 @@ export function Autocomplete(props: {
       {
         name: "prompt.autocomplete.select",
         title: t("prompt.autocomplete.select"),
-        category: "Autocomplete",
+        category: t("category.autocomplete"),
         run() {
           select()
         },
@@ -610,7 +610,7 @@ export function Autocomplete(props: {
       {
         name: "prompt.autocomplete.complete",
         title: t("prompt.autocomplete.complete"),
-        category: "Autocomplete",
+        category: t("category.autocomplete"),
         run() {
           const selected = options()[store.selected]
           if (selected?.isDirectory) {

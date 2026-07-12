@@ -15,7 +15,8 @@ export function DialogForkFromTimeline(props: { sessionID: string; onMove: (mess
   const dialog = useDialog()
   const sdk = useSDK()
   const route = useRoute()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
 
   onMount(() => {
     dialog.setSize("large")
@@ -45,7 +46,7 @@ export function DialogForkFromTimeline(props: { sessionID: string; onMove: (mess
       result.push({
         title: part.text.replace(/\n/g, " "),
         value: message.id,
-        footer: Locale.time(message.time.created),
+        footer: Locale.time(message.time.created, language.locale),
         onSelect: async (dialog) => {
           const forked = await sdk.client.session.fork({
             sessionID: props.sessionID,

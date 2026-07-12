@@ -15,7 +15,8 @@ export function DialogTimeline(props: {
 }) {
   const sync = useSync()
   const dialog = useDialog()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
 
   onMount(() => {
     dialog.setSize("large")
@@ -33,7 +34,7 @@ export function DialogTimeline(props: {
       result.push({
         title: part.text.replace(/\n/g, " "),
         value: message.id,
-        footer: Locale.time(message.time.created),
+        footer: Locale.time(message.time.created, language.locale),
         onSelect: (dialog) => {
           dialog.replace(() => (
             <DialogMessage messageID={message.id} sessionID={props.sessionID} setPrompt={props.setPrompt} />
