@@ -127,14 +127,14 @@ func TestWorkerStreamEndpointStopsWhenSinkCloses(t *testing.T) {
 }
 
 type workerStreamRecorder struct {
-	*httptest.ResponseRecorder
+	*lockedResponseRecorder
 	closeCh chan bool
 }
 
 func newWorkerStreamRecorder() *workerStreamRecorder {
 	return &workerStreamRecorder{
-		ResponseRecorder: httptest.NewRecorder(),
-		closeCh:          make(chan bool),
+		lockedResponseRecorder: newLockedResponseRecorder(),
+		closeCh:                make(chan bool),
 	}
 }
 
@@ -146,7 +146,7 @@ func requireBodyContainsEventually(t *testing.T, recorder *workerStreamRecorder,
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(recorder.Body.String(), needle) {
+		if strings.Contains(recorder.BodyString(), needle) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

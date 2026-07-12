@@ -101,7 +101,7 @@ func TestManagerEventsEndpointDeliversReplayThenLiveExactlyOnce(t *testing.T) {
 	}()
 
 	requireContainsEventually(t, recorder, "event: worker.updated")
-	body := recorder.Body.String()
+	body := recorder.BodyString()
 	if strings.Count(body, "event: worker.updated") != 1 {
 		t.Fatalf("expected exactly one replayed update event, got:\n%s", body)
 	}
@@ -142,14 +142,14 @@ func strconvFormatInt(id int64) string {
 }
 
 type streamingRecorder struct {
-	*httptest.ResponseRecorder
+	*lockedResponseRecorder
 	closeCh chan bool
 }
 
 func newStreamingRecorder() *streamingRecorder {
 	return &streamingRecorder{
-		ResponseRecorder: httptest.NewRecorder(),
-		closeCh:          make(chan bool),
+		lockedResponseRecorder: newLockedResponseRecorder(),
+		closeCh:                make(chan bool),
 	}
 }
 
@@ -161,7 +161,7 @@ func requireContainsEventually(t *testing.T, recorder *streamingRecorder, needle
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		text := recorder.Body.String()
+		text := recorder.BodyString()
 		if strings.Contains(text, needle) {
 			return
 		}
