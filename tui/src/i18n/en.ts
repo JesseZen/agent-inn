@@ -1,4 +1,7 @@
-export const en = {
+import { coreEn } from "./en-core"
+import { proxyEn } from "./en-proxy"
+
+const baseEn = {
   "language.name": "Language",
   "language.switch": "Switch language",
   "language.current": "Current language",
@@ -210,10 +213,8 @@ export const en = {
   "proxy.worker.deleted": "Deleted {{name}}",
   "proxy.worker.invalidPort": "Invalid port number",
   "proxy.worker.savedField": "Saved {{name}} {{field}}: {{value}}",
-  "proxy.worker.switchUpstream": "Switch upstream",
   "proxy.worker.switchedUpstream": "Switched {{name}} to {{upstream}}",
   "proxy.worker.upstreamIneligible": "target upstream is not eligible",
-  "proxy.worker.fallbackPool": "Fallback pool",
   "proxy.worker.fallbackPoolDisabled": "Disable automatic failover",
   "proxy.worker.fallbackPoolSaved": "Saved {{name}} fallback pool: {{pool}}",
 
@@ -234,7 +235,6 @@ export const en = {
   "proxy.upstream.probeModel": "Probe model",
   "proxy.upstream.displayName": "Display name",
   "proxy.upstream.probeModelDescription": "Model used for protocol readiness",
-  "proxy.upstream.nativePassthrough": "Native Responses passthrough",
   "proxy.upstream.unknownCount": "unknown {{count}}",
   "proxy.upstream.reachableLatency": "reachable {{latency}}ms",
 
@@ -281,6 +281,8 @@ export const en = {
   "proxy.module.functionTools": "Function tools",
   "proxy.batch.variantCount": "Variant count must be between {{min}} and {{max}}",
 } as const satisfies Record<string, string>
+
+export const en = { ...baseEn, ...coreEn, ...proxyEn } as const satisfies Record<string, string>
 
 export type TranslationKey = keyof typeof en
 export type TranslationParams = Record<string, string | number>

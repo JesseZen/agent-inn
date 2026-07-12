@@ -1,6 +1,8 @@
 import type { TranslationKey } from "./en"
+import { coreZhCN } from "./zh-CN-core"
+import { proxyZhCN } from "./zh-CN-proxy"
 
-export const zhCN = {
+const baseZhCN = {
   "language.name": "语言",
   "language.switch": "切换语言",
   "language.current": "当前语言",
@@ -212,10 +214,8 @@ export const zhCN = {
   "proxy.worker.deleted": "已删除 {{name}}",
   "proxy.worker.invalidPort": "端口号无效",
   "proxy.worker.savedField": "已保存 {{name}} 的 {{field}}：{{value}}",
-  "proxy.worker.switchUpstream": "切换上游",
   "proxy.worker.switchedUpstream": "已将 {{name}} 切换到 {{upstream}}",
   "proxy.worker.upstreamIneligible": "目标上游不可用",
-  "proxy.worker.fallbackPool": "故障转移池",
   "proxy.worker.fallbackPoolDisabled": "禁用自动故障转移",
   "proxy.worker.fallbackPoolSaved": "已保存 {{name}} 的故障转移池：{{pool}}",
 
@@ -236,7 +236,6 @@ export const zhCN = {
   "proxy.upstream.probeModel": "探测模型",
   "proxy.upstream.displayName": "显示名称",
   "proxy.upstream.probeModelDescription": "用于协议就绪检查的模型",
-  "proxy.upstream.nativePassthrough": "原生 Responses 透传",
   "proxy.upstream.unknownCount": "未知 {{count}}",
   "proxy.upstream.reachableLatency": "可访问 {{latency}}ms",
 
@@ -282,4 +281,6 @@ export const zhCN = {
   "proxy.module.computerUse": "OpenAI 计算机操作",
   "proxy.module.functionTools": "函数工具",
   "proxy.batch.variantCount": "变体数量必须在 {{min}} 到 {{max}} 之间",
-} as const satisfies Record<TranslationKey, string>
+} as const satisfies Record<string, string>
+
+export const zhCN = { ...baseZhCN, ...coreZhCN, ...proxyZhCN } as const satisfies Record<TranslationKey, string>
