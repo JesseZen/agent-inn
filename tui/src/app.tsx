@@ -59,6 +59,7 @@ import { DialogConfirm } from "./ui/dialog-confirm"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
+import { LanguageProvider, useLanguage } from "./context/language"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
 import open from "open"
@@ -276,7 +277,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                           <AinnKeymapProvider keymap={keymap}>
                             <ArgsProvider {...input.args}>
                               <KVProvider>
-                                <ToastProvider>
+                                <LanguageProvider><ToastProvider>
                                   <RouteProvider
                                     initialRoute={
                                       input.args.continue
@@ -328,7 +329,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                       </PluginRuntimeProvider>
                                     </TuiConfigProvider>
                                   </RouteProvider>
-                                </ToastProvider>
+                                </ToastProvider></LanguageProvider>
                               </KVProvider>
                             </ArgsProvider>
                           </AinnKeymapProvider>
@@ -380,6 +381,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const dialog = useDialog()
   const local = useLocal()
   const kv = useKV()
+  const language = useLanguage()
   const keymap = useAinnKeymap()
   const event = useEvent()
   const sdk = useSDK()
@@ -806,6 +808,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "themes",
         run: () => {
           dialog.replace(() => <DialogThemeList />)
+        },
+        category: "System",
+      },
+      {
+        name: "language.switch",
+        title: language.t("language.switch"),
+        slashName: "language",
+        run: () => {
+          language.setLocale(language.locale === "en" ? "zh-CN" : "en")
+          dialog.clear()
         },
         category: "System",
       },
