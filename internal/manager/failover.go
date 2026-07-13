@@ -152,6 +152,8 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 		m.failoverMu.Unlock()
 		return nil
 	}
+	previousProbeState := m.poolProbeStateLocked(poolName)
+	previousNextProbeAt := m.poolNextProbeAtLocked(poolName)
 
 	key := poolCircuitKey(poolName, upstreamName)
 	previous := m.circuits.Status(key, pool.CircuitBreaker)
@@ -184,6 +186,7 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 		}
 	}
 	if outcome != workerUpstreamFailure || current.State != CircuitStateOpen {
+		m.publishPoolStateTransitionLocked(poolName, previousProbeState, previousNextProbeAt)
 		m.failoverMu.Unlock()
 		if refreshFallbacks {
 			m.probeAllUpstreams(m.probeContext)
@@ -203,6 +206,7 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 			m.exhaustedPools[poolName] = upstreamName
 			m.publishEvent(EventUpstreamPoolExhausted, map[string]any{"pool": poolName, "upstream": upstreamName, "reason": "no_eligible_fallback"})
 		}
+		m.publishPoolStateTransitionLocked(poolName, previousProbeState, previousNextProbeAt)
 		m.failoverMu.Unlock()
 		if refreshFallbacks {
 			m.probeAllUpstreams(m.probeContext)
@@ -210,11 +214,29 @@ func (m *Manager) recordWorkerUpstreamOutcome(workerName string, upstreamName st
 		return nil
 	}
 	err := m.switchUpstreamPool(poolName, upstreamName, next)
+	m.publishPoolStateTransitionLocked(poolName, previousProbeState, previousNextProbeAt)
 	m.failoverMu.Unlock()
 	if refreshFallbacks {
 		m.probeAllUpstreams(m.probeContext)
 	}
 	return err
+}
+
+func (m *Manager) publishPoolStateTransitionLocked(poolName string, previousState PoolProbeState, previousNext *time.Time) {
+	state := m.poolProbeStateLocked(poolName)
+	next := m.poolNextProbeAtLocked(poolName)
+	deadlineChanged := (previousNext == nil) != (next == nil)
+	if previousNext != nil && next != nil && !previousNext.Equal(*next) {
+		deadlineChanged = true
+	}
+	if previousState == state && !deadlineChanged {
+		return
+	}
+	payload := map[string]any{"pool": poolName, "probe_state": state}
+	if next != nil {
+		payload["next_probe_at"] = next.UTC().Format(time.RFC3339)
+	}
+	m.publishEvent(EventUpstreamPoolStateChanged, payload)
 }
 
 func (m *Manager) recordPoolProbeResultLocked(poolName string, upstreamName string, probe upstream.ProbeResult) error {

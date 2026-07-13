@@ -220,6 +220,24 @@ test("pool editor applies complete adaptive probe events", async () => {
   }
 })
 
+test("pool editor applies request outcome pool state events without polling", async () => {
+	const app = await mountProxyApp({ upstreamPools: [attachedPool] })
+	try {
+		await openPoolEditor(app)
+		app.emitManagerEvent("upstream.pool.state.changed", {
+			pool: "codex-ha",
+			probe_state: "alert",
+			next_probe_at: "2026-07-13T04:01:00Z",
+		})
+		await wait(async () => {
+			await app.render()
+			return app.frame().includes("Probe State alert") && app.frame().includes("Next Probe 2026-07-13T04:01:00Z")
+		})
+	} finally {
+		await app.cleanup()
+	}
+})
+
 test("pool editor switches to an eligible member normally", async () => {
   const app = await mountProxyApp({ upstreamPools: [attachedPool] })
   try {

@@ -255,6 +255,7 @@ grep 'upstream.pool.mode.changed' ~/.ainn/logs/ainn.log
 ```bash
 curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstream.probed'
 curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstream.pool.mode.changed'
+curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstream.pool.state.changed'
 ```
 
 #### `upstream.probed`
@@ -269,6 +270,11 @@ curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstre
 - **触发**：pool 在 `active` 与 `disabled` 间切换
 - **字段**：`pool`，`previous_mode`，`mode`
 - **用途**：确认禁用或重新启用自适应故障转移的配置变更已由 Manager 接收
+
+#### `upstream.pool.state.changed`
+- **触发**：worker 请求结果改变 pool 派生的探测状态或下一次探测时间
+- **字段**：`pool`，`probe_state`，有调度截止时间时含 `next_probe_at`
+- **用途**：请求结果不是协议探测；该事件只投影 pool 汇总状态，不携带 readiness 或探测结果
 
 ---
 

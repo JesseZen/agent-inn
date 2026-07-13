@@ -458,6 +458,39 @@ func TestManagerFirstWorkerFailureRefreshesFallbacks(t *testing.T) {
 	}
 }
 
+func TestManagerWorkerOutcomePublishesDerivedPoolStateChanges(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 16, 17, 18, 0, time.UTC)
+	m, pool := newAuthorityTestManager(t, "primary", 3)
+	m.cancelProbes()
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	future := now.Add(time.Hour)
+	for _, upstreamName := range pool.Upstreams {
+		m.readiness[poolCircuitKey("coding-ha", upstreamName)] = readinessObservation{
+			Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+		}
+		m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
+	}
+
+	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.recordWorkerUpstreamSuccess("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.recordWorkerUpstreamSuccess("app", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	got := poolRoutingEvents(m, EventType("upstream.pool.state.changed"))
+	want := []map[string]any{
+		{"pool": "coding-ha", "probe_state": PoolProbeStateAlert, "next_probe_at": now.Format(time.RFC3339)},
+		{"pool": "coding-ha", "probe_state": PoolProbeStateStable, "next_probe_at": now.Format(time.RFC3339)},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("worker outcomes did not publish derived pool state changes:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerDisabledPoolIgnoresWorkerOutcomes(t *testing.T) {
 	m, pool := newAuthorityTestManager(t, "primary", 2)
 	m.cancelProbes()

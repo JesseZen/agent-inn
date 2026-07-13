@@ -29,6 +29,7 @@ const (
 	EventUpstreamCircuitChanged        EventType = "upstream.circuit.changed"
 	EventUpstreamPoolSwitched          EventType = "upstream.pool.switched"
 	EventUpstreamPoolModeChanged       EventType = "upstream.pool.mode.changed"
+	EventUpstreamPoolStateChanged      EventType = "upstream.pool.state.changed"
 	EventUpstreamPoolExhausted         EventType = "upstream.pool.exhausted"
 	EventConfigStatusChanged           EventType = "config.status.changed"
 	EventStreamRawRedacted             EventType = "stream.raw_redacted"

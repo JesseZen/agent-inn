@@ -324,9 +324,17 @@ export const {
               else readiness[index] = probe
               return { ...pool, readiness, probe_state: probe.probe_state, next_probe_at: probe.next_probe_at }
             })))
-            return
-          }
-          if (event.type === "upstream.circuit.changed") {
+			return
+		  }
+		  if (event.type === "upstream.pool.state.changed") {
+			const state = event.payload as Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool: string }
+			setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
+			  if (pool.id !== state.pool) return pool
+			  return { ...pool, probe_state: state.probe_state, next_probe_at: state.next_probe_at }
+			})))
+			return
+		  }
+		  if (event.type === "upstream.circuit.changed") {
             void sdk.client.getUpstreams().then((upstreams) => setStore("upstreams", reconcile(upstreams)))
             return
           }
