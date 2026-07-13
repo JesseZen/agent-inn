@@ -3,16 +3,38 @@ import { createSimpleContext } from "./helper"
 import { useKV } from "./kv"
 import { en, type TranslationKey, type TranslationParams } from "../i18n/en"
 import { zhCN } from "../i18n/zh-CN"
+import { zhTW } from "../i18n/zh-TW"
+import { ja } from "../i18n/ja"
 
-export const locales = ["en", "zh-CN", "zh-TW", "ja"] as const
-export type Locale = (typeof locales)[number]
+type TranslationDictionary = Partial<Record<TranslationKey, string>>
 
-export const localeLabels: Record<Locale, string> = {
-  en: "English",
-  "zh-CN": "简体中文",
-  "zh-TW": "繁體中文",
-  ja: "日本語",
+const englishKeyCount = Object.keys(en).length
+
+function translationCoverage(dictionary: TranslationDictionary) {
+  const translatedKeyCount = Object.entries(dictionary).filter(
+    ([key, value]) => key in en && value.trim().length > 0,
+  ).length
+  return Math.round((translatedKeyCount / englishKeyCount) * 100)
 }
+
+const localeDefinitions = [
+  { id: "en", name: "English", dictionary: en },
+  { id: "zh-CN", name: "简体中文", dictionary: zhCN },
+  { id: "zh-TW", name: "繁體中文", dictionary: zhTW },
+  { id: "ja", name: "日本語", dictionary: ja },
+] as const
+
+export type Locale = (typeof localeDefinitions)[number]["id"]
+type LocaleDefinition = (typeof localeDefinitions)[number] & { coverage: number }
+
+export const localeRegistry = localeDefinitions.map((locale) => ({
+  ...locale,
+  coverage: locale.id === "en" ? 100 : translationCoverage(locale.dictionary),
+})) as readonly LocaleDefinition[]
+
+export const locales = localeRegistry.map((locale) => locale.id) as readonly Locale[]
+
+export const localeLabels = Object.fromEntries(localeRegistry.map((locale) => [locale.id, locale.name])) as Record<Locale, string>
 
 const LOCALE_KV_KEY = "locale"
 
@@ -48,12 +70,14 @@ export function interpolate(template: string, params?: TranslationParams): strin
   })
 }
 
-function hasKey(dictionary: Record<string, string>, key: string): key is TranslationKey {
-  return Object.hasOwn(dictionary, key)
+function hasTranslation(dictionary: TranslationDictionary, key: string): key is TranslationKey {
+  const value = dictionary[key as TranslationKey]
+  return value !== undefined && value.trim().length > 0
 }
 
 function resolveTranslation(locale: Locale, key: string, params?: TranslationParams): string {
-  const template = locale === "zh-CN" && hasKey(zhCN, key) ? zhCN[key] : hasKey(en, key) ? en[key] : key
+  const dictionary = localeRegistry.find((item) => item.id === locale)!.dictionary
+  const template = hasTranslation(dictionary, key) ? dictionary[key]! : hasTranslation(en, key) ? en[key] : key
   return interpolate(template, params)
 }
 
@@ -74,6 +98,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       },
       locales,
       labels: localeLabels,
+      registry: localeRegistry,
       t(key: TranslationKey, params?: TranslationParams) {
         return resolveTranslation(locale(), key, params)
       },

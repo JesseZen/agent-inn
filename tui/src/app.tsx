@@ -820,9 +820,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => (
             <DialogSelect
               title={language.t("language.name")}
-              options={language.locales.map((locale) => ({
-                title: language.labels[locale],
-                value: locale,
+              options={language.registry.map((locale) => ({
+                title: locale.name,
+                footer: `${locale.coverage}%`,
+                value: locale.id,
               }))}
               current={language.locale}
               skipFilter

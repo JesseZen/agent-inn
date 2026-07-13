@@ -18,7 +18,7 @@ import { tmpdir } from "../fixture/fixture"
 
 test("locale detection prefers persisted value, then environment precedence", () => {
   expect(selectInitialLocale("zh-CN", { LC_ALL: "en_US.UTF-8", LC_MESSAGES: "en", LANG: "en" })).toBe("zh-CN")
-  expect(selectInitialLocale(undefined, { LC_ALL: "C", LC_MESSAGES: "zh_TW.UTF-8", LANG: "en" })).toBe("zh-CN")
+  expect(selectInitialLocale(undefined, { LC_ALL: "C", LC_MESSAGES: "zh_TW.UTF-8", LANG: "en" })).toBe("zh-TW")
   expect(selectInitialLocale(undefined, { LC_ALL: "C", LC_MESSAGES: "C", LANG: "en_GB.UTF-8" })).toBe("en")
   expect(selectInitialLocale("fr", { LC_ALL: "C", LC_MESSAGES: "C", LANG: "fr_FR.UTF-8" })).toBe("en")
   expect(detectLocale("zh-Hans")).toBe("zh-CN")

@@ -13,6 +13,7 @@ import {
   AinnKeymapProvider,
   registerAinnKeymap,
   resolvePromptSubmitKind,
+  useCommandSlashes,
 } from "../src/keymap"
 
 function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
@@ -227,6 +228,68 @@ test("prompt submit falls back to remote slash commands when no local slash exis
   const app = await testRender(() => <Harness />)
   try {
     expect(result).toEqual({ type: "remote", commandName: "deploy" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("slash command descriptions react to command metadata changes", async () => {
+  let updateTitle!: () => void
+
+  function Commands() {
+    const slashes = useCommandSlashes()
+    return <text>{slashes().find((item) => item.commandName === "language.switch")?.description}</text>
+  }
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createResolvedKeymapConfig()
+    const offKeymap = registerAinnKeymap(keymap, renderer, config)
+    let offLayer = keymap.registerLayer({
+      commands: [
+        {
+          namespace: "palette",
+          name: "language.switch",
+          title: "Switch language",
+          slashName: "language",
+          run() {},
+        },
+      ],
+    })
+    updateTitle = () => {
+      offLayer()
+      offLayer = keymap.registerLayer({
+        commands: [
+          {
+            namespace: "palette",
+            name: "language.switch",
+            title: "切换语言",
+            slashName: "language",
+            run() {},
+          },
+        ],
+      })
+    }
+    onCleanup(() => {
+      offLayer()
+      offKeymap()
+    })
+
+    return (
+      <AinnKeymapProvider keymap={keymap}>
+        <Commands />
+      </AinnKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />)
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("Switch language")
+    updateTitle()
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("切换语言")
   } finally {
     app.renderer.destroy()
   }

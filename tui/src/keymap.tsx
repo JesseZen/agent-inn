@@ -264,15 +264,7 @@ export function useCommandShortcut(command: string): Accessor<string> {
 }
 
 export function useCommandSlashes(): Accessor<readonly CommandSlashEntry[]> {
-  const keymap = useAinnKeymap()
-  useKeymapSelector((keymap: OpenTuiKeymap) =>
-    keymap.getCommandEntries({
-      visibility: "reachable",
-      namespace: "palette",
-      filter: isVisiblePaletteCommand,
-    }),
-  )
-  return createMemo(() => getCommandSlashes(keymap))
+  return useKeymapSelector((keymap: OpenTuiKeymap) => getCommandSlashes(keymap))
 }
 
 export function getCommandSlashes(keymap: OpenTuiKeymap): CommandSlashEntry[] {

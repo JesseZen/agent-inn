@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { createStore } from "solid-js/store"
-import { For } from "solid-js"
+import { createMemo, For } from "solid-js"
 import { useBindings } from "../keymap"
 import { useLanguage } from "../context/language"
 
@@ -20,7 +20,7 @@ export function DialogSessionDeleteFailed(props: {
     active: "delete" as "delete" | "restore",
   })
 
-  const options = [
+  const options = createMemo(() => [
     {
       id: "delete" as const,
       title: language.t("dialog.sessionDelete.deleteWorkspace"),
@@ -33,10 +33,10 @@ export function DialogSessionDeleteFailed(props: {
       description: language.t("dialog.sessionDelete.restoreDescription"),
       run: props.onRestore,
     },
-  ]
+  ])
 
   async function confirm() {
-    const result = await options.find((item) => item.id === store.active)?.run?.()
+    const result = await options().find((item) => item.id === store.active)?.run?.()
     if (result === false) return
     props.onDone?.()
     if (!props.onDone) dialog.clear()
@@ -69,7 +69,7 @@ export function DialogSessionDeleteFailed(props: {
         {language.t("dialog.sessionDelete.chooseRecovery")}
       </text>
       <box flexDirection="column" paddingBottom={1} gap={1}>
-        <For each={options}>
+        <For each={options()}>
           {(item) => (
             <box
               flexDirection="column"
