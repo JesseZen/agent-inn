@@ -9,6 +9,29 @@ import { registerProxyCommands } from "../src/proxy/commands"
 import { resolveExternalLaunchTarget } from "../src/proxy/dialog-launch"
 import { createProxyLaunchCommand } from "../src/proxy/launch"
 import { DialogPrompt } from "../src/ui/dialog-prompt"
+import { mkdir } from "node:fs/promises"
+import path from "node:path"
+import { tmpdir } from "./fixture/fixture"
+
+async function isolatedGlobalLayer(home: string) {
+  const app = "ainn"
+  const data = path.join(home, ".local", "share", app)
+  const cache = path.join(home, ".cache", app)
+  const state = path.join(home, ".local", "state", app)
+  await mkdir(state, { recursive: true })
+  await Bun.write(path.join(state, "kv.json"), "{}")
+  return Global.layerWith({
+    home,
+    data,
+    cache,
+    config: path.join(home, ".config", app),
+    state,
+    tmp: path.join(home, "tmp", app),
+    bin: path.join(cache, "bin"),
+    log: path.join(data, "log"),
+    repos: path.join(data, "repos"),
+  })
+}
 
 async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
@@ -55,6 +78,8 @@ test("external launch resolves a duplicate display name by worker id", () => {
 })
 
 test("launch dialog enables directory completion with current project directory", async () => {
+  await using tmp = await tmpdir()
+  const globalLayer = await isolatedGlobalLayer(tmp.path)
   const promptCalls: any[] = []
   const originalShow = DialogPrompt.show
   DialogPrompt.show = async (_dialog: unknown, _title: string, options: any) => {
@@ -128,7 +153,7 @@ test("launch dialog enables directory completion with current project directory"
           },
           async dispose() {},
         },
-      }).pipe(Effect.provide(Global.defaultLayer)),
+      }).pipe(Effect.provide(globalLayer)),
     )
 
     await ready
@@ -162,6 +187,8 @@ test("launch dialog enables directory completion with current project directory"
 })
 
 test("launch directory prompt ESC returns to worker picker", async () => {
+  await using tmp = await tmpdir()
+  const globalLayer = await isolatedGlobalLayer(tmp.path)
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false, kittyKeyboard: true })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -228,7 +255,7 @@ test("launch directory prompt ESC returns to worker picker", async () => {
           },
           async dispose() {},
         },
-      }).pipe(Effect.provide(Global.defaultLayer)),
+      }).pipe(Effect.provide(globalLayer)),
     )
 
     await ready
