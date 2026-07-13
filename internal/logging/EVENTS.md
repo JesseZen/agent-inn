@@ -240,6 +240,37 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 
 ---
 
+### Manager SSE（上游池自适应探测）
+
+以下事件来自 Manager 的 `/api/events` SSE 流，不是结构化日志行，不会写入
+`ainn.log`。因此下面两条日志 grep 不会显示这些事件：
+
+```bash
+grep 'upstream.probed' ~/.ainn/logs/ainn.log
+grep 'upstream.pool.mode.changed' ~/.ainn/logs/ainn.log
+```
+
+实时检查时，`AINN_MANAGER_PORT` 必须设置为待排查实例实际使用的 manager port：
+
+```bash
+curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstream.probed'
+curl -N "http://127.0.0.1:${AINN_MANAGER_PORT}/api/events" | grep 'event: upstream.pool.mode.changed'
+```
+
+#### `upstream.probed`
+- **触发**：Manager 完成 pool 成员的权威协议探测，或已有 readiness 过期
+- **字段**：`upstream`，`pool`，`mode`，`authoritative`，`readiness`，`eligible`，`ok`，`status_code`，`latency_ms`，`probe_state`，`reason`；有观测时间时含 `checked_at`；有调度截止时间时含 `next_probe_at`；按结果可选 `degraded`、`stale`、`error`
+- **状态**：`probe_state=paused` 表示 pool 已禁用，`idle` 表示没有附属 worker；两者都没有计划中的协议调用。`stable` 使用稳定周期，`alert` 使用告警周期并可按连续失败次数退避
+- **原因**：`reason` 为 `startup/stable/worker_failure/recovery/manual/config` 之一，表示本次探测的调度来源
+- **用途**：结合 `readiness`、`eligible`、`next_probe_at` 判断成员能否被自动或普通手动切换，以及下一次探测何时发生。协议探测响应不用于推断精确 token 用量
+
+#### `upstream.pool.mode.changed`
+- **触发**：pool 在 `active` 与 `disabled` 间切换
+- **字段**：`pool`，`previous_mode`，`mode`
+- **用途**：确认禁用或重新启用自适应故障转移的配置变更已由 Manager 接收
+
+---
+
 ### worker.proxy（请求路径）
 
 所有 worker.proxy 事件都带 `req=<8-hex-id>` 关联 ID，同一请求的所有行共享同一 req 值。

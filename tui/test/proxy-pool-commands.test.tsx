@@ -189,6 +189,37 @@ test("pool editor refreshes authoritative readiness", async () => {
   }
 })
 
+test("pool editor applies complete adaptive probe events", async () => {
+  const app = await mountProxyApp({ upstreamPools: [attachedPool] })
+  try {
+    await openPoolEditor(app)
+    app.emitManagerEvent("upstream.probed", {
+      upstream: "anthropic",
+      pool: "codex-ha",
+      mode: "protocol",
+      authoritative: true,
+      readiness: "not_ready",
+      eligible: false,
+      checked_at: "2026-07-13T03:00:00Z",
+      ok: false,
+      status_code: 503,
+      latency_ms: 21,
+      error: "upstream_error",
+      probe_state: "alert",
+      next_probe_at: "2026-07-13T03:01:00Z",
+      reason: "worker_failure",
+    })
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Probe State alert") && app.frame().includes("Next Probe 2026-07-13T03:01:00Z")
+    })
+    await selectPoolEditorOption(app, "2. anthropic")
+    expect(app.frame()).toContain("not_ready")
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("pool editor switches to an eligible member normally", async () => {
   const app = await mountProxyApp({ upstreamPools: [attachedPool] })
   try {

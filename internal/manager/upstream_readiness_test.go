@@ -68,6 +68,79 @@ func TestManagerExpiredReadinessPublishesUnknown(t *testing.T) {
 	}
 }
 
+func TestManagerAdaptiveProbeEventPayloads(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 11, 12, 13, 0, time.UTC)
+	reasons := []ProbeScheduleReason{
+		ProbeScheduleStartup,
+		ProbeScheduleStable,
+		ProbeScheduleWorkerFailure,
+		ProbeScheduleRecovery,
+		ProbeScheduleManual,
+		ProbeScheduleConfig,
+	}
+	for _, reason := range reasons {
+		t.Run(string(reason), func(t *testing.T) {
+			m := newReadinessTestManager(t)
+			defer m.Close()
+			m.clock = func() time.Time { return now }
+			m.mu.Lock()
+			pool := m.config.UpstreamPools["coding-ha"]
+			pool.Upstreams = []string{"primary"}
+			m.config.UpstreamPools["coding-ha"] = pool
+			m.mu.Unlock()
+			spec := readinessTestProbeSpec("coding-ha", "primary", "", 1, "model-a")
+			spec.Reason = reason
+			if reason == ProbeScheduleManual {
+				spec.Pools = nil
+				spec.ManualPools = []string{"coding-ha"}
+				m.failoverMu.Lock()
+				m.manualProbes[spec.Key] = spec
+				m.probeGenerations[spec.Key] = spec.Generation
+				m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}] = poolProbeSchedule{
+					NextProbeAt: now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second),
+					Reason:      ProbeScheduleStable,
+				}
+				m.failoverMu.Unlock()
+			} else {
+				installReadinessTestSpec(m, spec)
+			}
+
+			m.recordScheduledProbeResult(spec, readinessTestSuccess(12))
+			events := m.events.Replay(0)
+			gotEvent := events[len(events)-1]
+			nextProbeAt := now.Add(time.Duration(config.DefaultPoolProbeStableIntervalSeconds) * time.Second)
+			wantEvent := Event{ID: gotEvent.ID, Type: EventUpstreamProbed, At: gotEvent.At, Payload: map[string]any{
+				"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol,
+				"authoritative": true, "readiness": ReadinessStateReady, "eligible": true,
+				"checked_at": now.Format(time.RFC3339), "ok": true,
+				"status_code": http.StatusOK, "latency_ms": int64(12),
+				"probe_state": PoolProbeStateStable, "next_probe_at": nextProbeAt.Format(time.RFC3339),
+				"reason": reason,
+			}}
+			gotReadiness, gotOK := gotEvent.AsUpstreamProbed()
+			checkedAt := now
+			wantReadiness := PoolReadiness{
+				Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol,
+				Authoritative: true, Readiness: ReadinessStateReady, Eligible: true,
+				CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 12,
+			}
+			got := struct {
+				Event     Event
+				Readiness PoolReadiness
+				OK        bool
+			}{gotEvent, gotReadiness, gotOK}
+			want := struct {
+				Event     Event
+				Readiness PoolReadiness
+				OK        bool
+			}{wantEvent, wantReadiness, true}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("unexpected %s probe event contract:\n got %#v\nwant %#v", reason, got, want)
+			}
+		})
+	}
+}
+
 func TestManagerProbeObservationIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 11, 1, 2, 3, 0, time.UTC)
 	m := newReadinessTestManager(t)

@@ -144,6 +144,42 @@ func TestManagerPoolSwitchRejectsPoolWithoutWorkers(t *testing.T) {
 	}
 }
 
+func TestManagerPoolModeChangedEventContract(t *testing.T) {
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeActive, []string{"primary", "backup"}, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+	})
+	defer m.Close()
+
+	response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", `{"mode":"disabled"}`)
+	events := m.events.Replay(0)
+	gotEvent := events[len(events)-1]
+	gotPool, gotPrevious, gotMode, gotOK := gotEvent.AsUpstreamPoolModeChanged()
+	got := struct {
+		Status   int
+		Event    Event
+		Pool     string
+		Previous config.UpstreamPoolMode
+		Mode     config.UpstreamPoolMode
+		OK       bool
+	}{response.Code, gotEvent, gotPool, gotPrevious, gotMode, gotOK}
+	want := struct {
+		Status   int
+		Event    Event
+		Pool     string
+		Previous config.UpstreamPoolMode
+		Mode     config.UpstreamPoolMode
+		OK       bool
+	}{http.StatusOK, Event{
+		ID: gotEvent.ID, Type: EventUpstreamPoolModeChanged, At: gotEvent.At,
+		Payload: map[string]any{
+			"pool": "coding-ha", "previous_mode": config.UpstreamPoolModeActive, "mode": config.UpstreamPoolModeDisabled,
+		},
+	}, "coding-ha", config.UpstreamPoolModeActive, config.UpstreamPoolModeDisabled, true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected pool mode event contract:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestManagerPoolSwitchRollsBackPartialFailure(t *testing.T) {
 	client := &recordingWorkerClient{
 		runtimeStates: map[int]appruntime.WorkerRuntime{

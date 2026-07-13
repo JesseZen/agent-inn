@@ -20,7 +20,7 @@ import type {
   SnapshotFileDiff,
   ConsoleState,
 } from "@agent-inn/sdk/v2"
-import type { PoolReadiness, ProxyConfigStatus, RedactedUpstream, UpstreamProbeResult, WorkerSummary } from "./sdk"
+import type { PoolReadiness, ProxyConfigStatus, RedactedUpstream, UpstreamPool, UpstreamProbeResult, WorkerSummary } from "./sdk"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "./project"
 import { useEvent } from "./event"
@@ -310,12 +310,20 @@ export const {
             return
           }
           if (event.type === "upstream.probed") {
-            const probe = event.payload as UpstreamProbeResult & { pool?: string; eligible?: boolean }
+            const probe = event.payload as UpstreamProbeResult & PoolReadiness & Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool?: string }
             if (!probe.pool) {
               setStore("upstreamProbes", probe.upstream, reconcile(probe))
               return
             }
             setStore("upstreams", reconcile(mergePoolReadiness(store.upstreams, probe as PoolReadiness)))
+            setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
+              if (pool.id !== probe.pool) return pool
+              const readiness = [...pool.readiness]
+              const index = readiness.findIndex((item) => item.upstream === probe.upstream)
+              if (index < 0) readiness.push(probe)
+              else readiness[index] = probe
+              return { ...pool, readiness, probe_state: probe.probe_state, next_probe_at: probe.next_probe_at }
+            })))
             return
           }
           if (event.type === "upstream.circuit.changed") {
