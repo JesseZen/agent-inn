@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"testing"
@@ -296,6 +297,60 @@ func TestManagerPoolRefreshRejectsStaleIdentityResult(t *testing.T) {
 	}, map[poolProbeScheduleKey]poolProbeSchedule{}, nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("stale manual result changed readiness:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerPoolProbeRechecksDeletedPoolUnderAuthority(t *testing.T) {
+	m := newPoolActionTestManager(t, config.UpstreamPoolModeActive, []string{"primary"}, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+	})
+	m.cancelProbes()
+	defer m.Close()
+	m.mu.RLock()
+	_, routeSawPool := m.config.UpstreamPools["coding-ha"]
+	m.mu.RUnlock()
+	if !routeSawPool {
+		t.Fatal("route-level setup did not observe pool")
+	}
+	m.updateConfig(func(cfg *config.Config) { delete(cfg.UpstreamPools, "coding-ha") })
+	wantAuthority := struct {
+		Readiness map[string]readinessObservation
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
+		Desired   map[probeExecutionKey]probeSpec
+		Manual    map[probeExecutionKey]probeSpec
+		Pending   map[probeExecutionKey]probeSpec
+	}{maps.Clone(m.readiness), maps.Clone(m.probeSchedules), maps.Clone(m.desiredProbes), maps.Clone(m.manualProbes), maps.Clone(m.pendingProbes)}
+
+	response := httptest.NewRecorder()
+	m.handleUpstreamPoolProbe(response, httptest.NewRequest(http.MethodPost, "http://manager.local/api/upstream-pools/coding-ha/probe", nil), "coding-ha")
+	got := struct {
+		Code      int
+		Authority struct {
+			Readiness map[string]readinessObservation
+			Schedules map[poolProbeScheduleKey]poolProbeSchedule
+			Desired   map[probeExecutionKey]probeSpec
+			Manual    map[probeExecutionKey]probeSpec
+			Pending   map[probeExecutionKey]probeSpec
+		}
+	}{response.Code, struct {
+		Readiness map[string]readinessObservation
+		Schedules map[poolProbeScheduleKey]poolProbeSchedule
+		Desired   map[probeExecutionKey]probeSpec
+		Manual    map[probeExecutionKey]probeSpec
+		Pending   map[probeExecutionKey]probeSpec
+	}{maps.Clone(m.readiness), maps.Clone(m.probeSchedules), maps.Clone(m.desiredProbes), maps.Clone(m.manualProbes), maps.Clone(m.pendingProbes)}}
+	want := struct {
+		Code      int
+		Authority struct {
+			Readiness map[string]readinessObservation
+			Schedules map[poolProbeScheduleKey]poolProbeSchedule
+			Desired   map[probeExecutionKey]probeSpec
+			Manual    map[probeExecutionKey]probeSpec
+			Pending   map[probeExecutionKey]probeSpec
+		}
+	}{http.StatusNotFound, wantAuthority}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deleted pool probe acquired authority:\n got %#v\nwant %#v", got, want)
 	}
 }
 

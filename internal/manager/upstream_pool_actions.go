@@ -47,10 +47,16 @@ func (m *Manager) handleUpstreamPoolSwitch(rw http.ResponseWriter, r *http.Reque
 	writeJSON(rw, http.StatusOK, m.upstreamPoolSummary(poolName))
 }
 
-func (m *Manager) handleUpstreamPoolProbe(rw http.ResponseWriter, _ *http.Request, poolName string) {
+func (m *Manager) handleUpstreamPoolProbe(rw http.ResponseWriter, r *http.Request, poolName string) {
 	m.failoverMu.Lock()
 	m.mu.RLock()
-	pool := m.config.UpstreamPools[poolName]
+	pool, exists := m.config.UpstreamPools[poolName]
+	if !exists {
+		m.mu.RUnlock()
+		m.failoverMu.Unlock()
+		http.NotFound(rw, r)
+		return
+	}
 	profiles := make(map[string]config.UpstreamProfile, len(pool.Upstreams))
 	for _, upstreamName := range pool.Upstreams {
 		profiles[upstreamName] = m.config.Upstreams[upstreamName]
