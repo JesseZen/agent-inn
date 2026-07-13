@@ -4,20 +4,25 @@ import { useKV } from "./kv"
 import { en, type TranslationKey, type TranslationParams } from "../i18n/en"
 import { zhCN } from "../i18n/zh-CN"
 
-export const locales = ["en", "zh-CN"] as const
+export const locales = ["en", "zh-CN", "zh-TW", "ja"] as const
 export type Locale = (typeof locales)[number]
 
 export const localeLabels: Record<Locale, string> = {
   en: "English",
   "zh-CN": "简体中文",
+  "zh-TW": "繁體中文",
+  ja: "日本語",
 }
 
 const LOCALE_KV_KEY = "locale"
 
 export function detectLocale(value: string | undefined): Locale | undefined {
   if (!value) return undefined
-  if (value.startsWith("zh")) return "zh-CN"
-  if (value.startsWith("en")) return "en"
+  const normalized = value.replace("_", "-").toLowerCase()
+  if (["zh-hant", "zh-tw", "zh-hk", "zh-mo"].some((locale) => normalized.startsWith(locale))) return "zh-TW"
+  if (normalized.startsWith("zh")) return "zh-CN"
+  if (normalized.startsWith("ja")) return "ja"
+  if (normalized.startsWith("en")) return "en"
   return undefined
 }
 

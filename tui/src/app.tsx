@@ -56,6 +56,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { WorkerFrecencyProvider } from "./proxy/worker-frecency-context"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogSelect } from "./ui/dialog-select"
 import { ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -816,8 +817,21 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: language.t("language.switch"),
         slashName: "language",
         run: () => {
-          language.setLocale(language.locale === "en" ? "zh-CN" : "en")
-          dialog.clear()
+          dialog.replace(() => (
+            <DialogSelect
+              title={language.t("language.name")}
+              options={language.locales.map((locale) => ({
+                title: language.labels[locale],
+                value: locale,
+              }))}
+              current={language.locale}
+              skipFilter
+              onSelect={(option) => {
+                language.setLocale(option.value)
+                dialog.clear()
+              }}
+            />
+          ))
         },
         category: language.t("category.system"),
       },
