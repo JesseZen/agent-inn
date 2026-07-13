@@ -35,7 +35,8 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   const currentWorker = createMemo(() => sync.data.workers.find((item) => item.id === props.worker.id) ?? props.worker)
   const fallbackPoolName = createMemo(() => {
     const poolID = currentWorker().upstream_pool
-    return poolID ? sync.data.upstreamPools.find((pool) => pool.id === poolID)!.name : t("common.none")
+    if (!poolID) return t("common.none")
+    return sync.data.upstreamPools.find((pool) => pool.id === poolID)?.name ?? poolID
   })
   const modules = createMemo(() => Object.entries(props.worker.modules ?? {}))
   const hooks = createMemo(() => Object.entries(props.worker.hooks ?? {}))

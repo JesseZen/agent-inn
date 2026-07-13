@@ -4448,12 +4448,12 @@ func TestManagerPatchUpstreamRenamesDisplayNameWithoutChangingID(t *testing.T) {
 	}
 }
 
-func TestManagerPatchUpstreamCreatesMissingUpstream(t *testing.T) {
+func TestManagerCreateUpstreamAllocatesPersistentID(t *testing.T) {
 	m := New(Config{Config: config.Config{}})
-	body := strings.NewReader(`{"base_url":"https://api.groq.com/openai/v1","api_format":"chat_completions"}`)
+	body := strings.NewReader(`{"name":"Groq Main"}`)
 	res := httptest.NewRecorder()
-	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/groq", body))
-	if res.Code != http.StatusOK {
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/upstreams", body))
+	if res.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
 	var got upstream.RedactedUpstream
@@ -4461,22 +4461,32 @@ func TestManagerPatchUpstreamCreatesMissingUpstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := upstream.RedactedUpstream{
-		ID:        "groq",
-		Name:      "groq",
-		BaseURL:   "https://api.groq.com/openai/v1",
+		ID:        "up_1",
+		Name:      "Groq Main",
 		APIFormat: "chat_completions",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected upstream: got %#v want %#v", got, want)
 	}
 	if !reflect.DeepEqual(m.upstreamProfileSnapshot(), map[string]config.UpstreamProfile{
-		"groq": {
-			Name:      "groq",
-			BaseURL:   "https://api.groq.com/openai/v1",
+		"up_1": {
+			Name:      "Groq Main",
 			APIFormat: "chat_completions",
 		},
 	}) {
 		t.Fatalf("unexpected profiles: %#v", m.upstreamProfileSnapshot())
+	}
+	if got := m.store.Config().NextUpstreamID; got != 2 {
+		t.Fatalf("unexpected next upstream id: %d", got)
+	}
+}
+
+func TestManagerPatchMissingUpstreamReturnsNotFound(t *testing.T) {
+	m := New(Config{Config: config.Config{}})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/upstreams/groq", strings.NewReader(`{"name":"Groq"}`)))
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
 }
 

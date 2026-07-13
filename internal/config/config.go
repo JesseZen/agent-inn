@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -19,11 +20,12 @@ const (
 )
 
 type Config struct {
-	Settings      Settings                    `yaml:"settings"`
-	Plugins       map[string]PluginDefinition `yaml:"plugins" json:"plugins,omitempty"`
-	Workers       map[string]WorkerConfig     `yaml:"workers"`
-	Upstreams     map[string]UpstreamProfile  `yaml:"upstreams"`
-	UpstreamPools map[string]UpstreamPool     `yaml:"upstream_pools"`
+	Settings       Settings                    `yaml:"settings"`
+	Plugins        map[string]PluginDefinition `yaml:"plugins" json:"plugins,omitempty"`
+	Workers        map[string]WorkerConfig     `yaml:"workers"`
+	NextUpstreamID int                         `yaml:"next_upstream_id" json:"next_upstream_id"`
+	Upstreams      map[string]UpstreamProfile  `yaml:"upstreams"`
+	UpstreamPools  map[string]UpstreamPool     `yaml:"upstream_pools"`
 }
 
 const (
@@ -143,11 +145,12 @@ type UpstreamProfile struct {
 
 func (c Config) Clone() Config {
 	out := Config{
-		Settings:      c.Settings,
-		Plugins:       make(map[string]PluginDefinition, len(c.Plugins)),
-		Workers:       make(map[string]WorkerConfig, len(c.Workers)),
-		Upstreams:     make(map[string]UpstreamProfile, len(c.Upstreams)),
-		UpstreamPools: make(map[string]UpstreamPool, len(c.UpstreamPools)),
+		Settings:       c.Settings,
+		Plugins:        make(map[string]PluginDefinition, len(c.Plugins)),
+		Workers:        make(map[string]WorkerConfig, len(c.Workers)),
+		NextUpstreamID: c.NextUpstreamID,
+		Upstreams:      make(map[string]UpstreamProfile, len(c.Upstreams)),
+		UpstreamPools:  make(map[string]UpstreamPool, len(c.UpstreamPools)),
 	}
 	for name, plugin := range c.Plugins {
 		out.Plugins[name] = plugin
@@ -243,6 +246,18 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Upstreams == nil {
 		c.Upstreams = map[string]UpstreamProfile{}
+	}
+	for id := range c.Upstreams {
+		if !strings.HasPrefix(id, "up_") {
+			continue
+		}
+		number, err := strconv.Atoi(strings.TrimPrefix(id, "up_"))
+		if err == nil && number >= c.NextUpstreamID {
+			c.NextUpstreamID = number + 1
+		}
+	}
+	if c.NextUpstreamID < 1 {
+		c.NextUpstreamID = 1
 	}
 	if c.UpstreamPools == nil {
 		c.UpstreamPools = map[string]UpstreamPool{}

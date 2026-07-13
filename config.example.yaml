@@ -37,7 +37,7 @@ plugins:
 workers:
     codex-app:
         port: 6767
-        upstream: joycode
+        upstream: up_1
         upstream_pool: codex-ha
         launcher: codex
         # Optional outbound HTTP proxy for this worker.
@@ -59,16 +59,20 @@ workers:
             config_patch:
                 enabled: true
                 config_path: ~/.codex/config.toml
+next_upstream_id: 4
 upstreams:
-    joycode:
+    up_1:
+        name: joycode
         base_url: https://api.joycode.dev/v1
         api_key: sk-...
         api_format: chat_completions
-    anthropic:
+    up_2:
+        name: anthropic
         base_url: https://api.anthropic.com/v1
         api_key: sk-...
         api_format: anthropic
-    openrouter:
+    up_3:
+        name: openrouter
         base_url: https://openrouter.ai/api/v1
         api_key: sk-...
         api_format: chat_completions
@@ -87,8 +91,8 @@ upstream_pools:
             stable_interval_seconds: 900
             alert_interval_seconds: 60
         upstreams:
-            - joycode
-            - openrouter
+            - up_1
+            - up_3
         circuit_breaker:
             failure_threshold: 3
             recovery_success_threshold: 2

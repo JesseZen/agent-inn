@@ -13,6 +13,31 @@ import (
 )
 
 func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var payload struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+			return
+		}
+		name := strings.TrimSpace(payload.Name)
+		if name == "" {
+			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "upstream name is required"})
+			return
+		}
+		profile := config.UpstreamProfile{Name: name, APIFormat: "chat_completions"}
+		var id string
+		m.updateConfig(func(cfgRoot *config.Config) {
+			id = fmt.Sprintf("up_%d", cfgRoot.NextUpstreamID)
+			cfgRoot.NextUpstreamID++
+			cfgRoot.Upstreams[id] = profile
+		})
+		runtime, _ := upstream.ResolveWithDisplayName(id, profile.Name, profile)
+		m.publishEvent(EventUpstreamUpdated, map[string]any{"upstream": id})
+		writeJSON(rw, http.StatusCreated, runtime.Redacted())
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.NotFound(rw, r)
 		return
@@ -111,7 +136,11 @@ func (m *Manager) handleUpstreamByName(rw http.ResponseWriter, r *http.Request) 
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 		return
 	}
-	current := m.upstreamProfileSnapshot()[name]
+	current, exists := m.upstreamProfileSnapshot()[name]
+	if !exists {
+		http.NotFound(rw, r)
+		return
+	}
 	profile := current
 	if patch.Name != nil {
 		profile.Name = strings.TrimSpace(*patch.Name)

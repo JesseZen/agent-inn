@@ -81,11 +81,18 @@ export function DialogUpstream() {
           const name = await DialogPrompt.show(dialog, t("proxy.upstream.newName"), { placeholder: t("proxy.upstream.namePlaceholder") })
           if (name === null) return
           const upstreamName = name.trim()
-          if (!upstreamName || upstreamName.includes("/")) {
+          if (!upstreamName) {
             toast.show({ message: t("proxy.upstream.invalidName"), variant: "error" })
             return
           }
-          dialog.push(() => <DialogUpstreamEditor id={upstreamName} draft={{ name: upstreamName, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false, protocol_probe_model: "" }} mode="created" />)
+          try {
+            const upstream = await sdk.client.createUpstream({ name: upstreamName })
+            await sync.bootstrap({ fatal: false })
+            toast.show({ message: t("proxy.upstream.created", { name: upstream.name }), variant: "success" })
+            dialog.push(() => <DialogUpstreamEditor id={upstream.id} draft={{ name: upstream.name, base_url: "", api_key: "", api_format: "chat_completions", has_api_key: false, protocol_probe_model: "" }} />)
+          } catch (err) {
+            toast.error(err)
+          }
           return
         }
 
@@ -120,7 +127,6 @@ export function DialogUpstream() {
               has_api_key: upstream.has_api_key,
               protocol_probe_model: upstream.protocol_probe?.model ?? "",
             }}
-            mode="saved"
           />
         ))
       }}
@@ -128,7 +134,7 @@ export function DialogUpstream() {
   )
 }
 
-export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "created" | "saved" }) {
+export function DialogUpstreamEditor(props: { id: string; draft: Draft }) {
   const sync = useSync()
   const sdk = useSDK()
   const dialog = useDialog()
@@ -160,7 +166,7 @@ export function DialogUpstreamEditor(props: { id: string; draft: Draft; mode: "c
           await sdk.client.patchUpstream(props.id, patch)
           await sync.bootstrap({ fatal: false })
           const name = "name" in patch ? patch.name ?? draft().name : draft().name
-          toast.show({ message: t(props.mode === "created" ? "proxy.upstream.created" : "proxy.upstream.saved", { name }), variant: "success" })
+          toast.show({ message: t("proxy.upstream.saved", { name }), variant: "success" })
         } catch (err) {
           toast.error(err)
         }

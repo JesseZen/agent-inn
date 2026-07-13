@@ -89,6 +89,31 @@ upstreams:
 	if cfg.Workers["codex-app"].Launcher != "codex" {
 		t.Fatalf("expected worker launcher defaults, got %#v", cfg.Workers["codex-app"])
 	}
+	if cfg.NextUpstreamID != 1 {
+		t.Fatalf("expected first generated upstream id, got %d", cfg.NextUpstreamID)
+	}
+}
+
+func TestLoadDerivesNextUpstreamID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+upstreams:
+  up_2:
+    base_url: https://two.example/v1
+  up_7:
+    base_url: https://seven.example/v1
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NextUpstreamID != 8 {
+		t.Fatalf("expected next upstream id 8, got %d", cfg.NextUpstreamID)
+	}
 }
 
 func TestLoadFileDecodesUpstreamPoolRouting(t *testing.T) {

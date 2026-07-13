@@ -104,7 +104,6 @@ test("mounted upstream actions react to locale and draft name changes", async ()
           has_api_key: true,
           protocol_probe_model: "",
         }}
-        mode="saved"
       />
     )
   }

@@ -240,6 +240,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     getWorkerRoute: [] as string[],
     patchModuleRoute: [] as string[],
     patchWorkerBodies: [] as Array<Record<string, unknown>>,
+    createUpstream: [] as Array<{ name: string }>,
     patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } } }>,
     createUpstreamPool: [] as Array<{ name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }>,
     patchUpstreamPool: [] as Array<{
@@ -382,6 +383,21 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     const request = requestInput instanceof Request ? requestInput : undefined
     const url = new URL(request ? request.url : String(requestInput))
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
+
+    if (url.pathname === "/api/upstreams" && method === "POST") {
+      const body = JSON.parse(String(init?.body ?? "null")) as { name: string }
+      calls.createUpstream.push(body)
+      const id = `up_${providers.size + 1}`
+      const upstream: RedactedUpstream = {
+        id,
+        name: body.name,
+        base_url: "",
+        has_api_key: false,
+        api_format: "chat_completions",
+      }
+      providers.set(id, upstream)
+      return json(upstream, { status: 201 })
+    }
 
     const hostedSessionRoute = url.pathname.match(/^\/api\/hosted-sessions\/([^/]+)$/)
     if (hostedSessionRoute && method === "PATCH") {

@@ -241,11 +241,11 @@ test("proxy upstream creates a new upstream", async () => {
       return app.frame().includes("New Upstream Name")
     })
 
-    await app.mockInput.typeText("groq")
+    await app.mockInput.typeText("Groq Main")
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Edit Upstream: groq")
+      return app.frame().includes("Edit Upstream: Groq Main")
     })
 
     await runCommand(app, "dialog.select.next")
@@ -265,16 +265,17 @@ test("proxy upstream creates a new upstream", async () => {
 
     expect(app.calls.patchUpstream).toEqual([
       {
-        id: "groq",
+        id: "up_3",
         body: { base_url: "https://api.groq.com/openai/v1" },
       },
     ])
+    expect(app.calls.createUpstream).toEqual([{ name: "Groq Main" }])
   } finally {
     await app.cleanup()
   }
 })
 
-test("proxy upstream invalid create name stays in manager", async () => {
+test("proxy upstream rejects an empty display name", async () => {
   const app = await mountProxyApp()
 
   try {
@@ -287,7 +288,7 @@ test("proxy upstream invalid create name stays in manager", async () => {
       return app.frame().includes("New Upstream Name")
     })
 
-    await app.mockInput.typeText("bad/name")
+    await app.mockInput.typeText("   ")
     app.api.keymap.dispatchCommand("dialog.prompt.submit")
     await wait(async () => {
       await app.render()

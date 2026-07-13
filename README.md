@@ -151,7 +151,7 @@ settings:
 workers:
   codex-app:              # Worker name
     port: 6767            # Local listen port
-    upstream: joycode     # Bound Upstream
+    upstream: up_1        # Stable Upstream ID
     upstream_pool: codex-ha # Optional ordered fallback pool
     role: cli             # "cli" (default) or "app"
     launcher: codex       # "codex" (default) or "claudecode"
@@ -168,24 +168,29 @@ workers:
         enabled: true
 
 # Upstream definitions
+next_upstream_id: 5       # Next system-allocated Upstream ID
 upstreams:
-  joycode:
+  up_1:
+    name: joycode
     base_url: https://api.joycode.dev/v1
     api_key: sk-...                   # Plain key in config is supported
     api_format: chat_completions       # Requires Chat Completions translation
 
-  openrouter:
+  up_2:
+    name: openrouter
     base_url: https://openrouter.ai/api/v1
     api_key: sk-...
     api_format: chat_completions
 
-  openai:
+  up_3:
+    name: openai
     base_url: https://api.openai.com/v1
     api_key: sk-...                    # Plain key is supported
     # <UPSTREAM_NAME>_API_KEY env var wins over config if set (e.g. OPENAI_API_KEY)
     # No api_format = native Responses API passthrough
 
-  anthropic:
+  up_4:
+    name: anthropic
     base_url: https://api.anthropic.com/v1
     api_key: sk-...
     api_format: anthropic              # Native Anthropic API passthrough for Claude Code
@@ -195,8 +200,8 @@ upstreams:
 upstream_pools:
   codex-ha:
     upstreams:
-      - joycode
-      - openrouter
+      - up_1
+      - up_2
     circuit_breaker:
       failure_threshold: 3
       recovery_success_threshold: 2
@@ -204,6 +209,8 @@ upstream_pools:
 ```
 
 Leaving `api_format` empty or unset = native Responses API passthrough, no translation.
+
+New upstreams receive immutable IDs such as `up_5`; `name` is the editable display name shown in the UI.
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `launcher` defaults to `"codex"`, and `log_level` defaults to `"simple"`.
 

@@ -217,7 +217,6 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
           has_api_key: node.data.has_api_key,
           protocol_probe_model: node.data.protocol_probe?.model ?? "",
         }}
-        mode="saved"
       />
     ))
   }

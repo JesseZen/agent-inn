@@ -1376,11 +1376,12 @@ func (m *Manager) liveWorkersUsingUpstream(upstreamName string) []liveWorkerTarg
 
 func cloneConfig(cfg config.Config) config.Config {
 	out := config.Config{
-		Settings:      cfg.Settings,
-		Plugins:       clonePluginDefinitions(cfg.Plugins),
-		Workers:       make(map[string]config.WorkerConfig, len(cfg.Workers)),
-		Upstreams:     make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
-		UpstreamPools: make(map[string]config.UpstreamPool, len(cfg.UpstreamPools)),
+		Settings:       cfg.Settings,
+		Plugins:        clonePluginDefinitions(cfg.Plugins),
+		Workers:        make(map[string]config.WorkerConfig, len(cfg.Workers)),
+		NextUpstreamID: cfg.NextUpstreamID,
+		Upstreams:      make(map[string]config.UpstreamProfile, len(cfg.Upstreams)),
+		UpstreamPools:  make(map[string]config.UpstreamPool, len(cfg.UpstreamPools)),
 	}
 	for name, worker := range cfg.Workers {
 		out.Workers[name] = cloneWorkerConfig(worker)
