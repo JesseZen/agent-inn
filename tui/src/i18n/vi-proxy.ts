@@ -256,6 +256,7 @@ export const proxyVi = {
   "proxy.batch.selectVariant": "Chọn biến thể...",
   "proxy.batch.deleteTitle": "Xóa hàng loạt",
   "proxy.batch.deleteConfirm": "Xóa tất cả các biến thể, phiên được lưu trữ và sơ đồ công việc?",
+  "proxy.batch.createFailed": "Tạo lô không thành công",
   "proxy.batch.deleteFailed": "Xóa lô không thành công",
   "proxy.batch.category": "Lô",
   "proxy.batch.categoryAction": "hành động",

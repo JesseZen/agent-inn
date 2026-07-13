@@ -260,6 +260,7 @@ export const proxyEn = {
   "proxy.batch.selectVariant": "Select variant...",
   "proxy.batch.deleteTitle": "Delete batch",
   "proxy.batch.deleteConfirm": "Remove all variants, hosted sessions, and worktrees?",
+  "proxy.batch.createFailed": "Create batch failed",
   "proxy.batch.deleteFailed": "Delete batch failed",
   "proxy.batch.category": "Batches",
   "proxy.batch.categoryAction": "Action",

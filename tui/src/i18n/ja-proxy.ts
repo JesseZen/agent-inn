@@ -256,6 +256,7 @@ export const proxyJa = {
   "proxy.batch.selectVariant": "バリエーションを選択...",
   "proxy.batch.deleteTitle": "バッチの削除",
   "proxy.batch.deleteConfirm": "すべてのバリアント、ホストされたセッション、およびワークツリーを削除しますか?",
+  "proxy.batch.createFailed": "バッチの作成に失敗しました",
   "proxy.batch.deleteFailed": "バッチの削除に失敗しました",
   "proxy.batch.category": "バッチ",
   "proxy.batch.categoryAction": "アクション",

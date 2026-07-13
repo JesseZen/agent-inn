@@ -256,6 +256,7 @@ export const proxyRu = {
   "proxy.batch.selectVariant": "Выберите вариант...",
   "proxy.batch.deleteTitle": "Удалить пакет",
   "proxy.batch.deleteConfirm": "Удалить все варианты, размещенные сеансы и рабочие деревья?",
+  "proxy.batch.createFailed": "Не удалось создать пакет",
   "proxy.batch.deleteFailed": "Удалить пакет не удалось",
   "proxy.batch.category": "Пакеты",
   "proxy.batch.categoryAction": "Действие",

@@ -256,6 +256,7 @@ export const proxyIt = {
   "proxy.batch.selectVariant": "Seleziona variante...",
   "proxy.batch.deleteTitle": "Elimina batch",
   "proxy.batch.deleteConfirm": "Rimuovere tutte le varianti, le sessioni ospitate e gli alberi di lavoro?",
+  "proxy.batch.createFailed": "Creazione batch non riuscita",
   "proxy.batch.deleteFailed": "Eliminazione batch non riuscita",
   "proxy.batch.category": "Lotti",
   "proxy.batch.categoryAction": "Azione",

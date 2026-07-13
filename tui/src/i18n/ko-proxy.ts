@@ -256,6 +256,7 @@ export const proxyKo = {
   "proxy.batch.selectVariant": "변형 선택...",
   "proxy.batch.deleteTitle": "배치 삭제",
   "proxy.batch.deleteConfirm": "모든 변형, 호스팅 세션, 작업 트리를 삭제하시겠습니까?",
+  "proxy.batch.createFailed": "일괄 생성 실패",
   "proxy.batch.deleteFailed": "일괄 삭제 실패",
   "proxy.batch.category": "배치",
   "proxy.batch.categoryAction": "액션",

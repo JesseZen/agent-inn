@@ -256,6 +256,7 @@ export const proxyZhTW = {
   "proxy.batch.selectVariant": "選擇變體...",
   "proxy.batch.deleteTitle": "刪除批次",
   "proxy.batch.deleteConfirm": "刪除所有變體、託管會話和工作樹？",
+  "proxy.batch.createFailed": "建立批次失敗",
   "proxy.batch.deleteFailed": "刪除批次失敗",
   "proxy.batch.category": "批次",
   "proxy.batch.categoryAction": "行動",

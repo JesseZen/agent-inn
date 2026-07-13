@@ -256,6 +256,7 @@ export const proxyDe = {
   "proxy.batch.selectVariant": "Variante auswählen...",
   "proxy.batch.deleteTitle": "Charge löschen",
   "proxy.batch.deleteConfirm": "Alle Varianten, gehosteten Sitzungen und Arbeitsbäume entfernen?",
+  "proxy.batch.createFailed": "Stapel konnte nicht erstellt werden",
   "proxy.batch.deleteFailed": "Das Löschen des Stapels ist fehlgeschlagen",
   "proxy.batch.category": "Chargen",
   "proxy.batch.categoryAction": "Aktion",

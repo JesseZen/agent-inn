@@ -260,6 +260,7 @@ export const proxyZhCN = {
   "proxy.batch.selectVariant": "选择变体...",
   "proxy.batch.deleteTitle": "删除批处理",
   "proxy.batch.deleteConfirm": "移除所有变体、托管会话和工作树？",
+  "proxy.batch.createFailed": "创建批处理失败",
   "proxy.batch.deleteFailed": "删除批处理失败",
   "proxy.batch.category": "批处理",
   "proxy.batch.categoryAction": "操作",

@@ -75,7 +75,6 @@ export function DialogBatch(props: DialogBatchProps = {}) {
       tmuxHostSession: settings.settings.terminal.tmux.host_session,
       hostedTerminalAttachMode,
     })
-
   }
 
   function createBatch() {
@@ -130,18 +129,22 @@ export function DialogBatch(props: DialogBatchProps = {}) {
     })
     if (model === null) return
 
-    const batch = await sdk.client.createBatch({
-      title,
-      worker_name: worker.name,
-      ...(count !== undefined ? { count } : {}),
-      source_directory: sourceDirectory,
-      ...(model ? { model } : {}),
-    })
-    for (const variant of batch.variants) {
-      await launchVariant(batch, variant, "setup-only")
+    try {
+      const batch = await sdk.client.createBatch({
+        title,
+        worker_name: worker.id,
+        ...(count !== undefined ? { count } : {}),
+        source_directory: sourceDirectory,
+        ...(model ? { model } : {}),
+      })
+      for (const variant of batch.variants) {
+        await launchVariant(batch, variant, "setup-only")
+      }
+      if (batch.variants.length > 0) await launchVariant(batch, batch.variants[0], "open")
+      dialog.replace(() => <DialogBatchRun batch={batch} launchSession={props.launchSession} />)
+    } catch (err) {
+      await DialogAlert.show(dialog, t("proxy.batch.createFailed"), String(err instanceof Error ? err.message : err))
     }
-    if (batch.variants.length > 0) await launchVariant(batch, batch.variants[0], "open")
-    dialog.replace(() => <DialogBatchRun batch={batch} launchSession={props.launchSession} />)
   }
 
   return (

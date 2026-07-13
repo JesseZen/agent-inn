@@ -256,6 +256,7 @@ export const proxyPt = {
   "proxy.batch.selectVariant": "Selecione a variante...",
   "proxy.batch.deleteTitle": "Excluir lote",
   "proxy.batch.deleteConfirm": "Remover todas as variantes, sessões hospedadas e árvores de trabalho?",
+  "proxy.batch.createFailed": "Falha ao criar lote",
   "proxy.batch.deleteFailed": "Falha ao excluir lote",
   "proxy.batch.category": "Lotes",
   "proxy.batch.categoryAction": "Ação",

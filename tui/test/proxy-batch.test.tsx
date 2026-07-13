@@ -144,6 +144,81 @@ test("proxy batch create flow sets up variants before opening one hosted termina
   }
 })
 
+test("proxy batch create flow submits worker id when display name differs", async () => {
+  installLaunchMock()
+  const { mountProxyApp, runCommand, wait } = await loadProxyFixture()
+  const app = await mountProxyApp({
+    workers: [
+      {
+        id: "claude",
+        name: "🅰claude",
+        port: 53054,
+        role: "cli",
+        launcher: "claudecode",
+        upstream: {
+          id: "anthropic",
+          name: "anthropic",
+          base_url: "https://api.anthropic.com/v1",
+          has_api_key: true,
+          api_format: "anthropic",
+        },
+        status: "running",
+        snapshot_generation: 1,
+        log_level: "simple",
+      },
+    ],
+  })
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.batch")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Create a worktree race")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Choose worker") && app.setup.renderer.currentFocusedEditor instanceof InputRenderable
+    })
+    expect(app.frame()).toContain("🅰claude")
+    await app.mockInput.typeText("claude")
+    await runCommand(app, "dialog.select.submit")
+
+    await submitPrompt(app)
+    await submitPrompt(app, "fix scroll")
+    await submitPrompt(app, "1")
+    await submitPrompt(app)
+
+    await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 2)
+
+    expect(app.calls.createBatch).toEqual([
+      {
+        title: "fix scroll",
+        worker_name: "claude",
+        count: 1,
+        source_directory: directory,
+      },
+    ])
+    expect(launchCalls).toEqual([
+      expect.objectContaining({
+        workerPort: 53054,
+        profile: "claude",
+        mode: "hosted-terminal",
+        hostedTerminalAttachMode: "setup-only",
+      }),
+      expect.objectContaining({
+        workerPort: 53054,
+        profile: "claude",
+        mode: "hosted-terminal",
+        hostedTerminalAttachMode: "open",
+      }),
+    ])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy batch create flow does not inspect tmux windows", async () => {
   installLaunchMock()
   const { mountProxyApp, runCommand, wait } = await loadProxyFixture()

@@ -737,7 +737,11 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     if (url.pathname === "/api/batches" && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "null")) as CreateBatchRequest
       calls.createBatch.push(body)
-      const workerPort = [...workers.values()].find((worker) => worker.name === body.worker_name)?.port ?? 0
+      const worker = workers.get(body.worker_name) ?? [...workers.values()].find((item) => item.id === body.worker_name)
+      if (!worker) {
+        return json({ error: `worker ${JSON.stringify(body.worker_name)} not found` }, { status: 400 })
+      }
+      const workerPort = worker.port
       const batchID = `batch_${batches.size + 1}`
       const variantCount = body.count ?? defaultBatchVariantCount
       const variants = Array.from({ length: variantCount }, (_, index) => {
