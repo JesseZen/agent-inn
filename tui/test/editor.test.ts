@@ -1,13 +1,5 @@
-import { afterEach, expect, test } from "bun:test"
+import { expect, test } from "bun:test"
 import { normalizePromptContent, openEditor } from "../src/editor"
-
-const editor = process.env.EDITOR
-const visual = process.env.VISUAL
-
-afterEach(() => {
-  process.env.EDITOR = editor
-  process.env.VISUAL = visual
-})
 
 test("rejects when the external editor exits unsuccessfully", async () => {
   const renderer = {

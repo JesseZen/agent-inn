@@ -78,6 +78,7 @@ export type PromptProps = {
     normal?: string[]
     shell?: string[]
   }
+  editor?: Pick<Parameters<typeof openEditor>[0], "editor" | "runEditor">
 }
 
 function pastedFilepath(value: string, platform: string) {
@@ -442,6 +443,7 @@ export function Prompt(props: PromptProps) {
           const content = await openEditor({
             renderer,
             value,
+            ...props.editor,
             cwd:
               (project.instance.path().worktree === "/" ? undefined : project.instance.path().worktree) ||
               project.instance.directory() ||
