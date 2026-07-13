@@ -57,6 +57,56 @@ test("Proxy dashboard renders translated labels for a Chinese locale", async () 
   }
 })
 
+test("Chinese pool editor renders adaptive probe controls", async () => {
+  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
+  const app = await mountProxyApp({
+    height: 80,
+    upstreamPools: [
+      {
+        id: "codex-ha",
+        name: "codex-ha",
+        mode: "active",
+        probe: { stable_interval_seconds: 900, alert_interval_seconds: 60 },
+        probe_state: "stable",
+        upstreams: ["openai"],
+        circuit_breaker: { failure_threshold: 3, recovery_success_threshold: 2, recovery_wait_seconds: 60 },
+        active_upstream: "openai",
+        workers: ["app"],
+        readiness: [
+          {
+            upstream: "openai",
+            pool: "codex-ha",
+            mode: "protocol",
+            authoritative: true,
+            readiness: "ready",
+            eligible: true,
+            ok: true,
+            status_code: 200,
+            latency_ms: 12,
+          },
+        ],
+      },
+    ],
+  })
+  try {
+    await runCommand(app, "proxy.pools")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await waitForFrame(app, "自动故障转移")
+
+    expect({
+      status: app.frame().includes("探测状态"),
+      policy: app.frame().includes("探测策略"),
+      stable: app.frame().includes("稳定探测间隔 900 秒"),
+      refresh: app.frame().includes("刷新就绪状态"),
+      english: app.frame().includes("Automatic Failover"),
+    }).toEqual({ status: true, policy: true, stable: true, refresh: true, english: false })
+  } finally {
+    await app.cleanup()
+    restoreLocale()
+  }
+})
+
 test("Proxy command labels react to a runtime locale switch", async () => {
   const restoreLocale = setLocaleEnvironment("en_US.UTF-8")
   const app = await mountProxyApp()

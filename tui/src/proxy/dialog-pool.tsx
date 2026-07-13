@@ -23,9 +23,9 @@ const POOL_FIELDS: Array<{ key: PoolField; title: "proxy.pool.failureThreshold" 
   { key: "recovery_wait_seconds", title: "proxy.pool.recoveryWait" },
 ]
 
-const PROBE_FIELDS: Array<{ key: ProbeField; title: string }> = [
-  { key: "stable_interval_seconds", title: "Stable Interval" },
-  { key: "alert_interval_seconds", title: "Alert Interval" },
+const PROBE_FIELDS: Array<{ key: ProbeField; title: "proxy.pool.stableInterval" | "proxy.pool.alertInterval" }> = [
+  { key: "stable_interval_seconds", title: "proxy.pool.stableInterval" },
+  { key: "alert_interval_seconds", title: "proxy.pool.alertInterval" },
 ]
 
 export function DialogPool() {
@@ -83,7 +83,8 @@ export function DialogPoolEditor(props: { id: string }) {
   const sdk = useSDK()
   const dialog = useDialog()
   const toast = useToast()
-  const { t } = useLanguage()
+  const language = useLanguage()
+  const { t } = language
   const pool = createMemo(() => sync.data.upstreamPools.find((item) => item.id === props.id))
 
   async function patchPool(patch: PoolPatch, message: string) {
@@ -102,72 +103,72 @@ export function DialogPoolEditor(props: { id: string }) {
     const current = pool()
     if (!current) return []
     const status: DialogSelectOption<string>[] = [
-      { title: "Mode", value: "status-mode", description: current.mode, category: "Status" },
-      { title: "Probe State", value: "probe-state", description: current.probe_state, category: "Status" },
+      { title: t("proxy.pool.mode"), value: "status-mode", description: current.mode === "active" ? t("proxy.pool.active") : t("common.disabled"), category: t("proxy.pool.status") },
+      { title: t("proxy.pool.probeState"), value: "probe-state", description: current.probe_state, category: t("proxy.pool.status") },
       {
-        title: "Next Probe",
+        title: t("proxy.pool.nextProbe"),
         value: "next-probe",
         description: current.next_probe_at
-          ? Locale.datetime(Date.parse(current.next_probe_at))
-          : current.mode === "disabled" ? "paused" : "none",
-        category: "Status",
+          ? Locale.datetime(Date.parse(current.next_probe_at), language.locale)
+          : current.mode === "disabled" ? t("proxy.pool.paused") : t("proxy.pool.none"),
+        category: t("proxy.pool.status"),
       },
     ]
     const mode: DialogSelectOption<string> = {
-      title: "Automatic Failover",
+      title: t("proxy.pool.automaticFailover"),
       value: "mode",
-      description: current.mode,
-      category: "Mode",
+      description: current.mode === "active" ? t("proxy.pool.active") : t("common.disabled"),
+      category: t("proxy.pool.mode"),
       onSelect: () => dialog.push(() => (
         <DialogSelect
-          title={`Automatic Failover: ${current.name}`}
+          title={t("proxy.pool.automaticFailoverTitle", { name: current.name })}
           options={[
-            { title: "Active", value: "active" as const },
-            { title: "Disabled", value: "disabled" as const },
+            { title: t("proxy.pool.modeActive"), value: "active" as const },
+            { title: t("common.disabled"), value: "disabled" as const },
           ].map((option) => ({
             ...option,
             onSelect: async () => {
-              const saved = await patchPool({ mode: option.value }, `Saved ${current.name}`)
+              const saved = await patchPool({ mode: option.value }, t("proxy.pool.saved", { name: current.name }))
               if (saved) dialog.pop()
             },
           }))}
           current={current.mode}
-          placeholder="Select automatic failover mode..."
+          placeholder={t("proxy.pool.selectFailoverMode")}
         />
       )),
     }
     const probeFields: DialogSelectOption<string>[] = PROBE_FIELDS.map((field) => ({
-      title: field.title,
+      title: t(field.title),
       value: `probe:${field.key}`,
-      description: `${current.probe[field.key]} seconds`,
-      category: "Probe Policy",
+      description: t("proxy.pool.seconds", { seconds: current.probe[field.key] }),
+      category: t("proxy.pool.probePolicy"),
       onSelect: async () => {
-        const value = await DialogPrompt.show(dialog, `${field.title}: ${current.name}`, {
+        const value = await DialogPrompt.show(dialog, `${t(field.title)}: ${current.name}`, {
           value: String(current.probe[field.key]),
           selectAll: true,
         })
         if (value === null) return
         const seconds = Number(value)
         if (!Number.isInteger(seconds) || seconds < 1) {
-          toast.show({ message: `${field.title} must be a positive integer`, variant: "error" })
+          toast.show({ message: t("proxy.pool.positiveInteger", { field: t(field.title) }), variant: "error" })
           return
         }
         const probe = { ...current.probe, [field.key]: seconds }
         if (probe.alert_interval_seconds < MINIMUM_ALERT_INTERVAL_SECONDS) {
           toast.show({
-            message: `upstream pool "${current.name}" alert_interval_seconds must be at least ${MINIMUM_ALERT_INTERVAL_SECONDS}`,
+            message: t("proxy.pool.alertMinimum", { name: current.name, minimum: MINIMUM_ALERT_INTERVAL_SECONDS }),
             variant: "error",
           })
           return
         }
         if (probe.stable_interval_seconds < probe.alert_interval_seconds) {
           toast.show({
-            message: `upstream pool "${current.name}" stable_interval_seconds must be greater than or equal to alert_interval_seconds`,
+            message: t("proxy.pool.stableMinimum", { name: current.name }),
             variant: "error",
           })
           return
         }
-        await patchPool({ probe }, `Saved ${current.name}`)
+        await patchPool({ probe }, t("proxy.pool.saved", { name: current.name }))
       },
     }))
     const circuitFields: DialogSelectOption<string>[] = POOL_FIELDS.map((field) => ({
@@ -200,33 +201,33 @@ export function DialogPoolEditor(props: { id: string }) {
       onSelect: () => dialog.push(() => <DialogPoolMember poolID={current.id} upstream={upstream} />),
     }))
     const switchAction: DialogSelectOption<string> = {
-      title: "Switch Active Upstream",
+      title: t("proxy.pool.switchActive"),
       value: "switch",
-      description: current.active_upstream ?? "none",
-      category: "Actions",
+      description: current.active_upstream ?? t("common.none"),
+      category: t("common.actions"),
       onSelect: () => dialog.push(() => (
         <DialogSelect
-          title={`Switch Active Upstream: ${current.name}`}
+          title={t("proxy.pool.switchActiveTitle", { name: current.name })}
           options={current.upstreams.map((upstream) => {
             const readiness = current.readiness.find((item) => item.upstream === upstream)
             return {
               title: upstream,
               value: upstream,
-              description: `${readiness?.readiness ?? "unknown"} • ${readiness?.eligible ? "eligible" : "ineligible"}`,
+              description: `${readiness?.readiness ?? "unknown"} • ${readiness?.eligible ? t("proxy.pool.eligible") : t("proxy.pool.ineligible")}`,
               onSelect: async () => {
                 const mode = readiness?.eligible ? "normal" : "force"
                 if (mode === "force") {
                   const confirmed = await DialogConfirm.show(
                     dialog,
-                    "Force switch",
-                    `${upstream} is not eligible. Force ${current.name} to this upstream?`,
+                    t("proxy.pool.forceSwitch"),
+                    t("proxy.pool.forceSwitchConfirm", { upstream, name: current.name }),
                   )
                   if (!confirmed) return
                 }
                 try {
                   await sdk.client.switchUpstreamPool(current.id, { upstream, mode })
                   await sync.bootstrap({ fatal: false })
-                  toast.show({ message: `Switched ${current.name} to ${upstream}`, variant: "success" })
+                  toast.show({ message: t("proxy.pool.switched", { name: current.name, upstream }), variant: "success" })
                   dialog.pop()
                 } catch (error) {
                   toast.error(error)
@@ -235,7 +236,7 @@ export function DialogPoolEditor(props: { id: string }) {
             }
           })}
           current={current.active_upstream}
-          placeholder="Select a pool member..."
+          placeholder={t("proxy.pool.selectMember")}
         />
       )),
     }
@@ -251,11 +252,11 @@ export function DialogPoolEditor(props: { id: string }) {
       ...probeFields,
       ...circuitFields,
       ...(current.workers.length > 0 ? [switchAction] : []),
-      { title: "Refresh Readiness", value: "refresh", description: current.probe_state, category: "Actions", onSelect: async () => {
+      { title: t("proxy.pool.refreshReadiness"), value: "refresh", description: current.probe_state, category: t("common.actions"), onSelect: async () => {
         try {
           await sdk.client.probeUpstreamPool(current.id)
           await sync.bootstrap({ fatal: false })
-          toast.show({ message: `Refreshed ${current.name} readiness`, variant: "success" })
+          toast.show({ message: t("proxy.pool.refreshed", { name: current.name }), variant: "success" })
         } catch (error) {
           toast.error(error)
         }
