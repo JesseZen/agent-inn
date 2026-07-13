@@ -3,6 +3,7 @@ import { InputRenderable, TextareaRenderable } from "@opentui/core"
 import { mountProxyApp, openUpstreamEditor, openUpstreamManager, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 import { mergePoolReadiness } from "../src/context/sync"
 import type { UpstreamPool } from "../src/proxy/backend"
+import { Locale } from "../src/util/locale"
 
 test("pool editor shows runtime status and adaptive intervals", async () => {
   const pool: UpstreamPool = {
@@ -36,7 +37,9 @@ test("pool editor shows runtime status and adaptive intervals", async () => {
     const status = lines.indexOf("Status")
     const statusMode = lines.findIndex((line) => line.includes("Mode active"))
     const probeState = lines.findIndex((line) => line.includes("Probe State stable"))
-    const nextProbe = lines.findIndex((line) => line.includes("Next Probe 2026-07-13T02:45:00Z"))
+    const nextProbe = lines.findIndex((line) =>
+      line.includes(`Next Probe ${Locale.datetime(Date.parse(pool.next_probe_at!))}`),
+    )
     const mode = lines.indexOf("Mode", statusMode + 1)
     const automaticFailover = lines.findIndex((line) => line.includes("Automatic Failover active"))
     const members = lines.indexOf("Members")

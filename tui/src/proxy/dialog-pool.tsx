@@ -6,6 +6,7 @@ import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
+import { Locale } from "../util/locale"
 import type { UpstreamPool } from "./backend"
 
 type PoolOption = { type: "create" } | { type: "edit"; id: string }
@@ -103,7 +104,9 @@ export function DialogPoolEditor(props: { id: string }) {
       {
         title: "Next Probe",
         value: "next-probe",
-        description: current.next_probe_at ?? (current.mode === "disabled" ? "paused" : "none"),
+        description: current.next_probe_at
+          ? Locale.datetime(Date.parse(current.next_probe_at))
+          : current.mode === "disabled" ? "paused" : "none",
         category: "Status",
       },
     ]

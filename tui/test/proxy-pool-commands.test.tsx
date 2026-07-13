@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { InputRenderable, TextareaRenderable } from "@opentui/core"
 import { resolveSlashCommand } from "../src/keymap"
 import type { UpstreamPool } from "../src/proxy/backend"
+import { Locale } from "../src/util/locale"
 import { mountProxyApp, openUpstreamManager, openWorkerDetail, runCommand, wait } from "./proxy-commands.fixture"
 
 const pool: UpstreamPool = {
@@ -170,6 +171,20 @@ test("pool editor renders paused and none without deadlines", async () => {
   }
 })
 
+test("pool editor renders the next probe in local time", async () => {
+  const app = await mountProxyApp({ upstreamPools: [pool], height: 80 })
+  try {
+    await openPoolEditor(app)
+    const nextProbeAt = pool.next_probe_at!
+    expect({
+      local: app.frame().includes(`Next Probe ${Locale.datetime(Date.parse(nextProbeAt))}`),
+      raw: app.frame().includes(`Next Probe ${nextProbeAt}`),
+    }).toEqual({ local: true, raw: false })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("pool editor refreshes authoritative readiness", async () => {
   const app = await mountProxyApp({ upstreamPools: [attachedPool] })
   try {
@@ -211,7 +226,8 @@ test("pool editor applies complete adaptive probe events", async () => {
     })
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Probe State alert") && app.frame().includes("Next Probe 2026-07-13T03:01:00Z")
+      return app.frame().includes("Probe State alert")
+        && app.frame().includes(`Next Probe ${Locale.datetime(Date.parse("2026-07-13T03:01:00Z"))}`)
     })
     await selectPoolEditorOption(app, "2. anthropic")
     expect(app.frame()).toContain("not_ready")
@@ -231,7 +247,8 @@ test("pool editor applies request outcome pool state events without polling", as
 		})
 		await wait(async () => {
 			await app.render()
-			return app.frame().includes("Probe State alert") && app.frame().includes("Next Probe 2026-07-13T04:01:00Z")
+			return app.frame().includes("Probe State alert")
+				&& app.frame().includes(`Next Probe ${Locale.datetime(Date.parse("2026-07-13T04:01:00Z"))}`)
 		})
 	} finally {
 		await app.cleanup()
@@ -334,7 +351,7 @@ test("pool editor fits status and actions at narrow width", async () => {
       status: [
         expect.stringContaining("Mode active"),
         expect.stringContaining("Probe State stable"),
-        expect.stringContaining("Next Probe 2026-07-13T02:45:00Z"),
+        expect.stringContaining(`Next Probe ${Locale.datetime(Date.parse(pool.next_probe_at!))}`),
       ],
       mode: [expect.stringContaining("Automatic Failover active")],
       actions: [
