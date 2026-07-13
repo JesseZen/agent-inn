@@ -146,17 +146,17 @@ func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
 		if opts.GrokHome != "" {
 			cmd = append(cmd, "HOME="+opts.GrokHome)
 		}
+		cmd = append(cmd,
+			"GROK_MODELS_BASE_URL=http://"+constants.LocalhostAddr+":"+strconv.Itoa(opts.WorkerPort)+"/v1",
+			"XAI_API_KEY=ainn",
+		)
 		executable := opts.GrokExecutable
 		if executable == "" {
 			executable = "grok"
 		}
-		cmd = append(cmd, "XAI_API_KEY=ainn", executable)
-		model := opts.Profile
-		if model == "" {
-			model = opts.Model
-		}
-		if model != "" {
-			cmd = append(cmd, "--model", model)
+		cmd = append(cmd, executable)
+		if opts.Model != "" {
+			cmd = append(cmd, "--model", opts.Model)
 		}
 		return cmd, nil
 	}

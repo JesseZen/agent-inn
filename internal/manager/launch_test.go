@@ -114,7 +114,7 @@ func TestBuildGrokLaunchCommandUsesWorkerProxy(t *testing.T) {
 		GrokHome:       "/tmp/ainn-grok-home",
 		GrokExecutable: "/Users/test/.grok/bin/grok",
 		WorkerPort:     11199,
-		Model:          "worker-main",
+		Model:          "grok-4.5",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,10 +122,34 @@ func TestBuildGrokLaunchCommandUsesWorkerProxy(t *testing.T) {
 	want := []string{
 		"env",
 		"HOME=/tmp/ainn-grok-home",
+		"GROK_MODELS_BASE_URL=http://127.0.0.1:11199/v1",
 		"XAI_API_KEY=ainn",
 		"/Users/test/.grok/bin/grok",
 		"--model",
-		"worker-main",
+		"grok-4.5",
+	}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("unexpected grok launch command:\ngot  %#v\nwant %#v", cmd, want)
+	}
+}
+
+func TestBuildGrokLaunchCommandIgnoresProfileForModel(t *testing.T) {
+	cmd, err := BuildLaunchCommand(LaunchOptions{
+		Launcher:   "grok",
+		Profile:    "hututu",
+		WorkerPort: 53379,
+		Model:      "grok-4.3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"env",
+		"GROK_MODELS_BASE_URL=http://127.0.0.1:53379/v1",
+		"XAI_API_KEY=ainn",
+		"grok",
+		"--model",
+		"grok-4.3",
 	}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("unexpected grok launch command:\ngot  %#v\nwant %#v", cmd, want)
