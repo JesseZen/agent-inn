@@ -1,16 +1,20 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func TestManagerUpstreamPoolCRUD(t *testing.T) {
@@ -150,6 +154,152 @@ func TestManagerUpstreamPoolUpdateRejectsInvalidMemberSet(t *testing.T) {
 	}
 	if _, exists := m.store.Config().Upstreams["backup"]; !exists {
 		t.Fatal("pool member delete changed upstream config")
+	}
+}
+
+func TestManagerUpstreamPoolPatchReownsSchedules(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 11, 12, 13, 0, time.UTC)
+	tests := []struct {
+		name          string
+		mode          config.UpstreamPoolMode
+		workers       map[string]config.WorkerConfig
+		body          string
+		wantMembers   []string
+		wantSchedules map[poolProbeScheduleKey]poolProbeSchedule
+	}{
+		{
+			name: "probe policy",
+			workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			body:        `{"probe":{"stable_interval_seconds":600,"alert_interval_seconds":120}}`,
+			wantMembers: []string{"primary", "backup"},
+			wantSchedules: map[poolProbeScheduleKey]poolProbeSchedule{
+				{Pool: "coding-ha", Upstream: "primary"}: {NextProbeAt: now, Reason: ProbeScheduleConfig},
+				{Pool: "coding-ha", Upstream: "backup"}:  {NextProbeAt: now, Reason: ProbeScheduleConfig},
+			},
+		},
+		{
+			name: "member removal and re-add",
+			workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			body:        `{"upstreams":["primary","tertiary"]}`,
+			wantMembers: []string{"primary", "tertiary"},
+			wantSchedules: map[poolProbeScheduleKey]poolProbeSchedule{
+				{Pool: "coding-ha", Upstream: "primary"}:  {NextProbeAt: now, Reason: ProbeScheduleConfig},
+				{Pool: "coding-ha", Upstream: "tertiary"}: {NextProbeAt: now, Reason: ProbeScheduleConfig},
+			},
+		},
+		{
+			name: "disabled",
+			mode: config.UpstreamPoolModeDisabled,
+			workers: map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			},
+			body:          `{"probe":{"stable_interval_seconds":600,"alert_interval_seconds":120}}`,
+			wantMembers:   []string{"primary", "backup"},
+			wantSchedules: map[poolProbeScheduleKey]poolProbeSchedule{},
+		},
+		{
+			name:          "unattached",
+			workers:       map[string]config.WorkerConfig{},
+			body:          `{"probe":{"stable_interval_seconds":600,"alert_interval_seconds":120}}`,
+			wantMembers:   []string{"primary", "backup"},
+			wantSchedules: map[poolProbeScheduleKey]poolProbeSchedule{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m, pool := newPoolRoutingTestManager(t, test.workers)
+			m.cancelProbes()
+			defer m.Close()
+			m.clock = func() time.Time { return now }
+			m.updateConfig(func(cfg *config.Config) {
+				cfg.Upstreams["tertiary"] = config.UpstreamProfile{BaseURL: "https://tertiary.example/v1", ProtocolProbe: config.ProtocolProbeConfig{Model: "model-c"}}
+				if test.mode != "" {
+					configured := cfg.UpstreamPools["coding-ha"]
+					configured.Mode = test.mode
+					cfg.UpstreamPools["coding-ha"] = configured
+				}
+			})
+			for _, upstreamName := range []string{"primary", "backup", "tertiary"} {
+				m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}] = poolProbeSchedule{
+					NextProbeAt: now.Add(time.Hour), ConsecutiveFailures: 3, Reason: ProbeScheduleRecovery,
+				}
+			}
+			for _, upstreamName := range append([]string(nil), test.wantMembers...) {
+				key := poolCircuitKey("coding-ha", upstreamName)
+				m.readiness[key] = readinessObservation{Result: readinessTestFailure(), CheckedAt: now, ExpiresAt: now.Add(time.Hour)}
+			}
+			m.exhaustedPools["coding-ha"] = "primary"
+			response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", test.body)
+			got := struct {
+				Code       int
+				Members    []string
+				Readiness  map[string]readinessObservation
+				Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+				Exhaustion map[string]string
+			}{response.Code, m.store.Config().UpstreamPools["coding-ha"].Upstreams, maps.Clone(m.readiness), maps.Clone(m.probeSchedules), maps.Clone(m.exhaustedPools)}
+			want := struct {
+				Code       int
+				Members    []string
+				Readiness  map[string]readinessObservation
+				Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+				Exhaustion map[string]string
+			}{http.StatusOK, test.wantMembers, map[string]readinessObservation{}, test.wantSchedules, map[string]string{}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("pool PATCH retained stale schedule authority:\n got %#v\nwant %#v", got, want)
+			}
+			_ = pool
+		})
+	}
+}
+
+func TestManagerUpstreamPoolProbePolicyEventUsesConfigAuthority(t *testing.T) {
+	now := time.Date(2026, time.July, 13, 12, 13, 14, 0, time.UTC)
+	m, _ := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	started := make(chan probeSpec, 2)
+	releasePrimary := make(chan struct{})
+	releaseBackup := make(chan struct{})
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		started <- spec
+		if spec.Upstream == "primary" {
+			<-releasePrimary
+		} else {
+			<-releaseBackup
+		}
+		return readinessTestSuccess(4)
+	}
+
+	response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", `{"probe":{"stable_interval_seconds":600,"alert_interval_seconds":120}}`)
+	specs := []probeSpec{<-started, <-started}
+	sort.Slice(specs, func(i int, j int) bool { return specs[i].Upstream < specs[j].Upstream })
+	close(releasePrimary)
+	eventually(t, time.Second, func() bool { return len(poolRoutingEvents(m, EventUpstreamProbed)) == 1 })
+	close(releaseBackup)
+	m.probeWait.Wait()
+	events := poolRoutingEvents(m, EventUpstreamProbed)
+	got := struct {
+		Code    int
+		Reasons []ProbeScheduleReason
+		Events  []map[string]any
+	}{response.Code, []ProbeScheduleReason{specs[0].Reason, specs[1].Reason}, events}
+	checkedAt := now
+	want := struct {
+		Code    int
+		Reasons []ProbeScheduleReason
+		Events  []map[string]any
+	}{http.StatusOK, []ProbeScheduleReason{ProbeScheduleConfig, ProbeScheduleConfig}, []map[string]any{
+		{"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(4), "probe_state": PoolProbeStateAlert, "next_probe_at": now.Format(time.RFC3339), "reason": ProbeScheduleConfig},
+		{"upstream": "backup", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(4), "probe_state": PoolProbeStateStable, "next_probe_at": now.Add(10 * time.Minute).Format(time.RFC3339), "reason": ProbeScheduleConfig},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("config authority did not reach real probe event:\n got %#v\nwant %#v", got, want)
 	}
 }
 

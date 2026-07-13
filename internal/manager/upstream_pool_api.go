@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -210,23 +211,26 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 			m.circuits.Reset(poolCircuitKey(name, upstreamName))
 		}
 	}
-	if current.Mode != next.Mode {
+	scheduleChanged := current.Mode != next.Mode || current.Probe != next.Probe || !slices.Equal(current.Upstreams, next.Upstreams)
+	if scheduleChanged {
 		for key := range m.probeSchedules {
 			if key.Pool == name {
 				delete(m.probeSchedules, key)
 			}
 		}
-		if next.Mode == config.UpstreamPoolModeActive {
+		if next.Mode == config.UpstreamPoolModeActive && attached {
 			for _, upstreamName := range next.Upstreams {
-				m.invalidatePoolReadinessLocked(name, upstreamName)
-				m.circuits.Reset(poolCircuitKey(name, upstreamName))
-				if attached {
-					m.probeSchedules[poolProbeScheduleKey{Pool: name, Upstream: upstreamName}] = poolProbeSchedule{
-						NextProbeAt: m.clock(),
-						Reason:      ProbeScheduleConfig,
-					}
+				m.probeSchedules[poolProbeScheduleKey{Pool: name, Upstream: upstreamName}] = poolProbeSchedule{
+					NextProbeAt: m.clock(),
+					Reason:      ProbeScheduleConfig,
 				}
 			}
+		}
+	}
+	if current.Mode != next.Mode && next.Mode == config.UpstreamPoolModeActive {
+		for _, upstreamName := range next.Upstreams {
+			m.invalidatePoolReadinessLocked(name, upstreamName)
+			m.circuits.Reset(poolCircuitKey(name, upstreamName))
 		}
 	}
 	m.invalidatePoolProbeIdentityLocked(name)
