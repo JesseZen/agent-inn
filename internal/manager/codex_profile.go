@@ -19,7 +19,8 @@ const (
 	codexLaunchWireAPI      = "responses"
 	codexProfilePrefix      = "ainn-x-"
 	codexProfileMaxBytes    = 243
-	defaultGrokModel        = "grok-4.5"
+	// DefaultGrokModel is used when a Grok worker has no protocol_probe.model.
+	DefaultGrokModel = "grok-4.5"
 )
 
 var codexPassthroughProfilePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
@@ -131,7 +132,7 @@ func syncGrokConfig(cfg config.Config) error {
 		}
 		defaultModel = cfg.Upstreams[worker.Upstream].ProtocolProbe.Model
 		if defaultModel == "" {
-			defaultModel = defaultGrokModel
+			defaultModel = DefaultGrokModel
 		}
 		break
 	}

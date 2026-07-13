@@ -145,6 +145,9 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 			if *model == "" {
 				*model = cfg.Upstreams[workerCfg.Upstream].ProtocolProbe.Model
 			}
+			if launcher == "grok" && *model == "" {
+				*model = manager.DefaultGrokModel
+			}
 			if launcher == "grok" {
 				stateDir := cfg.Settings.StateDir
 				if stateDir == "" {

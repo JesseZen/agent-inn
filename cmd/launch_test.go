@@ -358,6 +358,76 @@ upstreams:
 	}
 }
 
+func TestRunLaunchUsesGrokDefaultModelWhenProbeEmpty(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+settings:
+  state_dir: ` + stateDir + `
+workers:
+  grok-main:
+    launcher: grok
+    port: 11199
+    upstream: xai
+upstreams:
+  xai:
+    base_url: https://api.x.ai/v1
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Prefer a deterministic fake grok binary on PATH over any host install.
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fakeGrok := filepath.Join(binDir, "grok")
+	if err := os.WriteFile(fakeGrok, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Hide ~/.grok/bin/grok by setting HOME away from the real one.
+	t.Setenv("HOME", dir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var got []string
+	previous := launchRunnerFactory
+	launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+		return launchRunnerFunc(func(args []string) (string, error) {
+			got = append([]string{}, args...)
+			return "", nil
+		})
+	}
+	defer func() { launchRunnerFactory = previous }()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{"--config-dir", configDir, "--worker", "11199"}, &bytes.Buffer{}, &stderr)
+	if code != 0 {
+		t.Fatalf("expected success, got %d: %s", code, stderr.String())
+	}
+	want := []string{
+		"env",
+		"HOME=" + filepath.Join(stateDir, "grok-home"),
+		"GROK_MODELS_BASE_URL=http://127.0.0.1:11199/v1",
+		"XAI_API_KEY=ainn",
+		fakeGrok,
+		"--model",
+		manager.DefaultGrokModel,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected launch args:\ngot  %#v\nwant %#v", got, want)
+	}
+	for _, arg := range got {
+		if arg == "grok-main" {
+			t.Fatalf("must not use worker id as model: %#v", got)
+		}
+	}
+}
+
 func TestRunLaunchExplicitExternalWindowMode(t *testing.T) {
 	var got []string
 	restore := func() func() {
