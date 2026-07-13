@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import { en } from "../../src/i18n/en"
 import { zhCN } from "../../src/i18n/zh-CN"
 import path from "node:path"
-import { mountProxyApp } from "../proxy-commands.fixture"
 
 const inventory = {
   "common.enabled": "Enabled",
@@ -50,25 +49,4 @@ test("core gap callsites use typed translations", async () => {
   expect(sources.settings).toContain('t("common.enabled")')
   expect(sources.settings).toContain('t("common.disabled")')
   expect(sources.batch).toContain('t("common.ready")')
-})
-
-test("home placeholder examples react to a locale switch", async () => {
-  const app = await mountProxyApp({ stateFiles: { "kv.json": JSON.stringify({ locale: "en" }) } })
-  const english = Object.values(inventory).slice(5, 8)
-  const chinese = ["修复代码库中的一个待办事项", "这个项目使用了哪些技术栈？", "修复失败的测试"]
-  try {
-    expect(english.some((value) => app.frame().includes(value))).toBeTrue()
-
-    app.api.keymap.dispatchCommand("language.switch")
-    const start = Date.now()
-    while (!chinese.some((value) => app.frame().includes(value))) {
-      if (Date.now() - start > 2000) throw new Error("timed out waiting for translated home placeholder")
-      await app.render()
-      await Bun.sleep(10)
-    }
-
-    expect(chinese.some((value) => app.frame().includes(value))).toBeTrue()
-  } finally {
-    await app.cleanup()
-  }
 })

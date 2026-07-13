@@ -3,12 +3,14 @@ package cmd
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -294,6 +296,10 @@ func runRoot(args []string, stdout io.Writer, stderr io.Writer) int {
 		Stdout:      stdout,
 		Stderr:      stderr,
 	}); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == rootRestartExitCode {
+			return rootRestartExitCode
+		}
 		writeRootStartupFailureLog(cfg.Settings, err)
 		fmt.Fprintf(stderr, "failed to start: %v\n", err)
 		return 1

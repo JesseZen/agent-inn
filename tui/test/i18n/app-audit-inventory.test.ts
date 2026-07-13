@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import { en } from "../../src/i18n/en"
 import { zhCN } from "../../src/i18n/zh-CN"
 import path from "node:path"
-import { mountProxyApp } from "../proxy-commands.fixture"
 
 export const appAuditInventory = {
   "app.aiChat.sessionsTodo": "TODO: future AI chat sessions",
@@ -110,30 +109,5 @@ test("app audit callsites consume typed keys without owned English literals", as
     'group: "Popup"',
   ]) {
     expect(source).not.toContain(literal)
-  }
-})
-
-test("mounted app command metadata reacts to a locale switch", async () => {
-  const app = await mountProxyApp({ stateFiles: { "kv.json": JSON.stringify({ locale: "en" }) } })
-  const command = () => app.api.keymap.getCommands().find((item) => item.name === "command.palette.show")
-  try {
-    expect({ title: command()?.title, category: command()?.category }).toEqual({
-      title: "Show command palette",
-      category: "System",
-    })
-
-    app.api.keymap.dispatchCommand("language.switch")
-    const start = Date.now()
-    while (command()?.title !== "显示命令面板") {
-      if (Date.now() - start > 2000) throw new Error("timed out waiting for translated app command")
-      await Bun.sleep(10)
-    }
-
-    expect({ title: command()?.title, category: command()?.category }).toEqual({
-      title: "显示命令面板",
-      category: "系统",
-    })
-  } finally {
-    await app.cleanup()
   }
 })

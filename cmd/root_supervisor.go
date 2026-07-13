@@ -23,17 +23,50 @@ const (
 	rootSupervisorFDEnvVar = "AINN_SUPERVISOR_FD"
 	rootSupervisorFD       = 3
 	rootStderrBufferBytes  = 32 * 1024
+	rootRestartExitCode    = 75
+	rootLoginPathCommand   = `printf %s "$PATH"`
 )
 
 var (
-	rootSupervisorNow        = time.Now
-	rootSupervisorExecutable = os.Executable
-	rootSupervisor           = superviseRoot
+	rootSupervisorNow                = time.Now
+	rootSupervisorExecutable         = os.Executable
+	rootSupervisor                   = superviseRoot
+	rootSupervisedRunner             = runSupervisedRoot
+	rootSupervisorRefreshEnvironment = refreshRootSupervisorEnvironment
 )
 
 func superviseRoot(opts RootOptions) error {
-	_, err := runSupervisedRoot(opts)
-	return err
+	for {
+		exit, err := rootSupervisedRunner(opts)
+		if exit.ExitCode != rootRestartExitCode {
+			return err
+		}
+		if err := rootSupervisorRefreshEnvironment(); err != nil {
+			return err
+		}
+	}
+}
+
+func refreshRootSupervisorEnvironment() error {
+	loginShell := exec.Command(os.Getenv("SHELL"), "-lic", rootLoginPathCommand)
+	loginShell.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	pathOutput, err := loginShell.Output()
+	if err != nil {
+		return fmt.Errorf("refresh login shell PATH: %w", err)
+	}
+	pathValue := string(pathOutput)
+	if err := os.Setenv("PATH", pathValue); err != nil {
+		return fmt.Errorf("refresh supervisor PATH: %w", err)
+	}
+	tmuxValue := os.Getenv("TMUX")
+	if tmuxValue == "" {
+		return nil
+	}
+	tmuxSocket, _, _ := strings.Cut(tmuxValue, ",")
+	if output, err := exec.Command("tmux", "-S", tmuxSocket, "set-environment", "-g", "PATH", pathValue).CombinedOutput(); err != nil {
+		return fmt.Errorf("refresh tmux PATH: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func runSupervisedRoot(opts RootOptions) (logging.RootRunExit, error) {

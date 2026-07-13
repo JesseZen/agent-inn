@@ -22,6 +22,62 @@ const rootSupervisorHelperEnv = "AINN_TEST_ROOT_SUPERVISOR_HELPER"
 const rootSupervisorDescendantPIDEnv = "AINN_TEST_ROOT_SUPERVISOR_DESCENDANT_PID"
 const rootSupervisorReadyPIDEnv = "AINN_TEST_ROOT_SUPERVISOR_READY_PID"
 
+func TestSuperviseRootRestartsAfterRestartExit(t *testing.T) {
+	previousRun := rootSupervisedRunner
+	previousRefresh := rootSupervisorRefreshEnvironment
+	defer func() {
+		rootSupervisedRunner = previousRun
+		rootSupervisorRefreshEnvironment = previousRefresh
+	}()
+
+	runs := 0
+	refreshes := 0
+	rootSupervisedRunner = func(RootOptions) (logging.RootRunExit, error) {
+		runs++
+		if runs == 1 {
+			return logging.RootRunExit{ExitCode: rootRestartExitCode}, nil
+		}
+		return logging.RootRunExit{ExitCode: 0}, nil
+	}
+	rootSupervisorRefreshEnvironment = func() error {
+		refreshes++
+		return nil
+	}
+
+	if err := superviseRoot(RootOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 2 || refreshes != 1 {
+		t.Fatalf("runs=%d refreshes=%d, want runs=2 refreshes=1", runs, refreshes)
+	}
+}
+
+func TestRefreshRootSupervisorEnvironmentIsolatesLoginShellSession(t *testing.T) {
+	dir := t.TempDir()
+	shellPath := filepath.Join(dir, "login-shell")
+	sessionPath := filepath.Join(dir, "session")
+	script := "#!/bin/sh\nprintf '%s %s\\n' \"$$\" \"$(ps -o pgid= -p $$)\" > \"$AINN_TEST_LOGIN_SESSION\"\nprintf /tmp/ainn-test-path\n"
+	if err := os.WriteFile(shellPath, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shellPath)
+	t.Setenv("TMUX", "")
+	t.Setenv("PATH", os.Getenv("PATH"))
+	t.Setenv("AINN_TEST_LOGIN_SESSION", sessionPath)
+
+	if err := refreshRootSupervisorEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 || fields[0] != fields[1] {
+		t.Fatalf("login shell pid/process group = %q, want a new session led by the shell", strings.TrimSpace(string(data)))
+	}
+}
+
 func TestRootSupervisorHelperProcess(t *testing.T) {
 	mode := os.Getenv(rootSupervisorHelperEnv)
 	if mode == "" {

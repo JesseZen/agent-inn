@@ -89,6 +89,8 @@ import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { DialogHostedTerminal } from "./proxy/dialog-hosted-terminal"
 
+const restartExitCode = 75
+
 const appGlobalBindingCommands = [
   "session.list",
   "session.new",
@@ -888,6 +890,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "exit",
         slashAliases: ["quit", "q"],
         run: () => exit(),
+        category: language.t("category.system"),
+      },
+      {
+        name: "app.restart",
+        title: language.t("common.restart"),
+        slashName: "restart",
+        run: () => {
+          process.exitCode = restartExitCode
+          exit()
+        },
         category: language.t("category.system"),
       },
       {

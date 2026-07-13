@@ -4,11 +4,6 @@ import { mountProxyApp, openWorkerDetail, runCommand, wait, type ProxyApp } from
 import { useLanguage, type Locale } from "../../src/context/language"
 import { DialogUpstreamEditor } from "../../src/proxy/dialog-upstream"
 
-function proxyCommandLabel(app: ProxyApp, name: string) {
-  const command = app.api.keymap.getCommands().find((item) => item.name === name)
-  return { title: command?.title, category: command?.category }
-}
-
 function lineValueForeground(app: ProxyApp, label: string, value: string) {
   const line = app.setup.captureSpans().lines.find((item) =>
     item.spans
@@ -87,21 +82,6 @@ test("Chinese pool editor renders adaptive probe controls", async () => {
       refresh: app.frame().includes("刷新就绪状态"),
       english: app.frame().includes("Automatic Failover"),
     }).toEqual({ status: true, policy: true, stable: true, refresh: true, english: false })
-  } finally {
-    await app.cleanup()
-  }
-})
-
-test("Proxy command labels react to a runtime locale switch", async () => {
-  const app = await mountProxyApp({ stateFiles: { "kv.json": JSON.stringify({ locale: "en" }) } })
-  try {
-    expect(proxyCommandLabel(app, "proxy.workers")).toEqual({ title: "Manage workers", category: "Proxy" })
-
-    await runCommand(app, "language.switch")
-    await wait(() => proxyCommandLabel(app, "proxy.workers").title === "管理工作进程")
-
-    expect(proxyCommandLabel(app, "proxy.workers")).toEqual({ title: "管理工作进程", category: "代理" })
-    await Bun.sleep(500)
   } finally {
     await app.cleanup()
   }

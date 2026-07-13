@@ -47,7 +47,7 @@
 22. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，主进程日志在 `~/.ainn/logs/ainn.log`，可通过 `settings.log_dir` 配置
 23. 日志事件手册（事件名含义、字段、常见问题 grep 命令）：`internal/logging/EVENTS.md`——遇到 bug 先查这里，不要直接读源码
 24. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
-25. root 由 supervisor、root/TUI 和 workers 组成；主实例停止优先向 supervisor PID 发送 `SIGTERM`，不要直接杀 `tmux` server。启动画面卡住时检查 `ps -o pid,ppid,pgid,tpgid,stat,command`：root/TUI 的 `TPGID` 应与自身前台进程组一致；若只看到 manager API 正常而 TUI 无输入，优先排查 TTY 前台进程组。
+25. root 由 supervisor、root/TUI 和 workers 组成；主实例停止优先向 supervisor PID 发送 `SIGTERM`，不要直接杀 `tmux` server。启动画面卡住时检查 `ps -o pid,ppid,pgid,tpgid,stat,command`：root/TUI 的 `TPGID` 应与自身前台进程组一致；刷新登录 shell/PATH 必须隔离 session，避免留下失效的前台 `TPGID`。
 
 ## 人工验证
 
