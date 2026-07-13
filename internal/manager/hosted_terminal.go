@@ -15,7 +15,12 @@ const (
 	tmuxWindowPrefix              = "ainn"
 	tmuxExtkeysSlot               = "terminal-features[3]"
 	tmuxExtkeys                   = "xterm*:extkeys"
+	tmuxMainWindowStatusLeft      = "#{?#{==:#{window_index},0},#[fg=colour0]#[bg=colour45]#[bold],#[fg=colour244]#[bg=colour235]}#[range=window|0] 0:ainn #[norange]#[default]"
+	tmuxMainWindowStatusFormat    = "#{?#{==:#{window_index},0},,#[fg=colour244]#[bg=colour235] #I:#W #[default]}"
+	tmuxMainWindowCurrentFormat   = "#{?#{==:#{window_index},0},,#[fg=colour0]#[bg=colour45]#[bold] #I:#W #[default]}"
 	tmuxHostedSessionsStatusRight = "#[range=user|ainn-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]"
+	tmuxWindowStatusFormat        = "#[fg=colour244,bg=colour235] #I:#W #[default]"
+	tmuxWindowStatusCurrentFormat = "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
 )
 
 func defaultTmuxSettings() config.Settings {
@@ -196,13 +201,21 @@ func TmuxEnableExtendedKeysCommandForSettings(settings config.Settings) []string
 // without re-injection. This mirrors the existing mouse setting which also
 // uses -g.
 func TmuxThemeCommandForSettings(settings config.Settings) []string {
+	statusLeft := ""
+	windowStatusFormat := tmuxWindowStatusFormat
+	windowStatusCurrentFormat := tmuxWindowStatusCurrentFormat
+	if settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeMainTUIWindow {
+		statusLeft = tmuxMainWindowStatusLeft
+		windowStatusFormat = tmuxMainWindowStatusFormat
+		windowStatusCurrentFormat = tmuxMainWindowCurrentFormat
+	}
 	return append(tmuxPrefixForSettings(settings),
 		"set-option", "-g", "status", "on", ";",
-		"set-option", "-g", "status-left", "", ";",
+		"set-option", "-g", "status-left", statusLeft, ";",
 		"set-option", "-g", "status-right", tmuxHostedSessionsStatusRight, ";",
 		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
-		"set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";",
-		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
+		"set-window-option", "-g", "window-status-format", windowStatusFormat, ";",
+		"set-window-option", "-g", "window-status-current-format", windowStatusCurrentFormat, ";",
 		"set-window-option", "-g", "automatic-rename", "off",
 	)
 }

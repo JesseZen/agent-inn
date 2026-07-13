@@ -3059,6 +3059,7 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 	}
 
 	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
+	tmuxSettings.Terminal.Tmux.HostStartMode = config.TmuxHostStartModeMainTUIWindow
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},

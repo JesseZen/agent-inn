@@ -138,12 +138,44 @@ func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
 	}
 }
 
-func TestTmuxThemeCommandForSettingsIncludesHostedSessions(t *testing.T) {
+func TestTmuxThemeCommandForSettingsPinsMainWindowAndIncludesHostedSessions(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{
 			Tmux: config.TmuxSettings{
-				SocketName:  "ainn-test",
-				HostSession: "ainn-test-host",
+				SocketName:    "ainn-test",
+				HostSession:   "ainn-test-host",
+				HostStartMode: config.TmuxHostStartModeMainTUIWindow,
+			},
+		},
+	}
+	got := TmuxThemeCommandForSettings(settings)
+	want := []string{
+		"tmux", "-L", "ainn-test",
+		"set-option", "-g", "status", "on", ";",
+		"set-option", "-g", "status-left", "#{?#{==:#{window_index},0},#[fg=colour0]#[bg=colour45]#[bold],#[fg=colour244]#[bg=colour235]}#[range=window|0] 0:ainn #[norange]#[default]", ";",
+		"set-option", "-g", "status-right", "#[range=user|ainn-sessions]#[fg=colour235,bg=colour45,bold] Sessions #[default]", ";",
+		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
+		"set-window-option", "-g", "window-status-format", "#{?#{==:#{window_index},0},,#[fg=colour244]#[bg=colour235] #I:#W #[default]}", ";",
+		"set-window-option", "-g", "window-status-current-format", "#{?#{==:#{window_index},0},,#[fg=colour0]#[bg=colour45]#[bold] #I:#W #[default]}", ";",
+		"set-window-option", "-g", "automatic-rename", "off",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for _, arg := range got {
+		if strings.Contains(arg, "ainn-hosted-sessions") {
+			t.Fatalf("tmux status range must fit tmux 3.6b 15-byte user range data limit, got %#v", got)
+		}
+	}
+}
+
+func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInWindowList(t *testing.T) {
+	settings := config.Settings{
+		Terminal: config.TerminalSettings{
+			Tmux: config.TmuxSettings{
+				SocketName:    "ainn-test",
+				HostSession:   "ainn-test-host",
+				HostStartMode: config.TmuxHostStartModeNewWindow,
 			},
 		},
 	}
@@ -160,11 +192,6 @@ func TestTmuxThemeCommandForSettingsIncludesHostedSessions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
-	}
-	for _, arg := range got {
-		if strings.Contains(arg, "ainn-hosted-sessions") {
-			t.Fatalf("tmux status range must fit tmux 3.6b 15-byte user range data limit, got %#v", got)
-		}
 	}
 }
 
