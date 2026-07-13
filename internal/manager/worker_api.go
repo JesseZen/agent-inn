@@ -36,7 +36,7 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "config" && r.Method == http.MethodDelete {
-		workerName, _, ok := m.workerByRouteKey(parts[0])
+		workerName, current, ok := m.workerByRouteKey(parts[0])
 		if !ok {
 			http.NotFound(rw, r)
 			return
@@ -45,9 +45,23 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err)})
 			return
 		}
-		m.updateConfig(func(cfgRoot *config.Config) {
-			delete(cfgRoot.Workers, workerName)
-		})
+		if current.UpstreamPool != "" {
+			m.failoverMu.Lock()
+			attachmentsBefore := 0
+			m.mu.RLock()
+			for _, configured := range m.config.Workers {
+				if configured.UpstreamPool == current.UpstreamPool {
+					attachmentsBefore++
+				}
+			}
+			m.mu.RUnlock()
+			m.updateConfig(func(cfgRoot *config.Config) { delete(cfgRoot.Workers, workerName) })
+			m.updatePoolAttachmentAuthorityLocked(current.UpstreamPool, attachmentsBefore, attachmentsBefore-1)
+			m.failoverMu.Unlock()
+			m.probeAllUpstreams(m.probeContext)
+		} else {
+			m.updateConfig(func(cfgRoot *config.Config) { delete(cfgRoot.Workers, workerName) })
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"worker": workerName})
 		return
 	}
@@ -191,6 +205,12 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 		poolMutation := current.UpstreamPool != "" || next.UpstreamPool != ""
 		if poolMutation {
 			m.failoverMu.Lock()
+			attachmentCounts := map[string]int{}
+			m.mu.RLock()
+			for _, configured := range m.config.Workers {
+				attachmentCounts[configured.UpstreamPool]++
+			}
+			m.mu.RUnlock()
 			if current.UpstreamPool != next.UpstreamPool && next.UpstreamPool != "" {
 				if err := m.validatePoolAttachmentLocked(workerName, next); err != nil {
 					m.failoverMu.Unlock()
@@ -249,6 +269,14 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 					m.invalidatePoolReadinessLocked(poolName, upstreamName)
 				}
 				m.invalidatePoolProbeIdentityLocked(poolName)
+				after := attachmentCounts[poolName]
+				if current.UpstreamPool == poolName {
+					after--
+				}
+				if next.UpstreamPool == poolName {
+					after++
+				}
+				m.updatePoolAttachmentAuthorityLocked(poolName, attachmentCounts[poolName], after)
 			}
 			if current.UpstreamPool != "" && oldSourceProxy != m.poolProxyURL(current.UpstreamPool) {
 				m.resetPoolIdentityLocked(current.UpstreamPool)

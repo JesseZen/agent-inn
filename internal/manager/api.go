@@ -187,6 +187,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 	}
 	pooled := worker.UpstreamPool != ""
 	oldProxyURL := ""
+	attachmentsBefore := 0
 	if pooled {
 		m.failoverMu.Lock()
 		if err := m.validatePoolAttachmentLocked(payload.Name, worker); err != nil {
@@ -200,6 +201,13 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		oldProxyURL = m.poolProxyURL(worker.UpstreamPool)
+		m.mu.RLock()
+		for _, configured := range m.config.Workers {
+			if configured.UpstreamPool == worker.UpstreamPool {
+				attachmentsBefore++
+			}
+		}
+		m.mu.RUnlock()
 	} else {
 		if err := m.validateWorkerRuntime(payload.Name, worker); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(err)})
@@ -225,6 +233,7 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 			m.invalidatePoolReadinessLocked(worker.UpstreamPool, upstreamName)
 		}
 		m.invalidatePoolProbeIdentityLocked(worker.UpstreamPool)
+		m.updatePoolAttachmentAuthorityLocked(worker.UpstreamPool, attachmentsBefore, attachmentsBefore+1)
 		if oldProxyURL != m.poolProxyURL(worker.UpstreamPool) {
 			m.resetPoolIdentityLocked(worker.UpstreamPool)
 		}

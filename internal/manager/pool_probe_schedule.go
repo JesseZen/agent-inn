@@ -37,6 +37,35 @@ type poolProbeSchedule struct {
 	Reason              ProbeScheduleReason
 }
 
+func (m *Manager) updatePoolAttachmentAuthorityLocked(poolName string, before int, after int) {
+	if (before == 0) == (after == 0) {
+		return
+	}
+	m.mu.RLock()
+	pool := m.config.UpstreamPools[poolName]
+	m.mu.RUnlock()
+	for _, upstreamName := range pool.Upstreams {
+		m.invalidatePoolReadinessLocked(poolName, upstreamName)
+	}
+	for key := range m.probeSchedules {
+		if key.Pool == poolName {
+			delete(m.probeSchedules, key)
+		}
+	}
+	m.invalidatePoolProbeIdentityLocked(poolName)
+	delete(m.exhaustedPools, poolName)
+	if after == 0 || pool.Mode != config.UpstreamPoolModeActive {
+		return
+	}
+	now := m.clock()
+	for _, upstreamName := range pool.Upstreams {
+		m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}] = poolProbeSchedule{
+			NextProbeAt: now,
+			Reason:      ProbeScheduleConfig,
+		}
+	}
+}
+
 func poolProbeFailureDelay(policy config.PoolProbeConfig, consecutiveFailures int) time.Duration {
 	delaySeconds := policy.AlertIntervalSeconds
 	for failure := 1; failure < consecutiveFailures && delaySeconds < policy.StableIntervalSeconds; failure++ {
