@@ -5,6 +5,14 @@ import { en, type TranslationKey, type TranslationParams } from "../i18n/en"
 import { zhCN } from "../i18n/zh-CN"
 import { zhTW } from "../i18n/zh-TW"
 import { ja } from "../i18n/ja"
+import { fr } from "../i18n/fr"
+import { es } from "../i18n/es"
+import { de } from "../i18n/de"
+import { it } from "../i18n/it"
+import { pt } from "../i18n/pt"
+import { ko } from "../i18n/ko"
+import { ru } from "../i18n/ru"
+import { vi } from "../i18n/vi"
 
 type TranslationDictionary = Partial<Record<TranslationKey, string>>
 
@@ -22,6 +30,14 @@ const localeDefinitions = [
   { id: "zh-CN", name: "简体中文", dictionary: zhCN },
   { id: "zh-TW", name: "繁體中文", dictionary: zhTW },
   { id: "ja", name: "日本語", dictionary: ja },
+  { id: "fr", name: "Français", dictionary: fr },
+  { id: "es", name: "Español", dictionary: es },
+  { id: "de", name: "Deutsch", dictionary: de },
+  { id: "it", name: "Italiano", dictionary: it },
+  { id: "pt", name: "Português", dictionary: pt },
+  { id: "ko", name: "한국어", dictionary: ko },
+  { id: "ru", name: "Русский", dictionary: ru },
+  { id: "vi", name: "Tiếng Việt", dictionary: vi },
 ] as const
 
 export type Locale = (typeof localeDefinitions)[number]["id"]
@@ -44,6 +60,14 @@ export function detectLocale(value: string | undefined): Locale | undefined {
   if (["zh-hant", "zh-tw", "zh-hk", "zh-mo"].some((locale) => normalized.startsWith(locale))) return "zh-TW"
   if (normalized.startsWith("zh")) return "zh-CN"
   if (normalized.startsWith("ja")) return "ja"
+  if (normalized.startsWith("fr")) return "fr"
+  if (normalized.startsWith("es")) return "es"
+  if (normalized.startsWith("de")) return "de"
+  if (normalized.startsWith("it")) return "it"
+  if (normalized.startsWith("pt")) return "pt"
+  if (normalized.startsWith("ko")) return "ko"
+  if (normalized.startsWith("ru")) return "ru"
+  if (normalized.startsWith("vi")) return "vi"
   if (normalized.startsWith("en")) return "en"
   return undefined
 }
