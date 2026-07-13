@@ -110,14 +110,16 @@ func TestSyncCodexProfileFilesUsesDerivedWorkerProfile(t *testing.T) {
 	}
 }
 
-func TestSyncGrokConfigWritesWorkerProxyModels(t *testing.T) {
+func TestSyncGrokConfigWritesSharedDefaultWithoutWorkerModels(t *testing.T) {
 	home := t.TempDir()
 	cfg := config.Config{
 		Settings: config.Settings{StateDir: filepath.Join(home, "state")},
 		Workers: map[string]config.WorkerConfig{
-			"worker-main": {Port: 11199, Upstream: "openai", Launcher: "grok"},
+			"hututu": {Port: 53379, Upstream: "jws", Launcher: "grok"},
 		},
-		Upstreams: map[string]config.UpstreamProfile{"openai": {BaseURL: "https://api.openai.com/v1"}},
+		Upstreams: map[string]config.UpstreamProfile{
+			"jws": {ProtocolProbe: config.ProtocolProbeConfig{Model: "grok-4.5"}},
+		},
 	}
 
 	if err := syncGrokConfig(cfg); err != nil {
@@ -127,17 +129,50 @@ func TestSyncGrokConfigWritesWorkerProxyModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	text := string(data)
+	if strings.Contains(text, "[model.hututu]") || strings.Contains(text, "name = 'hututu'") || strings.Contains(text, `name = "hututu"`) {
+		t.Fatalf("worker-named custom model must not be written:\n%s", text)
+	}
+	if strings.Contains(text, "53379") {
+		t.Fatalf("managed config must not embed worker base_url/port:\n%s", text)
+	}
 	var got grokConfig
 	if err := toml.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := grokConfig{
-		Model: map[string]grokModel{
-			"worker-main": {Model: "grok-4.5", BaseURL: "http://127.0.0.1:11199", Name: "worker-main", EnvKey: "XAI_API_KEY"},
-		},
-	}
+	want := grokConfig{Models: grokModelsSettings{Default: "grok-4.5"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestSyncGrokConfigClearsStaleWorkerModelsWhenNoGrokWorkers(t *testing.T) {
+	home := t.TempDir()
+	stateDir := filepath.Join(home, "state")
+	path := filepath.Join(stateDir, "grok-home", ".grok", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := "[model.hututu]\nmodel = 'grok-4.5'\nbase_url = 'http://127.0.0.1:53379'\nname = 'hututu'\nenv_key = 'XAI_API_KEY'\n"
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Settings: config.Settings{StateDir: stateDir},
+		Workers: map[string]config.WorkerConfig{
+			"claude": {Port: 53054, Upstream: "up_4", Launcher: "claudecode"},
+		},
+		Upstreams: map[string]config.UpstreamProfile{"up_4": {}},
+	}
+	if err := syncGrokConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "hututu") || strings.Contains(string(data), "[model.") {
+		t.Fatalf("stale worker model residue remained:\n%s", data)
 	}
 }
 

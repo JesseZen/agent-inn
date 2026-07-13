@@ -36,14 +36,11 @@ type codexProfileEntry struct {
 }
 
 type grokConfig struct {
-	Model map[string]grokModel `toml:"model"`
+	Models grokModelsSettings `toml:"models,omitempty"`
 }
 
-type grokModel struct {
-	Model   string `toml:"model"`
-	BaseURL string `toml:"base_url"`
-	Name    string `toml:"name"`
-	EnvKey  string `toml:"env_key"`
+type grokModelsSettings struct {
+	Default string `toml:"default,omitempty"`
 }
 
 type piModelsConfig struct {
@@ -121,34 +118,40 @@ func syncCodexProfileFiles(cfg config.Config) error {
 }
 
 func syncGrokConfig(cfg config.Config) error {
-	models := make(map[string]grokModel)
-	for name, worker := range cfg.Workers {
-		if worker.Launcher != grokLauncherName {
-			continue
-		}
-		model := cfg.Upstreams[worker.Upstream].ProtocolProbe.Model
-		if model == "" {
-			model = defaultGrokModel
-		}
-		models[name] = grokModel{
-			Model:   model,
-			BaseURL: fmt.Sprintf("http://%s:%d", constants.LocalhostAddr, worker.Port),
-			Name:    name,
-			EnvKey:  "XAI_API_KEY",
-		}
-	}
-	if len(models) == 0 {
-		return nil
-	}
 	stateDir := cfg.Settings.StateDir
 	if stateDir == "" {
 		stateDir = "~/.ainn"
 	}
-	data, err := toml.Marshal(grokConfig{Model: models})
+	path := filepath.Join(expandHomePath(stateDir), "grok-home", ".grok", "config.toml")
+
+	defaultModel := ""
+	for _, worker := range cfg.Workers {
+		if worker.Launcher != grokLauncherName {
+			continue
+		}
+		defaultModel = cfg.Upstreams[worker.Upstream].ProtocolProbe.Model
+		if defaultModel == "" {
+			defaultModel = defaultGrokModel
+		}
+		break
+	}
+
+	if defaultModel == "" {
+		// No Grok workers: clear managed custom-model residue if present.
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		return writeTextFile(path, "", 0o600)
+	}
+
+	data, err := toml.Marshal(grokConfig{Models: grokModelsSettings{Default: defaultModel}})
 	if err != nil {
 		return err
 	}
-	return writeTextFile(filepath.Join(expandHomePath(stateDir), "grok-home", ".grok", "config.toml"), string(data), 0600)
+	return writeTextFile(path, string(data), 0o600)
 }
 
 func syncPiConfig(cfg config.Config) error {
