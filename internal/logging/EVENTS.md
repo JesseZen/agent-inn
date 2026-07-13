@@ -134,6 +134,7 @@ tmux supervisor 先记录并转发信号时出现；`external_or_unknown` 能排
 - **字段**：`pid`，`supervisor_pid`，`socket`，`host_session`，`config_dir`，`started_at`
 - **位置**：`tmux-<socket>.log`
 - **用途**：确认后续退出事件对应的真实 tmux server PID；已存在的旧 server 不会被主动替换，需等下一次自然重建后才有此事件
+- **边界**：`can't find session` 但 server 仍存在时只创建缺失 session，不会重启 server；只有 `no server running` 或 socket 不存在才启动新的受管 server
 
 #### `tmux.server.signal`
 - **触发**：AINN 的 tmux supervisor 即将向 server 转发信号

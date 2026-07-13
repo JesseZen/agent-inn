@@ -111,6 +111,12 @@ func isTmuxHostMissingError(err error) bool {
 		(strings.Contains(errText, tmuxErrorConnecting) && strings.Contains(errText, tmuxNoSuchFile))
 }
 
+func isTmuxServerMissingError(err error) bool {
+	errText := err.Error()
+	return strings.Contains(errText, tmuxNoServerRunning) ||
+		(strings.Contains(errText, tmuxErrorConnecting) && strings.Contains(errText, tmuxNoSuchFile))
+}
+
 func printTmuxTraceWriteError(stderr io.Writer, err error) bool {
 	if strings.HasPrefix(err.Error(), tmuxTraceWriteError) {
 		fmt.Fprintln(stderr, err)
@@ -152,6 +158,7 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 		}
 	}
 	rootCmd := []string{"env", tmuxRootChildEnvVar + "=1", exe, "--config-dir", configDir, "--manager-port", strconv.Itoa(managerPort)}
+	serverMissing := false
 	if _, err := runner.Run(tmuxHostCommand(manager.TmuxHasSessionCommandForSettings(cfg.Settings))); err != nil {
 		if printTmuxTraceWriteError(stderr, err) {
 			return 1
@@ -160,7 +167,22 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 			fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 			return 1
 		}
-		createdWindowIndex, err := runner.Run(tmuxHostCommand(manager.TmuxStartMainWindowHostCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd)))
+		serverMissing = isTmuxServerMissingError(err)
+		initialCommand := tmuxHostCommand(manager.TmuxStartMainWindowHostCommandForSettings(cfg.Settings, tmuxMainWindowName, rootCmd))
+		createdWindowIndex := ""
+		if serverMissing {
+			response, startErr := managedTmuxServerStarter(tmuxServerStartRequest{
+				ConfigDir:      configDir,
+				LogDir:         expandHome(cfg.Settings.LogDir),
+				SocketName:     cfg.Settings.Terminal.Tmux.SocketName,
+				HostSession:    cfg.Settings.Terminal.Tmux.HostSession,
+				InitialCommand: initialCommand,
+			})
+			err = startErr
+			createdWindowIndex = response.Stdout
+		} else {
+			createdWindowIndex, err = runner.Run(initialCommand)
+		}
 		if err != nil {
 			if printTmuxTraceWriteError(stderr, err) {
 				return 1
