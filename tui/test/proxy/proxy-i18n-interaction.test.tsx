@@ -168,6 +168,8 @@ test("Chinese Proxy dialogs cover each mounted action family", async () => {
 
     await runCommand(app, "proxy.settings")
     await waitForFrame(app, "状态目录")
+    for (let index = 0; index < 7; index++) await runCommand(app, "dialog.select.next")
+    await waitForFrame(app, "已禁用")
 
     await runCommand(app, "proxy.logs")
     await waitForFrame(app, "工作进程日志")

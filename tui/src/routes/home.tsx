@@ -14,13 +14,9 @@ import { useTuiConfig } from "../config"
 import { HomeSessionDestinationProvider } from "./home/session-destination"
 import { useKV } from "../context/kv"
 import { defaultLogoStyleID, resolveLogoStyle } from "../logo"
+import { useLanguage } from "../context/language"
 
 let once = false
-const placeholder = {
-  normal: ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"],
-  shell: ["ls -la", "git status", "pwd"],
-}
-
 export function Home() {
   const pluginRuntime = usePluginRuntime()
   const sync = useSync()
@@ -33,6 +29,11 @@ export function Home() {
   const dimensions = useTerminalDimensions()
   const tuiConfig = useTuiConfig()
   const kv = useKV()
+  const language = useLanguage()
+  const placeholder = createMemo(() => ({
+    normal: [language.t("home.placeholder.fixTodo"), language.t("home.placeholder.techStack"), language.t("home.placeholder.fixTests")],
+    shell: ["ls -la", "git status", "pwd"],
+  }))
   const logoStyle = createMemo(() => resolveLogoStyle(kv.get("logo_style", defaultLogoStyleID)))
   const promptMaxWidth = createMemo(() => {
     const configured = tuiConfig.prompt?.max_width
@@ -84,7 +85,7 @@ export function Home() {
         <box height={1} minHeight={0} flexShrink={1} />
         <box width="100%" maxWidth={promptMaxWidth()} zIndex={1000} paddingTop={1} flexShrink={0}>
           <pluginRuntime.Slot name="home_prompt" mode="replace" ref={bind}>
-            <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
+            <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder()} />
           </pluginRuntime.Slot>
         </box>
         <pluginRuntime.Slot name="home_bottom" />

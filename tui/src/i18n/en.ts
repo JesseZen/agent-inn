@@ -17,6 +17,7 @@ const baseEn = {
   "common.no": "no",
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
+  "common.ready": "ready",
   "common.save": "Save",
   "common.saved": "Saved",
   "common.create": "Create",

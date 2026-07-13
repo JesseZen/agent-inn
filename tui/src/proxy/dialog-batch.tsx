@@ -179,7 +179,7 @@ export function DialogBatchRun(props: { batch: BatchRun; launchSession?: BatchSe
       return {
         title: variant.session_label,
         value: variant,
-        description: state === "idle" ? "ready" : state,
+        description: state === "idle" ? t("common.ready") : state,
       }
     }),
   )

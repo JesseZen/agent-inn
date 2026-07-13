@@ -91,7 +91,13 @@ export function DialogSettings() {
       ...fields().map((field) => ({
         title: field.title,
         value: field.key,
-        description: current ? field.value(current) || "—" : t("common.loading"),
+        description: current
+          ? field.key === "terminal.tmux.turn_status_hooks"
+            ? field.value(current) === "enabled"
+              ? t("common.enabled")
+              : t("common.disabled")
+            : field.value(current) || "—"
+          : t("common.loading"),
         category: field.category,
         onSelect: async () => {
           if (!current) return

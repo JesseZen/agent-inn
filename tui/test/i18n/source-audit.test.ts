@@ -6,7 +6,11 @@ import { en } from "../../src/i18n/en"
 const sourceRoot = path.resolve(import.meta.dir, "../../src")
 const sourcePatterns = [
   "app.tsx",
+  "component/command-palette.tsx",
+  "component/startup-loading.tsx",
+  "component/plugin-route-missing.tsx",
   "routes/home/**/*.{ts,tsx}",
+  "routes/home.tsx",
   "routes/session/**/*.{ts,tsx}",
   "component/dialog-*.tsx",
   "component/prompt/**/*.{ts,tsx}",

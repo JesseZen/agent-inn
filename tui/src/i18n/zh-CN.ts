@@ -18,6 +18,7 @@ const baseZhCN = {
   "common.no": "否",
   "common.enabled": "已启用",
   "common.disabled": "已禁用",
+  "common.ready": "就绪",
   "common.save": "保存",
   "common.saved": "已保存",
   "common.create": "创建",
