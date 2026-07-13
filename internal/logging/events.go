@@ -5,6 +5,7 @@ package logging
 const (
 	ComponentRoot           = "root"
 	ComponentRootSupervisor = "root.supervisor"
+	ComponentTmuxSupervisor = "tmux.supervisor"
 	ComponentManagerSuper   = "manager.super"
 	ComponentManagerHealth  = "manager.health"
 	ComponentManagerAPI     = "manager.api"
@@ -46,5 +47,9 @@ const (
 	EventRootSupervisorSignal = "root.supervisor.signal"
 	EventRootSupervisorExit   = "root.supervisor.exit"
 	EventRootPreviousUnclean  = "root.previous_unclean"
+	EventTmuxServerStart      = "tmux.server.start"
+	EventTmuxServerSignal     = "tmux.server.signal"
+	EventTmuxServerExit       = "tmux.server.exit"
+	EventTmuxClientExit       = "tmux.client.exit"
 	EventHostedTurnPoll       = "hosted_turn.poll"
 )

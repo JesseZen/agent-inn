@@ -61,7 +61,7 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 		var stderrBuf bytes.Buffer
 		if attachSession {
 			cmd.Stdout = stdout
-			cmd.Stderr = stderr
+			cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 		} else {
 			cmd.Stdout = &stdoutBuf
 			cmd.Stderr = &stderrBuf
@@ -70,6 +70,9 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 		err := cmd.Run()
 		if err != nil && strings.TrimSpace(stderrBuf.String()) != "" {
 			return stdoutBuf.String(), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderrBuf.String()))
+		}
+		if attachSession {
+			return stderrBuf.String(), err
 		}
 		return stdoutBuf.String(), err
 	})

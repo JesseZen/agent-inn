@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -44,5 +45,24 @@ func TestRedactCommonCredentialForms(t *testing.T) {
 				t.Fatalf("redaction marker missing: %q", got)
 			}
 		})
+	}
+}
+
+func TestRedactPreservesQuotedBearerBoundaryAcrossRepeatedPasses(t *testing.T) {
+	once := Redact(`error="Authorization: Bearer sk-secret"`)
+	twice := Redact(once)
+	got := struct {
+		Once  string
+		Twice string
+	}{Once: once, Twice: twice}
+	want := struct {
+		Once  string
+		Twice string
+	}{
+		Once:  `error="Authorization: Bearer ***REDACTED***"`,
+		Twice: `error="Authorization: Bearer ***REDACTED***"`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("repeated redaction mismatch:\n got %#v\nwant %#v", got, want)
 	}
 }

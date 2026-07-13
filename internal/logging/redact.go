@@ -8,8 +8,8 @@ type redactPattern struct {
 }
 
 var redactPatterns = []redactPattern{
-	{regexp.MustCompile(`(?i)(bearer\s+)\S+`), `${1}***REDACTED***`},
-	{regexp.MustCompile(`(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer|token)\s+)\S+`), `${1}***REDACTED***`},
+	{regexp.MustCompile(`(?i)(bearer\s+)[^"'\s]+`), `${1}***REDACTED***`},
+	{regexp.MustCompile(`(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer|token)\s+)[^"'\s]+`), `${1}***REDACTED***`},
 	{regexp.MustCompile(`(?i)("(?:api_key|access_token|auth_token|client_secret|webhook_secret|password|secret|token)"\s*:\s*")[^"]*(")`), `${1}***REDACTED***${2}`},
 	{regexp.MustCompile(`(?i)([?&](?:api_key|access_token|auth_token|token|key)=)[^&\s"]+`), `${1}***REDACTED***`},
 	{regexp.MustCompile(`(?i)((?:x-api-key|api-key|api_key|access-token|access_token|auth-token|auth_token|client-secret|client_secret|password|secret|token)\s*[:=]\s*["']?)[^"'\s,;}]+(["']?)`), `${1}***REDACTED***${2}`},

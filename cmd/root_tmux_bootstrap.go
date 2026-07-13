@@ -49,7 +49,7 @@ var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRun
 		var stderrBuf bytes.Buffer
 		if attachSession {
 			cmd.Stdout = stdout
-			cmd.Stderr = stderr
+			cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 		} else {
 			cmd.Stdout = &stdoutBuf
 			cmd.Stderr = &stderrBuf
@@ -96,6 +96,9 @@ var rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRun
 		}
 		if err != nil && strings.TrimSpace(stderrText) != "" {
 			return stdoutText, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderrText))
+		}
+		if attachSession {
+			return stderrText, err
 		}
 		return stdoutText, err
 	})
@@ -275,11 +278,16 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 		fmt.Fprintf(stderr, "failed to select main tmux window: %v\n", err)
 		return 1
 	}
-	if _, err := runner.Run(tmuxHostCommand(manager.TmuxAttachCommandForSettings(cfg.Settings))); err != nil {
-		if printTmuxTraceWriteError(stderr, err) {
+	attachOutput, attachErr := runner.Run(tmuxHostCommand(manager.TmuxAttachCommandForSettings(cfg.Settings)))
+	if err := writeTmuxClientExit(cfg.Settings, attachOutput, attachErr); err != nil {
+		fmt.Fprintf(stderr, "failed to log tmux client exit: %v\n", err)
+		return 1
+	}
+	if attachErr != nil {
+		if printTmuxTraceWriteError(stderr, attachErr) {
 			return 1
 		}
-		fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
+		fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", attachErr)
 		return 1
 	}
 	return 0

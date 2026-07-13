@@ -5,6 +5,7 @@
 > **日志位置**
 > - 主进程：`~/.ainn/logs/ainn.log`（可通过 `config.yaml` 的 `settings.log_dir` 修改）
 > - Worker：`~/.ainn/logs/worker-<port>.log`（同一 log_dir）
+> - tmux 生命周期：`~/.ainn/logs/tmux-<socket>.log`（同一 log_dir）
 > - 崩溃证据：`~/.ainn/logs/crashes/root-<UTC>-<run>.log`（同一 log_dir）
 > - 未完成运行标记：`~/.ainn/logs/crashes/active-root.json`
 > - 实时流：TUI 中按 `l` 进入日志面板，或通过 `/api/workers/<port>/logs` SSE 接口
@@ -42,6 +43,7 @@
 |---|---|---|
 | `root` | 主进程启停 | `ainn.log` |
 | `root.supervisor` | root 子进程 stderr、信号和实际退出状态 | `crashes/root-*.log` |
+| `tmux.supervisor` | AINN 私有 tmux server 和 attach client 生命周期 | `tmux-<socket>.log` |
 | `manager.super` | Worker 生命周期 | `ainn.log` |
 | `manager.health` | 健康探测循环 | `ainn.log` |
 | `manager.api` | 配置 PATCH API | `ainn.log` |
@@ -76,12 +78,19 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 | `root.supervisor.exit ... forwarded_signal=quit` | `SIGQUIT` 已转发给 root；macOS Go runtime 可能以 `exit_code=2` 结束，crash artifact 的全 goroutine dump 才是关键证据 |
 | `tui.exit reason=tui_exit exit_code!=0` + `root.stop` | Bun/TUI 子进程失败，root 仍完成了清理；查看同一 artifact 中 TUI stderr |
 | `root.previous_unclean` | 上一次连 supervisor 都没能记录退出，常见于 supervisor 自身被 `SIGKILL`、tmux server 被杀或断电 |
+| `tmux.client.exit reason=server_unexpected` + `tmux.server.exit reason=signal signal=killed` | tmux server 收到 `SIGKILL`；`initiator=external_or_unknown` 表示不是 AINN supervisor 转发的信号 |
+| `tmux.client.exit reason=server_unexpected` + `tmux.server.exit reason=signal signal="segmentation fault"` | tmux server 因崩溃信号退出 |
+| `tmux.client.exit reason=server_terminated` + `tmux.server.exit signal=terminated` | tmux server 收到并处理了 `SIGTERM`；查看 `initiator` 判断是否由 AINN supervisor 转发 |
 | `worker.exit exit_code!=0` 或 `signal` 非空 | worker 真实异常退出；用同一 `run` 和 `worker` 查看对应 `worker-<port>.log` |
 | 只有请求 `503`，同一时间没有 root/worker 日志 | 先确认 root 是否已退出；整个 manager 消失时 pool 无法执行故障转移 |
 
 `SIGKILL` 无法由被杀进程自己处理。AINN 通过外层 supervisor 的 wait status
 记录 root 子进程的 `SIGKILL`；若 supervisor 也被同时杀掉，则下一次启动通过
 遗留的 `active-root.json` 产生 `root.previous_unclean`。
+
+tmux 的 wait status 同样不包含发信号者 PID。`initiator=ainn` 只在 AINN 的
+tmux supervisor 先记录并转发信号时出现；`external_or_unknown` 能排除该路径，
+但无法区分其他进程、用户操作和操作系统。精确追踪外部发信号者需要特权系统审计。
 
 ---
 
@@ -117,6 +126,31 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 - **字段**：`run`（当前），`previous_run`，`previous_pid`，`previous_started_at`，`previous_artifact`
 - **LEVEL**：WARN
 - **用途**：说明上一轮 supervisor 未执行到退出记录；直接打开 `previous_artifact`
+
+### tmux.supervisor（tmux 进程边界）
+
+#### `tmux.server.start`
+- **触发**：AINN 的 tmux supervisor 已以前台模式启动新的私有 tmux server
+- **字段**：`pid`，`supervisor_pid`，`socket`，`host_session`，`config_dir`，`started_at`
+- **位置**：`tmux-<socket>.log`
+- **用途**：确认后续退出事件对应的真实 tmux server PID；已存在的旧 server 不会被主动替换，需等下一次自然重建后才有此事件
+
+#### `tmux.server.signal`
+- **触发**：AINN 的 tmux supervisor 即将向 server 转发信号
+- **字段**：`pid`，`signal`，`initiator=ainn`
+- **LEVEL**：WARN
+- **用途**：证明信号由 AINN supervisor 路径发起，而不是外部来源
+
+#### `tmux.server.exit`
+- **触发**：tmux supervisor 已 `Wait` 到 server 的真实退出状态
+- **字段**：`pid`，`exit_code`，`reason`（`clean/exit_code/signal/start_error/wait_error`），`signal`，`initiator`（`ainn/external_or_unknown`），`duration_ms`，`completed_at`，`error`，可选 `output_tail`
+- **用途**：判断 tmux server 是正常空会话退出、非零返回、被 `SIGKILL`，还是因崩溃信号退出；`output_tail` 有长度上限并经过凭据脱敏
+
+#### `tmux.client.exit`
+- **触发**：AINN 的 tmux attach client 返回
+- **字段**：`socket`，`host_session`，`reason`（`detached/empty/server_terminated/server_unexpected/client_error`），`exit_code`，`error`
+- **用途**：保留 tmux 文档定义的 client 视角；`server_unexpected` 必须与同一 `tmux-<socket>.log` 中紧邻的 `tmux.server.exit` 联合判断
+- **注意**：AINN 不启用 tmux `-v`，因为原生日志会包含完整 client 环境变量
 
 ### root（主进程与 TUI）
 

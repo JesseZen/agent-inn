@@ -1766,6 +1766,68 @@ func TestRunRootMainTUIWindowOutsideTmuxSelectsWindowZeroThenAttaches(t *testing
 	}
 }
 
+func TestRunRootMainTUIWindowLogsUnexpectedTmuxClientExit(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restoreTmux := func() func() {
+		previous := rootTmuxRunnerFactory
+		rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+			return rootTmuxRunnerFunc(func(args []string) (string, error) {
+				switch tmuxSubcommand(args) {
+				case "list-panes":
+					return "0\tenv " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
+				case "attach-session":
+					return "[server exited unexpectedly]\n", errors.New("exit status 1")
+				default:
+					return "", nil
+				}
+			})
+		}
+		return func() { rootTmuxRunnerFactory = previous }
+	}()
+	defer restoreTmux()
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr)
+	logPath := filepath.Join(dir, "logs", "tmux-ainn-test.log")
+	data, readErr := os.ReadFile(logPath)
+	got := struct {
+		Code    int
+		ReadErr string
+		Event   string
+	}{Code: code}
+	if readErr != nil {
+		got.ReadErr = readErr.Error()
+	} else if line := strings.TrimSpace(string(data)); line != "" {
+		if index := strings.Index(line, "tmux.supervisor tmux.client.exit "); index >= 0 {
+			got.Event = line[index:]
+		}
+	}
+	want := struct {
+		Code    int
+		ReadErr string
+		Event   string
+	}{
+		Code:  1,
+		Event: "tmux.supervisor tmux.client.exit socket=ainn-test host_session=ainn-test-host reason=server_unexpected exit_code=1 error=\"exit status 1\"",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected tmux client exit mismatch:\n got %#v\nwant %#v\nstderr %q", got, want, stderr.String())
+	}
+}
+
 func TestRunRootMainTUIWindowSwitchesClientInsideTmux(t *testing.T) {
 	dir := t.TempDir()
 	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", "main-tui-window")
@@ -2378,17 +2440,23 @@ func TestRootTmuxRunnerStreamsAttachSessionToTerminalWriters(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	got, err := rootTmuxRunnerFactory(&stdout, &stderr).Run([]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"})
+	gotView := struct {
+		Output string
+		Stdout string
+		Stderr string
+		Error  string
+	}{Output: got, Stdout: stdout.String(), Stderr: stderr.String()}
 	if err != nil {
-		t.Fatalf("expected attach-session success, got %v", err)
+		gotView.Error = err.Error()
 	}
-	if got != "" {
-		t.Fatalf("expected attach-session output not to be buffered, got %q", got)
-	}
-	if stdout.String() != "attached\n" {
-		t.Fatalf("expected attach-session stdout to stream to terminal writer, got %q", stdout.String())
-	}
-	if stderr.String() != "attach stderr\n" {
-		t.Fatalf("expected attach-session stderr to stream to terminal writer, got %q", stderr.String())
+	wantView := struct {
+		Output string
+		Stdout string
+		Stderr string
+		Error  string
+	}{Output: "attach stderr\n", Stdout: "attached\n", Stderr: "attach stderr\n"}
+	if !reflect.DeepEqual(gotView, wantView) {
+		t.Fatalf("attach-session stream mismatch:\n got %#v\nwant %#v", gotView, wantView)
 	}
 }
 
