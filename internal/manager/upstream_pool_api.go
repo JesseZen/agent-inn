@@ -214,26 +214,40 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 			m.invalidatePoolProbeMemberLocked(name, upstreamName)
 		}
 	}
-	scheduleChanged := current.Mode != next.Mode || current.Probe != next.Probe || !slices.Equal(current.Upstreams, next.Upstreams)
-	if scheduleChanged {
-		for key := range m.probeSchedules {
-			if key.Pool == name {
-				delete(m.probeSchedules, key)
-			}
-		}
-		if next.Mode == config.UpstreamPoolModeActive && attached {
-			for _, upstreamName := range next.Upstreams {
-				m.probeSchedules[poolProbeScheduleKey{Pool: name, Upstream: upstreamName}] = poolProbeSchedule{
-					NextProbeAt: m.clock(),
-					Reason:      ProbeScheduleConfig,
-				}
-			}
-		}
-	}
 	if current.Mode != next.Mode && next.Mode == config.UpstreamPoolModeActive {
 		for _, upstreamName := range next.Upstreams {
 			m.invalidatePoolReadinessLocked(name, upstreamName)
 			m.circuits.Reset(poolCircuitKey(name, upstreamName))
+		}
+	}
+	scheduleChanged := current.Mode != next.Mode || current.Probe != next.Probe || current.CircuitBreaker != next.CircuitBreaker || !slices.Equal(current.Upstreams, next.Upstreams)
+	if scheduleChanged {
+		previousSchedules := make(map[poolProbeScheduleKey]poolProbeSchedule, len(next.Upstreams))
+		for key := range m.probeSchedules {
+			if key.Pool == name {
+				previousSchedules[key] = m.probeSchedules[key]
+				delete(m.probeSchedules, key)
+			}
+		}
+		if next.Mode == config.UpstreamPoolModeActive && attached {
+			now := m.clock()
+			for _, upstreamName := range next.Upstreams {
+				key := poolProbeScheduleKey{Pool: name, Upstream: upstreamName}
+				schedule := poolProbeSchedule{
+					NextProbeAt: now,
+					Reason:      ProbeScheduleConfig,
+				}
+				circuit := m.circuits.Status(poolCircuitKey(name, upstreamName), next.CircuitBreaker)
+				if circuit.State == CircuitStateOpen {
+					schedule.NextProbeAt = circuit.OpenedAt.Add(time.Duration(next.CircuitBreaker.RecoveryWaitSeconds) * time.Second)
+					if schedule.NextProbeAt.Before(now) {
+						schedule.NextProbeAt = now
+					}
+					schedule.ConsecutiveFailures = previousSchedules[key].ConsecutiveFailures
+					schedule.Reason = ProbeScheduleRecovery
+				}
+				m.probeSchedules[key] = schedule
+			}
 		}
 	}
 	if current.Mode != next.Mode && next.Mode == config.UpstreamPoolModeDisabled {

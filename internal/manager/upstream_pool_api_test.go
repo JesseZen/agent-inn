@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -300,6 +301,65 @@ func TestManagerUpstreamPoolProbePolicyEventUsesConfigAuthority(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("config authority did not reach real probe event:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerUpstreamPoolCircuitPolicyReownsProbeSchedules(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		openedAgo  time.Duration
+		newWait    int
+		wantOpenAt time.Duration
+	}{
+		{name: "increase", openedAgo: 30 * time.Second, newWait: 180, wantOpenAt: 150 * time.Second},
+		{name: "decrease floors at now", openedAgo: 2 * time.Minute, newWait: 30},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, time.July, 14, 5, 6, 7, 0, time.UTC)
+			m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+				"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+			})
+			m.cancelProbes()
+			defer m.Close()
+			openedAt := now.Add(-test.openedAgo)
+			current := openedAt
+			m.clock = func() time.Time { return current }
+			circuitKey := poolCircuitKey("coding-ha", "primary")
+			for failure := 0; failure < pool.CircuitBreaker.FailureThreshold; failure++ {
+				m.circuits.RecordFailure(circuitKey, pool.CircuitBreaker)
+			}
+			current = now
+			for _, upstreamName := range pool.Upstreams {
+				key := poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}
+				m.probeSchedules[key] = poolProbeSchedule{NextProbeAt: now.Add(time.Hour), ConsecutiveFailures: 4, Reason: ProbeScheduleRecovery}
+				m.readiness[poolCircuitKey("coding-ha", upstreamName)] = readinessObservation{
+					Result: readinessTestFailure(), CheckedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+				}
+			}
+
+			body := fmt.Sprintf(`{"circuit_breaker":{"failure_threshold":3,"recovery_success_threshold":2,"recovery_wait_seconds":%d}}`, test.newWait)
+			response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", body)
+			got := struct {
+				Code        int
+				Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+				Readiness   map[string]readinessObservation
+				ProbeEvents []map[string]any
+			}{response.Code, maps.Clone(m.probeSchedules), maps.Clone(m.readiness), poolRoutingEvents(m, EventUpstreamProbed)}
+			want := struct {
+				Code        int
+				Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+				Readiness   map[string]readinessObservation
+				ProbeEvents []map[string]any
+			}{http.StatusOK, map[poolProbeScheduleKey]poolProbeSchedule{
+				{Pool: "coding-ha", Upstream: "primary"}: {
+					NextProbeAt: now.Add(test.wantOpenAt), ConsecutiveFailures: 4, Reason: ProbeScheduleRecovery,
+				},
+				{Pool: "coding-ha", Upstream: "backup"}: {NextProbeAt: now, Reason: ProbeScheduleConfig},
+			}, map[string]readinessObservation{}, nil}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("circuit policy PATCH retained old schedule ownership:\n got %#v\nwant %#v", got, want)
+			}
+		})
 	}
 }
 
