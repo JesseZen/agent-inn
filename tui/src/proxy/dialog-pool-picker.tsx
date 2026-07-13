@@ -12,16 +12,19 @@ export function DialogPoolPicker(props: { worker: WorkerSummary }) {
   const dialog = useDialog()
   const toast = useToast()
   const { t } = useLanguage()
-  const options = createMemo<DialogSelectOption<string>[]>(() => [
-    { title: t("common.none"), value: "", description: t("proxy.worker.fallbackPoolDisabled"), category: props.worker.upstream_pool ? t("common.options") : t("common.current") },
-    ...sync.data.upstreamPools.map((pool) => ({
-      title: pool.name,
-      value: pool.id,
-      description: pool.upstreams.join(" -> "),
-      details: pool.active_upstream ? [t("proxy.pool.activeUpstream", { upstream: pool.active_upstream })] : undefined,
-      category: pool.id === props.worker.upstream_pool ? t("common.current") : t("proxy.dashboard.pools"),
-    })),
-  ])
+  const options = createMemo<DialogSelectOption<string>[]>(() => {
+    const upstreamNames = new Map(sync.data.upstreams.map((upstream) => [upstream.id, upstream.name]))
+    return [
+      { title: t("common.none"), value: "", description: t("proxy.worker.fallbackPoolDisabled"), category: props.worker.upstream_pool ? t("common.options") : t("common.current") },
+      ...sync.data.upstreamPools.map((pool) => ({
+        title: pool.name,
+        value: pool.id,
+        description: pool.upstreams.map((upstream) => upstreamNames.get(upstream)!).join(" -> "),
+        details: pool.active_upstream ? [t("proxy.pool.activeUpstream", { upstream: upstreamNames.get(pool.active_upstream)! })] : undefined,
+        category: pool.id === props.worker.upstream_pool ? t("common.current") : t("proxy.dashboard.pools"),
+      })),
+    ]
+  })
 
   return (
     <DialogSelect
@@ -34,18 +37,18 @@ export function DialogPoolPicker(props: { worker: WorkerSummary }) {
           dialog.pop()
           return
         }
+        const pool = option.value ? sync.data.upstreamPools.find((item) => item.id === option.value)! : undefined
         try {
-          if (!option.value) {
+          if (!pool) {
             await sdk.client.patchWorker(props.worker.id, { upstream_pool: "" })
           } else {
-            const pool = sync.data.upstreamPools.find((item) => item.id === option.value)!
             await sdk.client.patchWorker(props.worker.id, {
               upstream_pool: pool.id,
               upstream_id: pool.active_upstream || pool.upstreams[0]!,
             })
           }
           await sync.bootstrap({ fatal: false })
-          toast.show({ message: t("proxy.worker.fallbackPoolSaved", { name: props.worker.name, pool: option.value || t("common.none") }), variant: "success" })
+          toast.show({ message: t("proxy.worker.fallbackPoolSaved", { name: props.worker.name, pool: pool?.name ?? t("common.none") }), variant: "success" })
           dialog.pop()
         } catch (error) {
           toast.error(error)

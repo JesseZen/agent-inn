@@ -33,6 +33,10 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   const toast = useToast()
   const { t } = useLanguage()
   const currentWorker = createMemo(() => sync.data.workers.find((item) => item.id === props.worker.id) ?? props.worker)
+  const fallbackPoolName = createMemo(() => {
+    const poolID = currentWorker().upstream_pool
+    return poolID ? sync.data.upstreamPools.find((pool) => pool.id === poolID)!.name : t("common.none")
+  })
   const modules = createMemo(() => Object.entries(props.worker.modules ?? {}))
   const hooks = createMemo(() => Object.entries(props.worker.hooks ?? {}))
   const hookStatusSummary = createMemo(() =>
@@ -120,7 +124,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
   const poolAction = createMemo<DialogSelectOption<string>>(() => ({
     title: t("proxy.worker.fallbackPool"),
     value: "pool",
-    description: props.worker.upstream_pool || t("common.none"),
+    description: fallbackPoolName(),
     onSelect: () => dialog.push(() => <DialogPoolPicker worker={currentWorker()} />),
   }))
 
@@ -293,7 +297,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
 
   const actions = createMemo<DialogSelectOption<string>[]>(() =>
     props.management
-      ? [{ ...renameAction(), description: currentWorker().name }, logLevelAction(), switchAction(), modulesAction(), logsAction(), launcherAction(), portAction(), proxyAction(), { ...poolAction(), description: currentWorker().upstream_pool || t("common.none") }, restartAction(), stopAction(), deleteAction()]
+      ? [{ ...renameAction(), description: currentWorker().name }, logLevelAction(), switchAction(), modulesAction(), logsAction(), launcherAction(), portAction(), proxyAction(), poolAction(), restartAction(), stopAction(), deleteAction()]
       : [switchAction(), logsAction(), modulesAction()],
   )
 
@@ -306,7 +310,7 @@ export function DialogWorkerStatus(props: { worker: WorkerSummary; management?: 
         <box flexDirection="column">
           <text fg={theme.textMuted}>{t("proxy.worker.statusLine", { status: currentWorker().status })}{hookStatusSummary() ? ` • ${hookStatusSummary()}` : ""}</text>
           <text fg={theme.textMuted}>{t("proxy.worker.upstreamLine", { upstream: upstreamLabel(currentWorker(), t), protocol: currentWorker().protocol ?? "responses" })}</text>
-          <text fg={theme.textMuted}>{t("proxy.worker.fallbackLine", { pool: currentWorker().upstream_pool || t("common.none") })}</text>
+          <text fg={theme.textMuted}>{t("proxy.worker.fallbackLine", { pool: fallbackPoolName() })}</text>
           <text fg={theme.textMuted}>{t("proxy.worker.launcherLine", { launcher: currentWorker().launcher ?? "codex", level: currentWorker().log_level ?? "" })}</text>
           <text fg={theme.textMuted}>{t("proxy.worker.proxyLine", { proxy: currentWorker().proxy_url || t("common.direct"), modules: modules().length, hooks: hooks().length })}</text>
           <Show when={modules().length > 0} fallback={<text fg={theme.textMuted}>{t("proxy.worker.modulesNone")}</text>}>

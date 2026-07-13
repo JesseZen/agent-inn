@@ -53,12 +53,18 @@ const attachedPool: UpstreamPool = {
 }
 
 test("proxy pools register a command and upstream cross-link", async () => {
-  const app = await mountProxyApp({ upstreamPools: [pool] })
+  const app = await mountProxyApp({
+    upstreamPools: [pool],
+    upstreams: [
+      { id: "openai", name: "OpenAI Latest", has_api_key: true },
+      { id: "anthropic", name: "Anthropic Latest", has_api_key: true },
+    ],
+  })
   try {
     await runCommand(app, "proxy.pools")
     expect(app.frame()).toContain("Manage Pools")
     expect(app.frame()).toContain("codex-ha")
-    expect(app.frame()).toContain("openai -> anthropic")
+    expect(app.frame()).toContain("OpenAI Latest -> Anthropic Latest")
     expect(resolveSlashCommand(app.api.keymap, "/pools")).toBe("proxy.pools")
 
     await openUpstreamManager(app)
@@ -72,7 +78,13 @@ test("proxy pools register a command and upstream cross-link", async () => {
 })
 
 test("proxy pools create an ordered pool and open its editor", async () => {
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({
+    height: 80,
+    upstreams: [
+      { id: "openai", name: "OpenAI Latest", has_api_key: true },
+      { id: "anthropic", name: "Anthropic", has_api_key: true },
+    ],
+  })
   try {
     await runCommand(app, "proxy.pools")
     await runCommand(app, "dialog.select.submit")
@@ -83,11 +95,13 @@ test("proxy pools create an ordered pool and open its editor", async () => {
       await app.render()
       return app.frame().includes("First Pool Member")
     })
+    expect(app.frame()).toContain("OpenAI Latest")
     await runCommand(app, "dialog.select.submit")
     await wait(async () => {
       await app.render()
       return app.frame().includes("Edit Pool: new-ha")
     })
+    expect(app.frame()).toContain("1. OpenAI Latest")
     expect(app.calls.createUpstreamPool).toEqual([{ name: "new-ha", upstreams: ["openai"] }])
   } finally {
     await app.cleanup()
@@ -413,8 +427,14 @@ test("proxy pools reorder members and edit circuit breaker", async () => {
 })
 
 test("worker fallback pool binds active upstream in one patch", async () => {
-  const activePool = { ...pool, active_upstream: "anthropic", workers: ["cli-openrouter"] }
-  const app = await mountProxyApp({ upstreamPools: [activePool] })
+  const activePool = { ...pool, name: "Codex HA Latest", active_upstream: "anthropic", workers: ["cli-openrouter"] }
+  const app = await mountProxyApp({
+    upstreamPools: [activePool],
+    upstreams: [
+      { id: "openai", name: "OpenAI Latest", has_api_key: true },
+      { id: "anthropic", name: "Anthropic Latest", has_api_key: true },
+    ],
+  })
   try {
     await openWorkerDetail(app)
     await runCommand(app, "dialog.select.end")
@@ -423,13 +443,15 @@ test("worker fallback pool binds active upstream in one patch", async () => {
     await runCommand(app, "dialog.select.prev")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Fallback Pool: app")
+    expect(app.frame()).toContain("Codex HA Latest")
+    expect(app.frame()).toContain("OpenAI Latest -> Anthropic Latest")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await wait(() => app.calls.patchWorkerBodies.length === 1)
     expect(app.calls.patchWorkerBodies).toEqual([{ upstream_pool: "codex-ha", upstream_id: "anthropic" }])
     await wait(async () => {
       await app.render()
-      return app.frame().includes("Fallback Pool") && app.frame().includes("codex-ha")
+      return app.frame().includes("Fallback Pool") && app.frame().includes("Codex HA Latest")
     })
   } finally {
     await app.cleanup()
@@ -442,7 +464,7 @@ test("proxy pools add and remove members", async () => {
     upstreams: [
       { id: "openai", name: "openai", has_api_key: true },
       { id: "anthropic", name: "anthropic", has_api_key: true },
-      { id: "relay", name: "relay", has_api_key: true },
+      { id: "relay", name: "Relay Latest", has_api_key: true },
     ],
   })
   try {
@@ -450,6 +472,7 @@ test("proxy pools add and remove members", async () => {
     await selectPoolEditorOption(app, "Add Upstream")
     await runCommand(app, "dialog.select.submit")
     expect(app.frame()).toContain("Add Member: codex-ha")
+    expect(app.frame()).toContain("Relay Latest")
     await runCommand(app, "dialog.select.submit")
     await wait(() => app.calls.patchUpstreamPool.length === 1)
     expect(app.calls.patchUpstreamPool[0]).toEqual({ id: "codex-ha", body: { upstreams: ["openai", "anthropic", "relay"] } })
@@ -457,9 +480,9 @@ test("proxy pools add and remove members", async () => {
       await app.render()
       return app.frame().includes("Edit Pool: codex-ha")
     })
-    await selectPoolEditorOption(app, "3. relay")
+    await selectPoolEditorOption(app, "3. Relay Latest")
     await runCommand(app, "dialog.select.submit")
-    expect(app.frame()).toContain("Pool Member: relay")
+    expect(app.frame()).toContain("Pool Member: Relay Latest")
     await runCommand(app, "dialog.select.next")
     expect(app.frame()).toContain("Remove")
     await runCommand(app, "dialog.select.submit")
