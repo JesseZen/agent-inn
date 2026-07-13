@@ -345,30 +345,281 @@ func TestManagerUpstreamPoolPatchPreservesConcurrentModeTransition(t *testing.T)
 }
 
 func TestManagerUpstreamPoolDisableReconcilesSharedProbeIdentity(t *testing.T) {
+	now := time.Date(2026, time.July, 14, 1, 2, 3, 0, time.UTC)
 	m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
 		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
 		"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "research-ha"},
 	})
 	defer m.Close()
+	m.clock = func() time.Time { return now }
 	m.updateConfig(func(cfg *config.Config) { cfg.UpstreamPools["research-ha"] = pool })
-	future := time.Now().Add(time.Hour)
+	future := now.Add(time.Hour)
 	for _, poolName := range []string{"coding-ha", "research-ha"} {
 		for _, upstreamName := range pool.Upstreams {
 			m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
 		}
 	}
 	m.probeAllUpstreams(t.Context())
+	wantDesired := map[probeExecutionKey]probeSpec{}
+	wantManual := map[probeExecutionKey]probeSpec{}
+	wantPending := map[probeExecutionKey]probeSpec{}
+	wantGenerations := maps.Clone(m.probeGenerations)
+	for key, desired := range m.desiredProbes {
+		for _, poolName := range desired.Pools {
+			m.readiness[poolCircuitKey(poolName, desired.Upstream)] = readinessObservation{
+				Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+				Generation: desired.Generation, Fingerprint: desired.Fingerprint,
+			}
+		}
+		manual := desired
+		manual.ManualPools = append([]string(nil), desired.Pools...)
+		m.manualProbes[key] = manual
+		m.pendingProbes[key] = manual
+		desired.Pools = []string{"research-ha"}
+		wantDesired[key] = desired
+		manual.Pools = []string{"research-ha"}
+		manual.ManualPools = []string{"research-ha"}
+		wantManual[key] = manual
+		wantPending[key] = manual
+	}
+	wantReadiness := map[string]readinessObservation{
+		poolCircuitKey("research-ha", "primary"): m.readiness[poolCircuitKey("research-ha", "primary")],
+		poolCircuitKey("research-ha", "backup"):  m.readiness[poolCircuitKey("research-ha", "backup")],
+	}
+	wantSchedules := map[poolProbeScheduleKey]poolProbeSchedule{
+		{Pool: "research-ha", Upstream: "primary"}: {NextProbeAt: future, Reason: ProbeScheduleStable},
+		{Pool: "research-ha", Upstream: "backup"}:  {NextProbeAt: future, Reason: ProbeScheduleStable},
+	}
+	executions := make(chan probeSpec, 1)
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		executions <- spec
+		return readinessTestSuccess(2)
+	}
 	response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", `{"mode":"disabled"}`)
-	got := map[probeExecutionKey][]string{}
-	for key, spec := range m.desiredProbes {
-		got[key] = spec.Pools
+	got := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Executed    bool
+	}{
+		Code: response.Code, Readiness: maps.Clone(m.readiness), Schedules: maps.Clone(m.probeSchedules),
+		Generations: maps.Clone(m.probeGenerations), Desired: maps.Clone(m.desiredProbes),
+		Manual: maps.Clone(m.manualProbes), Pending: maps.Clone(m.pendingProbes),
 	}
-	want := map[probeExecutionKey][]string{
-		{Upstream: "primary"}: {"research-ha"},
-		{Upstream: "backup"}:  {"research-ha"},
+	select {
+	case <-executions:
+		got.Executed = true
+	default:
 	}
-	if response.Code != http.StatusOK || !reflect.DeepEqual(got, want) {
-		t.Fatalf("disable did not reconcile shared probes: status %d got %#v want %#v", response.Code, got, want)
+	want := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Executed    bool
+	}{http.StatusOK, wantReadiness, wantSchedules, wantGenerations, wantDesired, wantManual, wantPending, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("disable destroyed shared survivor authority:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestManagerUpstreamPoolMemberRemovalPreservesSharedSurvivorAuthority(t *testing.T) {
+	now := time.Date(2026, time.July, 14, 3, 4, 5, 0, time.UTC)
+	m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+		"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "research-ha"},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	m.updateConfig(func(cfg *config.Config) { cfg.UpstreamPools["research-ha"] = pool })
+	future := now.Add(time.Hour)
+	for _, poolName := range []string{"coding-ha", "research-ha"} {
+		for _, upstreamName := range pool.Upstreams {
+			m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
+		}
+	}
+	m.probeAllUpstreams(t.Context())
+	wantDesired := map[probeExecutionKey]probeSpec{}
+	wantManual := map[probeExecutionKey]probeSpec{}
+	wantPending := map[probeExecutionKey]probeSpec{}
+	wantGenerations := maps.Clone(m.probeGenerations)
+	for key, desired := range m.desiredProbes {
+		for _, poolName := range desired.Pools {
+			m.readiness[poolCircuitKey(poolName, desired.Upstream)] = readinessObservation{
+				Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+				Generation: desired.Generation, Fingerprint: desired.Fingerprint,
+			}
+		}
+		manual := desired
+		manual.ManualPools = append([]string(nil), desired.Pools...)
+		m.manualProbes[key] = manual
+		if desired.Upstream == "backup" {
+			pending := manual
+			m.pendingProbes[key] = pending
+			desired.Pools = []string{"research-ha"}
+			manual.Pools = []string{"research-ha"}
+			manual.ManualPools = []string{"research-ha"}
+			wantPending[key] = manual
+		} else {
+			desired.Due = true
+			desired.Reason = ProbeScheduleConfig
+		}
+		wantDesired[key] = desired
+		wantManual[key] = manual
+	}
+	wantReadiness := map[string]readinessObservation{
+		poolCircuitKey("research-ha", "primary"): m.readiness[poolCircuitKey("research-ha", "primary")],
+		poolCircuitKey("research-ha", "backup"):  m.readiness[poolCircuitKey("research-ha", "backup")],
+	}
+	wantSchedules := map[poolProbeScheduleKey]poolProbeSchedule{
+		{Pool: "coding-ha", Upstream: "primary"}:   {NextProbeAt: now, Reason: ProbeScheduleConfig},
+		{Pool: "research-ha", Upstream: "primary"}: {NextProbeAt: future, Reason: ProbeScheduleStable},
+		{Pool: "research-ha", Upstream: "backup"}:  {NextProbeAt: future, Reason: ProbeScheduleStable},
+	}
+	started := make(chan probeSpec, 2)
+	release := make(chan struct{})
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		started <- spec
+		<-release
+		return upstream.ProbeResult{}
+	}
+
+	response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", `{"upstreams":["primary"]}`)
+	var execution probeSpec
+	select {
+	case execution = <-started:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("member config probe did not start")
+	}
+	got := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Execution   probeSpec
+	}{
+		response.Code, maps.Clone(m.readiness), maps.Clone(m.probeSchedules), maps.Clone(m.probeGenerations),
+		maps.Clone(m.desiredProbes), maps.Clone(m.manualProbes), maps.Clone(m.pendingProbes), execution,
+	}
+	wantExecution := wantDesired[probeExecutionKey{Upstream: "primary"}]
+	want := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Execution   probeSpec
+	}{http.StatusOK, wantReadiness, wantSchedules, wantGenerations, wantDesired, wantManual, wantPending, wantExecution}
+	if !reflect.DeepEqual(got, want) {
+		close(release)
+		t.Fatalf("member removal destroyed shared survivor authority:\n got %#v\nwant %#v", got, want)
+	}
+	select {
+	case extra := <-started:
+		close(release)
+		t.Fatalf("member removal launched unnecessary survivor probe: %#v", extra)
+	default:
+	}
+	close(release)
+	m.probeWait.Wait()
+}
+
+func TestManagerSharedInFlightResultRejectsDepartedPoolBinding(t *testing.T) {
+	now := time.Date(2026, time.July, 14, 4, 5, 6, 0, time.UTC)
+	m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
+		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha"},
+		"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "research-ha"},
+	})
+	defer m.Close()
+	m.clock = func() time.Time { return now }
+	m.updateConfig(func(cfg *config.Config) { cfg.UpstreamPools["research-ha"] = pool })
+	future := now.Add(time.Hour)
+	for _, poolName := range []string{"coding-ha", "research-ha"} {
+		for _, upstreamName := range pool.Upstreams {
+			m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
+		}
+	}
+	m.probeAllUpstreams(t.Context())
+	key := probeExecutionKey{Upstream: "primary"}
+	spec := m.desiredProbes[key]
+	for _, poolName := range spec.Pools {
+		m.readiness[poolCircuitKey(poolName, "primary")] = readinessObservation{
+			Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+			Generation: spec.Generation, Fingerprint: spec.Fingerprint,
+		}
+	}
+	wantSurvivorBefore := m.readiness[poolCircuitKey("research-ha", "primary")]
+	started := make(chan probeSpec, 2)
+	release := make(chan struct{})
+	m.probeRunner = func(_ context.Context, running probeSpec) upstream.ProbeResult {
+		started <- running
+		<-release
+		return readinessTestSuccess(9)
+	}
+	m.failoverMu.Lock()
+	m.startProbeLocked(spec)
+	m.failoverMu.Unlock()
+	<-started
+
+	response := requestManager(t, m, http.MethodPatch, "/api/upstream-pools/coding-ha", `{"mode":"disabled"}`)
+	desired := spec
+	desired.Pools = []string{"research-ha"}
+	gotBefore := struct {
+		Code       int
+		Readiness  map[string]readinessObservation
+		Generation int
+		Desired    probeSpec
+	}{response.Code, maps.Clone(m.readiness), m.probeGenerations[key], m.desiredProbes[key]}
+	wantBefore := struct {
+		Code       int
+		Readiness  map[string]readinessObservation
+		Generation int
+		Desired    probeSpec
+	}{http.StatusOK, map[string]readinessObservation{poolCircuitKey("research-ha", "primary"): wantSurvivorBefore}, spec.Generation, desired}
+	if !reflect.DeepEqual(gotBefore, wantBefore) {
+		close(release)
+		t.Fatalf("departing binding changed shared in-flight authority:\n got %#v\nwant %#v", gotBefore, wantBefore)
+	}
+	close(release)
+	m.probeWait.Wait()
+	checkedAt := now
+	wantSurvivorAfter := PoolReadiness{
+		Upstream: "primary", Pool: "research-ha", Mode: upstream.ProbeModeProtocol,
+		Authoritative: true, Readiness: ReadinessStateReady, Eligible: true,
+		CheckedAt: &checkedAt, OK: true, StatusCode: http.StatusOK, LatencyMS: 9,
+	}
+	gotAfter := struct {
+		Departed PoolReadiness
+		Survivor PoolReadiness
+		Events   []map[string]any
+	}{m.poolReadiness("coding-ha", "primary"), m.poolReadiness("research-ha", "primary"), poolRoutingEvents(m, EventUpstreamProbed)}
+	wantAfter := struct {
+		Departed PoolReadiness
+		Survivor PoolReadiness
+		Events   []map[string]any
+	}{PoolReadiness{Upstream: "primary", Pool: "coding-ha", Mode: upstream.ProbeModeProtocol, Authoritative: true, Readiness: ReadinessStateUnknown}, wantSurvivorAfter, []map[string]any{
+		{"upstream": "primary", "pool": "research-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": now.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(9), "probe_state": PoolProbeStateAlert, "next_probe_at": now.Add(15 * time.Minute).Format(time.RFC3339), "reason": ProbeScheduleStable},
+	}}
+	if !reflect.DeepEqual(gotAfter, wantAfter) {
+		t.Fatalf("stale shared result reached departed binding:\n got %#v\nwant %#v", gotAfter, wantAfter)
+	}
+	select {
+	case extra := <-started:
+		t.Fatalf("shared survivor launched replacement before deadline: %#v", extra)
+	default:
 	}
 }
 

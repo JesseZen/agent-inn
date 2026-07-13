@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"maps"
 	"net/http"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
+	"github.com/jesse/agent-inn/internal/upstream"
 )
 
 func TestManagerPooledWorkerCreateActivatesConfigSchedules(t *testing.T) {
@@ -171,30 +173,88 @@ func TestManagerPooledWorkerConfigDeleteClearsIdleAuthority(t *testing.T) {
 }
 
 func TestManagerWorkerDetachReconcilesSharedProbeIdentity(t *testing.T) {
+	now := time.Date(2026, time.July, 14, 2, 3, 4, 0, time.UTC)
 	m, pool := newPoolRoutingTestManager(t, map[string]config.WorkerConfig{
 		"app": {Port: 6767, Upstream: "primary", UpstreamPool: "coding-ha", ProxyURL: "http://proxy.example"},
 		"cli": {Port: 6768, Upstream: "primary", UpstreamPool: "research-ha", ProxyURL: "http://proxy.example"},
 	})
 	defer m.Close()
+	m.clock = func() time.Time { return now }
 	m.updateConfig(func(cfg *config.Config) { cfg.UpstreamPools["research-ha"] = pool })
-	future := time.Now().Add(time.Hour)
+	future := now.Add(time.Hour)
 	for _, poolName := range []string{"coding-ha", "research-ha"} {
 		for _, upstreamName := range pool.Upstreams {
 			m.probeSchedules[poolProbeScheduleKey{Pool: poolName, Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
 		}
 	}
 	m.probeAllUpstreams(t.Context())
+	wantDesired := map[probeExecutionKey]probeSpec{}
+	wantManual := map[probeExecutionKey]probeSpec{}
+	wantPending := map[probeExecutionKey]probeSpec{}
+	wantGenerations := maps.Clone(m.probeGenerations)
+	for key, desired := range m.desiredProbes {
+		for _, poolName := range desired.Pools {
+			m.readiness[poolCircuitKey(poolName, desired.Upstream)] = readinessObservation{
+				Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+				Generation: desired.Generation, Fingerprint: desired.Fingerprint,
+			}
+		}
+		manual := desired
+		manual.ManualPools = append([]string(nil), desired.Pools...)
+		m.manualProbes[key] = manual
+		m.pendingProbes[key] = manual
+		desired.Pools = []string{"research-ha"}
+		wantDesired[key] = desired
+		manual.Pools = []string{"research-ha"}
+		manual.ManualPools = []string{"research-ha"}
+		wantManual[key] = manual
+		wantPending[key] = manual
+	}
+	wantReadiness := map[string]readinessObservation{
+		poolCircuitKey("research-ha", "primary"): m.readiness[poolCircuitKey("research-ha", "primary")],
+		poolCircuitKey("research-ha", "backup"):  m.readiness[poolCircuitKey("research-ha", "backup")],
+	}
+	wantSchedules := map[poolProbeScheduleKey]poolProbeSchedule{
+		{Pool: "research-ha", Upstream: "primary"}: {NextProbeAt: future, Reason: ProbeScheduleStable},
+		{Pool: "research-ha", Upstream: "backup"}:  {NextProbeAt: future, Reason: ProbeScheduleStable},
+	}
+	executions := make(chan probeSpec, 1)
+	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
+		executions <- spec
+		return readinessTestSuccess(2)
+	}
 
 	response := patchPoolRouting(t, m, "/api/workers/app", `{"upstream_pool":""}`)
-	got := map[probeExecutionKey][]string{}
-	for key, spec := range m.desiredProbes {
-		got[key] = spec.Pools
+	got := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Executed    bool
+	}{
+		Code: response.Code, Readiness: maps.Clone(m.readiness), Schedules: maps.Clone(m.probeSchedules),
+		Generations: maps.Clone(m.probeGenerations), Desired: maps.Clone(m.desiredProbes),
+		Manual: maps.Clone(m.manualProbes), Pending: maps.Clone(m.pendingProbes),
 	}
-	want := map[probeExecutionKey][]string{
-		{Upstream: "primary", ProxyURL: "http://proxy.example"}: {"research-ha"},
-		{Upstream: "backup", ProxyURL: "http://proxy.example"}:  {"research-ha"},
+	select {
+	case <-executions:
+		got.Executed = true
+	default:
 	}
-	if response.Code != http.StatusOK || !reflect.DeepEqual(got, want) {
-		t.Fatalf("worker detach lost shared probe identity: status %d body %s got %#v want %#v", response.Code, strings.TrimSpace(response.Body.String()), got, want)
+	want := struct {
+		Code        int
+		Readiness   map[string]readinessObservation
+		Schedules   map[poolProbeScheduleKey]poolProbeSchedule
+		Generations map[probeExecutionKey]int
+		Desired     map[probeExecutionKey]probeSpec
+		Manual      map[probeExecutionKey]probeSpec
+		Pending     map[probeExecutionKey]probeSpec
+		Executed    bool
+	}{http.StatusOK, wantReadiness, wantSchedules, wantGenerations, wantDesired, wantManual, wantPending, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("worker detach destroyed shared survivor authority: body %s\n got %#v\nwant %#v", strings.TrimSpace(response.Body.String()), got, want)
 	}
 }

@@ -78,7 +78,7 @@ func (m *Manager) probeAllUpstreams(ctx context.Context) {
 	nextDesired := make(map[probeExecutionKey]probeSpec, len(specs))
 	for _, spec := range specs {
 		previous, exists := m.desiredProbes[spec.Key]
-		if !exists || previous.Fingerprint != spec.Fingerprint || !slices.Equal(previous.Pools, spec.Pools) {
+		if !exists || previous.Fingerprint != spec.Fingerprint {
 			m.probeGenerations[spec.Key]++
 			spec.Generation = m.probeGenerations[spec.Key]
 			delete(m.manualProbes, spec.Key)

@@ -232,7 +232,6 @@ func (m *Manager) handleCreateWorker(rw http.ResponseWriter, r *http.Request) {
 		for _, upstreamName := range pool.Upstreams {
 			m.invalidatePoolReadinessLocked(worker.UpstreamPool, upstreamName)
 		}
-		m.invalidatePoolProbeIdentityLocked(worker.UpstreamPool)
 		m.updatePoolAttachmentAuthorityLocked(worker.UpstreamPool, attachmentsBefore, attachmentsBefore+1)
 		if oldProxyURL != m.poolProxyURL(worker.UpstreamPool) {
 			m.resetPoolIdentityLocked(worker.UpstreamPool)

@@ -268,7 +268,6 @@ func (m *Manager) handleWorkerByPort(rw http.ResponseWriter, r *http.Request) {
 				for _, upstreamName := range pool.Upstreams {
 					m.invalidatePoolReadinessLocked(poolName, upstreamName)
 				}
-				m.invalidatePoolProbeIdentityLocked(poolName)
 				after := attachmentCounts[poolName]
 				if current.UpstreamPool == poolName {
 					after--

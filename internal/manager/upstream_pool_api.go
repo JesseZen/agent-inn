@@ -210,6 +210,9 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 		if existed != remains {
 			m.circuits.Reset(poolCircuitKey(name, upstreamName))
 		}
+		if existed && !remains {
+			m.invalidatePoolProbeMemberLocked(name, upstreamName)
+		}
 	}
 	scheduleChanged := current.Mode != next.Mode || current.Probe != next.Probe || !slices.Equal(current.Upstreams, next.Upstreams)
 	if scheduleChanged {
@@ -233,7 +236,9 @@ func (m *Manager) handleUpstreamPoolByName(rw http.ResponseWriter, r *http.Reque
 			m.circuits.Reset(poolCircuitKey(name, upstreamName))
 		}
 	}
-	m.invalidatePoolProbeIdentityLocked(name)
+	if current.Mode != next.Mode && next.Mode == config.UpstreamPoolModeDisabled {
+		m.invalidatePoolProbeIdentityLocked(name)
+	}
 	delete(m.exhaustedPools, name)
 	if current.Mode != next.Mode {
 		m.publishEvent(EventUpstreamPoolModeChanged, map[string]any{

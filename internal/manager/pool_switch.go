@@ -221,14 +221,75 @@ func (m *Manager) invalidatePoolProbeIdentityLocked(poolName string) {
 		}
 	}
 	for key, spec := range m.manualProbes {
-		if slices.Contains(spec.ManualPools, poolName) {
+		if slices.Contains(spec.Pools, poolName) || slices.Contains(spec.ManualPools, poolName) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key, spec := range m.pendingProbes {
+		if slices.Contains(spec.Pools, poolName) || slices.Contains(spec.ManualPools, poolName) {
 			keys[key] = struct{}{}
 		}
 	}
 	for key := range keys {
+		m.removePoolProbeBindingLocked(poolName, key)
+	}
+}
+
+func (m *Manager) invalidatePoolProbeMemberLocked(poolName string, upstreamName string) {
+	keys := map[probeExecutionKey]struct{}{}
+	for key, spec := range m.desiredProbes {
+		if key.Upstream == upstreamName && slices.Contains(spec.Pools, poolName) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key, spec := range m.manualProbes {
+		if key.Upstream == upstreamName && (slices.Contains(spec.Pools, poolName) || slices.Contains(spec.ManualPools, poolName)) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key, spec := range m.pendingProbes {
+		if key.Upstream == upstreamName && (slices.Contains(spec.Pools, poolName) || slices.Contains(spec.ManualPools, poolName)) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range keys {
+		m.removePoolProbeBindingLocked(poolName, key)
+	}
+}
+
+func (m *Manager) removePoolProbeBindingLocked(poolName string, key probeExecutionKey) {
+	desired, desiredExists := m.desiredProbes[key]
+	if desiredExists {
+		desired.Pools = slices.DeleteFunc(append([]string(nil), desired.Pools...), func(candidate string) bool { return candidate == poolName })
+		if len(desired.Pools) == 0 {
+			delete(m.desiredProbes, key)
+			desiredExists = false
+		} else {
+			m.desiredProbes[key] = desired
+		}
+	}
+	manual, manualExists := m.manualProbes[key]
+	if manualExists {
+		manual.Pools = slices.DeleteFunc(append([]string(nil), manual.Pools...), func(candidate string) bool { return candidate == poolName })
+		manual.ManualPools = slices.DeleteFunc(append([]string(nil), manual.ManualPools...), func(candidate string) bool { return candidate == poolName })
+		if len(manual.ManualPools) == 0 {
+			delete(m.manualProbes, key)
+			manualExists = false
+		} else {
+			m.manualProbes[key] = manual
+		}
+	}
+	if pending, exists := m.pendingProbes[key]; exists {
+		pending.Pools = slices.DeleteFunc(append([]string(nil), pending.Pools...), func(candidate string) bool { return candidate == poolName })
+		pending.ManualPools = slices.DeleteFunc(append([]string(nil), pending.ManualPools...), func(candidate string) bool { return candidate == poolName })
+		if len(pending.Pools) == 0 && len(pending.ManualPools) == 0 {
+			delete(m.pendingProbes, key)
+		} else {
+			m.pendingProbes[key] = pending
+		}
+	}
+	if !desiredExists && !manualExists {
 		m.probeGenerations[key]++
-		delete(m.desiredProbes, key)
-		delete(m.manualProbes, key)
 		delete(m.pendingProbes, key)
 	}
 }
