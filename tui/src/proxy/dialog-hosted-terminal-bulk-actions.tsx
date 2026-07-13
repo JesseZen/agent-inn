@@ -11,10 +11,12 @@ import { Global } from "@agent-inn/core/global"
 import type { HostedSessionSummary } from "./backend"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { rebindHostedSession } from "./hosted-session-rebind"
+import { launchProxySession, setupHostedTerminalSession } from "./launch"
 import { useWorkerFrecency } from "./worker-frecency-context"
 import { useLanguage } from "../context/language"
 
 type BulkSessionOption =
+  | { type: "open" }
   | { type: "change-worker" }
   | { type: "delete" }
   | { type: "session"; session: HostedSessionSummary }
@@ -72,6 +74,12 @@ export function DialogHostedTerminalBulkActions(props: {
 
   const options = createMemo<DialogSelectOption<BulkSessionOption>[]>(() => [
     {
+      title: "Open selected",
+      value: { type: "open" },
+      description: "Open selected hosted sessions",
+      category: t("proxy.hosted.categoryAction"),
+    },
+    {
       title: t("proxy.hosted.bulkChange"),
       value: { type: "change-worker" },
       description: t("proxy.hosted.bulkChangeDescription"),
@@ -94,6 +102,36 @@ export function DialogHostedTerminalBulkActions(props: {
       }
     }),
   ])
+
+  function openSelected() {
+    const sessions = selectedSessions()
+    if (sessions.length === 0) return
+    void (async () => {
+      try {
+        const settings = await sdk.client.getSettings()
+        const launch = props.mode === "popup" ? setupHostedTerminalSession : launchProxySession
+        for (const session of sessions) {
+          const workerID = session.worker_id ?? session.worker_name
+          const launched = await launch({
+            executable: import.meta.env?.AINN_EXECUTABLE || undefined,
+            workerPort: session.worker_port,
+            profile: workerID,
+            configDir: Global.Path.config,
+            mode: "hosted-terminal",
+            sessionID: session.session_id,
+            opener: settings.settings.terminal.opener,
+            tmuxSocketName: settings.settings.terminal.tmux.socket_name,
+            tmuxHostSession: settings.settings.terminal.tmux.host_session,
+          })
+          if (launched) workerFrecency.record(workerID)
+        }
+        await props.onComplete()
+        dialog.pop()
+      } catch (err) {
+        await DialogAlert.show(dialog, "Open hosted sessions failed", String(err instanceof Error ? err.message : err))
+      }
+    })()
+  }
 
   function chooseWorker() {
     const sessions = selectedSessions()
@@ -170,6 +208,10 @@ export function DialogHostedTerminalBulkActions(props: {
         setHighlightedSession(option.value.type === "session" ? option.value.session : undefined)
       }}
       onSelect={(option) => {
+        if (option.value.type === "open") {
+          openSelected()
+          return
+        }
         if (option.value.type === "change-worker") {
           chooseWorker()
           return

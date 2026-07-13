@@ -25,38 +25,39 @@
 12. 不为静态值加测试，不为已删除逻辑加负面测试。
 13. 改动核心逻辑优先写集成测试，而非单元测试。
 14. Go 测试用 `go test ./...`，TUI 测试用 `cd tui && bun test --timeout 30000`。
+15. 实现新功能时默认不补 i18n；只有明确要求时才新增或修改翻译。
 
 ## Git
 
-15. 分支名 ≤3 个词，用连字符分隔，不加 type 前缀（如 feat/、fix/）。示例：session-recovery、fix-scroll-state。
-16. Commit 和 PR 标题用 conventional commit 格式：type(scope): summary。type 限：feat、fix、docs、chore、refactor、test。scope 可选。
-17. 默认分支是 main。对比差异时用 origin/main。
-18. 禁止用 force 方式提交被 `.gitignore` 忽略的内容，如 `git add -f`；需要入库忽略内容时先寻求同意，再改 ignore 规则。
-19. 被 `.gitignore` 忽略的本地文档目录（如 `docs/`）可以作为交接/方案文档位置；不要因为它被 ignore 就移动到可追踪路径，除非我明确要求入库。
+16. 分支名 ≤3 个词，用连字符分隔，不加 type 前缀（如 feat/、fix/）。示例：session-recovery、fix-scroll-state。
+17. Commit 和 PR 标题用 conventional commit 格式：type(scope): summary。type 限：feat、fix、docs、chore、refactor、test。scope 可选。
+18. 默认分支是 main。对比差异时用 origin/main。
+19. 禁止用 force 方式提交被 `.gitignore` 忽略的内容，如 `git add -f`；需要入库忽略内容时先寻求同意，再改 ignore 规则。
+20. 被 `.gitignore` 忽略的本地文档目录（如 `docs/`）可以作为交接/方案文档位置；不要因为它被 ignore 就移动到可追踪路径，除非我明确要求入库。
 
 ## 变更规模
 
-20. 单次变更非机械改动不超过 800 行，复杂逻辑改动不超过 500 行，超出要拆成可审查阶段。
+21. 单次变更非机械改动不超过 800 行，复杂逻辑改动不超过 500 行，超出要拆成可审查阶段。
 
 ## 版本
 
-21. 版本号由 git tag 驱动，构建时通过 `git describe --tags` 注入。切换 channel：`gh workflow run bump.yml -f channel=beta`
+22. 版本号由 git tag 驱动，构建时通过 `git describe --tags` 注入。切换 channel：`gh workflow run bump.yml -f channel=beta`
 
 ## 调试
 
-22. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，主进程日志在 `~/.ainn/logs/ainn.log`，可通过 `settings.log_dir` 配置
-23. 日志事件手册（事件名含义、字段、常见问题 grep 命令）：`internal/logging/EVENTS.md`——遇到 bug 先查这里，不要直接读源码
-24. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
-25. root 由 supervisor、root/TUI 和 workers 组成；主实例停止优先向 supervisor PID 发送 `SIGTERM`，不要直接杀 `tmux` server。启动画面卡住时检查 `ps -o pid,ppid,pgid,tpgid,stat,command`：root/TUI 的 `TPGID` 应与自身前台进程组一致；刷新登录 shell/PATH 必须隔离 session，避免留下失效的前台 `TPGID`。
+23. Worker 日志默认在 `~/.ainn/logs/worker-<port>.log`，主进程日志在 `~/.ainn/logs/ainn.log`，可通过 `settings.log_dir` 配置
+24. 日志事件手册（事件名含义、字段、常见问题 grep 命令）：`internal/logging/EVENTS.md`——遇到 bug 先查这里，不要直接读源码
+25. 另起一个实例测试必须使用独立配置目录和端口：`TEST_CONFIG="$(mktemp -d /tmp/ainn-test.XXXXXX)" && cp ~/.ainn/config.yaml "$TEST_CONFIG/config.yaml"`，然后修改 `$TEST_CONFIG/config.yaml` 里的 `state_dir`、`log_dir`、`settings.terminal.tmux.socket_name`、`settings.terminal.tmux.host_session` 为唯一值；后端用 `./ainn --config-dir "$TEST_CONFIG" --manager-port 19090`，TUI dev 用 `cd tui && AINN_URL=http://127.0.0.1:19090 AINN_CONFIG_DIR="$TEST_CONFIG" bun run dev`，不要复用 `~/.ainn` 或默认 `9090`。
+26. root 由 supervisor、root/TUI 和 workers 组成；主实例停止优先向 supervisor PID 发送 `SIGTERM`，不要直接杀 `tmux` server。启动画面卡住时检查 `ps -o pid,ppid,pgid,tpgid,stat,command`：root/TUI 的 `TPGID` 应与自身前台进程组一致；刷新登录 shell/PATH 必须隔离 session，避免留下失效的前台 `TPGID`。
 
 ## 人工验证
 
-26. 修 TUI 视觉/交互问题时，自动测试通过后必须提供隔离人工验证命令，让我亲自检查。
-27. 人工验证命令必须使用 worktree build 产物、独立临时 config/state/log、非默认 manager port、唯一 tmux socket/session；禁止复用 `~/.ainn`、`9090` 或当前主实例状态。
-28. 优先使用最小假配置复现 UI 行为，避免真实 upstream/API key 和真实 worker；最终回复必须包含启动命令、操作路径、预期结果和清理命令。
-29. 人工发现的新场景要补自动回归测试，再修源头。
-30. 人工验证必须生成 `/tmp` 下的可执行脚本，让人类直接在自己的终端运行；最终回复只给脚本路径、操作路径、预期结果和清理方式。
-31. `ainn` root 同时运行 manager 和 TUI；另启 dev TUI 时，必须把 root 放进独立 detached PTY，禁止两个 TUI 共享 stdin。
-32. dev TUI 必须显式传 `AINN_EXECUTABLE` 指向 worktree build 的绝对路径，禁止依赖 `PATH` 命中其他 `ainn`。
-33. 脚本必须动态选择空闲 manager/worker 端口；ready 检查还要核对返回的 `state_dir` 属于本次临时配置，防止误连旧实例。
-34. 验证脚本不得依赖当前 cwd；构建应在 worktree 内执行，ready 检查按实际 JSON 字段解析，临时 tmux 名称避开 `.` 等特殊字符。
+27. 修 TUI 视觉/交互问题时，自动测试通过后必须提供隔离人工验证命令，让我亲自检查。
+28. 人工验证命令必须使用 worktree build 产物、独立临时 config/state/log、非默认 manager port、唯一 tmux socket/session；禁止复用 `~/.ainn`、`9090` 或当前主实例状态。
+29. 优先使用最小假配置复现 UI 行为，避免真实 upstream/API key 和真实 worker；最终回复必须包含启动命令、操作路径、预期结果和清理命令。
+30. 人工发现的新场景要补自动回归测试，再修源头。
+31. 人工验证必须生成 `/tmp` 下的可执行脚本，让人类直接在自己的终端运行；最终回复只给脚本路径、操作路径、预期结果和清理方式。
+32. `ainn` root 同时运行 manager 和 TUI；另启 dev TUI 时，必须把 root 放进独立 detached PTY，禁止两个 TUI 共享 stdin。
+33. dev TUI 必须显式传 `AINN_EXECUTABLE` 指向 worktree build 的绝对路径，禁止依赖 `PATH` 命中其他 `ainn`。
+34. 脚本必须动态选择空闲 manager/worker 端口；ready 检查还要核对返回的 `state_dir` 属于本次临时配置，防止误连旧实例。
+35. 验证脚本不得依赖当前 cwd；构建应在 worktree 内执行，ready 检查按实际 JSON 字段解析，临时 tmux 名称避开 `.` 等特殊字符。
