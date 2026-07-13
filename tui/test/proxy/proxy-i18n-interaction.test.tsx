@@ -4,18 +4,6 @@ import { mountProxyApp, openWorkerDetail, runCommand, wait, type ProxyApp } from
 import { useLanguage, type Locale } from "../../src/context/language"
 import { DialogUpstreamEditor } from "../../src/proxy/dialog-upstream"
 
-function setLocaleEnvironment(locale: string) {
-  const previous = { LC_ALL: process.env.LC_ALL, LC_MESSAGES: process.env.LC_MESSAGES, LANG: process.env.LANG }
-  process.env.LC_ALL = locale
-  process.env.LC_MESSAGES = locale
-  process.env.LANG = locale
-  return () => {
-    process.env.LC_ALL = previous.LC_ALL
-    process.env.LC_MESSAGES = previous.LC_MESSAGES
-    process.env.LANG = previous.LANG
-  }
-}
-
 function proxyCommandLabel(app: ProxyApp, name: string) {
   const command = app.api.keymap.getCommands().find((item) => item.name === name)
   return { title: command?.title, category: command?.category }
@@ -42,8 +30,7 @@ async function waitForFrame(app: ProxyApp, value: string) {
 }
 
 test("Proxy dashboard renders translated labels for a Chinese locale", async () => {
-  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) } })
   try {
     await runCommand(app, "proxy.dashboard")
     await wait(() => app.frame().includes("仪表板"))
@@ -53,14 +40,13 @@ test("Proxy dashboard renders translated labels for a Chinese locale", async () 
     expect(app.frame()).not.toContain("Dashboard")
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("Chinese pool editor renders adaptive probe controls", async () => {
-  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
   const app = await mountProxyApp({
     height: 80,
+    stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) },
     upstreamPools: [
       {
         id: "codex-ha",
@@ -103,13 +89,11 @@ test("Chinese pool editor renders adaptive probe controls", async () => {
     }).toEqual({ status: true, policy: true, stable: true, refresh: true, english: false })
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("Proxy command labels react to a runtime locale switch", async () => {
-  const restoreLocale = setLocaleEnvironment("en_US.UTF-8")
-  const app = await mountProxyApp()
+  const app = await mountProxyApp({ stateFiles: { "kv.json": JSON.stringify({ locale: "en" }) } })
   try {
     expect(proxyCommandLabel(app, "proxy.workers")).toEqual({ title: "Manage workers", category: "Proxy" })
 
@@ -120,12 +104,10 @@ test("Proxy command labels react to a runtime locale switch", async () => {
     await Bun.sleep(500)
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("mounted upstream actions react to locale and draft name changes", async () => {
-  const restoreLocale = setLocaleEnvironment("en_US.UTF-8")
   const localeSetters: Array<(locale: Locale) => void> = []
 
   function UpstreamEditorProbe() {
@@ -147,7 +129,7 @@ test("mounted upstream actions react to locale and draft name changes", async ()
     )
   }
 
-  const app = await mountProxyApp({ height: 40 })
+  const app = await mountProxyApp({ height: 40, stateFiles: { "kv.json": JSON.stringify({ locale: "en" }) } })
   try {
     app.api.ui.dialog.replace(() => <UpstreamEditorProbe />)
     await app.render()
@@ -185,13 +167,12 @@ test("mounted upstream actions react to locale and draft name changes", async ()
     await Bun.sleep(500)
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("Chinese Proxy dialogs cover each mounted action family", async () => {
-  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
   const app = await mountProxyApp({
+    stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) },
     hostedSessions: [
       {
         session_id: "hs_active",
@@ -265,13 +246,12 @@ test("Chinese Proxy dialogs cover each mounted action family", async () => {
     }).toEqual({ pools: true, logs: true, metrics: true, batch: true, launch: true, launcher: true })
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("translated dashboard warnings keep their semantic warning color", async () => {
-  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
   const app = await mountProxyApp({
+    stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) },
     hostedSessions: [
       {
         session_id: "hs_unbound",
@@ -293,13 +273,14 @@ test("translated dashboard warnings keep their semantic warning color", async ()
     expect(lineValueForeground(app, "未绑定", "1")).not.toEqual(lineValueForeground(app, "工作进程", "2"))
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })
 
 test("Chinese Proxy errors preserve the upstream error body", async () => {
-  const restoreLocale = setLocaleEnvironment("zh_CN.UTF-8")
-  const app = await mountProxyApp({ patchUpstreamError: "rename rejected" })
+  const app = await mountProxyApp({
+    patchUpstreamError: "rename rejected",
+    stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) },
+  })
   try {
     await runCommand(app, "proxy.upstreams")
     await runCommand(app, "dialog.select.next")
@@ -328,6 +309,5 @@ test("Chinese Proxy errors preserve the upstream error body", async () => {
     expect(app.frame()).toContain("rename rejected")
   } finally {
     await app.cleanup()
-    restoreLocale()
   }
 })

@@ -6,6 +6,9 @@ import { Global } from "@agent-inn/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json, type FetchHandler } from "./fixture/tui-sdk"
 import { registerProxyCommands } from "../src/proxy/commands"
+import { mkdir } from "node:fs/promises"
+import path from "node:path"
+import { tmpdir } from "./fixture/fixture"
 
 export async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
@@ -69,6 +72,14 @@ export async function mountHostedTerminalPopupApp(override?: FetchHandler) {
 }
 
 async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: boolean }, override?: FetchHandler) {
+  const tmp = await tmpdir()
+  const home = tmp.path
+  const app = "ainn"
+  const data = path.join(home, ".local", "share", app)
+  const cache = path.join(home, ".cache", app)
+  const state = path.join(home, ".local", "state", app)
+  await mkdir(state, { recursive: true })
+  await Bun.write(path.join(state, "kv.json"), "{}")
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -100,7 +111,21 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
         },
         async dispose() {},
       },
-    }).pipe(Effect.provide(Global.defaultLayer)),
+    }).pipe(
+      Effect.provide(
+        Global.layerWith({
+          home,
+          data,
+          cache,
+          config: path.join(home, ".config", app),
+          state,
+          tmp: path.join(home, "tmp", app),
+          bin: path.join(cache, "bin"),
+          log: path.join(data, "log"),
+          repos: path.join(data, "repos"),
+        }),
+      ),
+    ),
   )
 
   async function renderReady() {
@@ -127,6 +152,7 @@ async function mountHostedTerminalAppWithArgs(args: { hostedTerminalPopup?: bool
     setup.renderer.destroy()
     await task
     mock.restore()
+    await tmp[Symbol.asyncDispose]()
   }
 
   function currentApi() {
