@@ -214,13 +214,16 @@ New upstreams receive immutable IDs such as `up_5`; `name` is the editable displ
 
 `role` defaults to `"cli"`; workers with `role: app` are filtered out of the `/launch` picker. `launcher` defaults to `"codex"`, and `log_level` defaults to `"simple"`.
 
-`launcher: grok` starts the installed xAI Grok Build CLI with an AINN-managed
-worker URL. AINN writes an isolated Grok model configuration under the
-configured state directory and sets `XAI_API_KEY=ainn`; the worker replaces
-that token with the selected upstream API key. Grok Build login and user
-configuration remain outside AINN. Basic launch, hosted terminal, rename,
-delete, and worker changes are supported; Grok-specific turn status and resume
-tracking are not.
+`launcher: grok` starts the installed xAI Grok Build CLI against an AINN-managed
+worker URL. AINN uses a shared isolated home under the configured state
+directory (`grok-home`), sets `XAI_API_KEY=ainn`, and sets
+`GROK_MODELS_BASE_URL` to the selected worker's `/v1` endpoint so Grok's model
+picker and requests use the worker catalog/proxy. The launch default model is
+`protocol_probe.model` when set, otherwise `grok-4.5`. Upstream model rewriting
+remains available through the `model_override` request module. Grok Build login
+and user configuration remain outside AINN. Basic launch, hosted terminal,
+rename, delete, and worker changes are supported; Grok-specific turn status and
+resume tracking are not.
 
 `launcher: opencode` starts OpenCode with an inline `ainn` provider whose URL
 points at the selected worker and whose API key is the placeholder `ainn`.
