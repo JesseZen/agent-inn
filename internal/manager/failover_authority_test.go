@@ -413,10 +413,16 @@ func TestManagerFirstWorkerFailureRefreshesFallbacks(t *testing.T) {
 	for _, upstreamName := range pool.Upstreams {
 		m.probeSchedules[poolProbeScheduleKey{Pool: "coding-ha", Upstream: upstreamName}] = poolProbeSchedule{NextProbeAt: future, Reason: ProbeScheduleStable}
 	}
+	m.probeAllUpstreams(t.Context())
+	m.readiness[poolCircuitKey("coding-ha", "primary")] = readinessObservation{
+		Result: readinessTestSuccess(1), CheckedAt: now, ExpiresAt: future.Add(time.Hour),
+	}
 	started := make(chan probeSpec, 1)
+	release := make(chan struct{})
 	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
 		started <- spec
-		return upstream.ProbeResult{}
+		<-release
+		return readinessTestSuccess(2)
 	}
 
 	if err := m.recordWorkerUpstreamFailure("app", "primary"); err != nil {
@@ -454,7 +460,20 @@ func TestManagerFirstWorkerFailureRefreshesFallbacks(t *testing.T) {
 		Schedule poolProbeSchedule
 	}{"primary", CircuitStatus{State: CircuitStateClosed, ConsecutiveFailures: 1}, poolProbeSchedule{NextProbeAt: now, Reason: ProbeScheduleWorkerFailure}}
 	if !reflect.DeepEqual(got, want) {
+		close(release)
 		t.Fatalf("unexpected first failure state:\n got %#v\nwant %#v", got, want)
+	}
+	close(release)
+	m.probeWait.Wait()
+	wantEvent := []map[string]any{{
+		"upstream": "backup", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol,
+		"authoritative": true, "readiness": ReadinessStateReady, "eligible": true,
+		"checked_at": now.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK,
+		"latency_ms": int64(2), "probe_state": PoolProbeStateAlert,
+		"next_probe_at": now.Add(15 * time.Minute).Format(time.RFC3339), "reason": ProbeScheduleWorkerFailure,
+	}}
+	if gotEvents := poolRoutingEvents(m, EventUpstreamProbed); !reflect.DeepEqual(gotEvents, wantEvent) {
+		t.Fatalf("first worker failure did not publish complete probe event:\n got %#v\nwant %#v", gotEvents, wantEvent)
 	}
 }
 

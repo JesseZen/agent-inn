@@ -30,13 +30,15 @@ func TestManagerPoolRefreshActiveUsesUniqueExecutions(t *testing.T) {
 	defer m.Close()
 	m.clock = func() time.Time { return now }
 	calls := make(chan probeSpec, 2)
-	release := make(chan struct{})
+	releasePrimary := make(chan struct{})
+	releaseBackup := make(chan struct{})
 	m.probeRunner = func(_ context.Context, spec probeSpec) upstream.ProbeResult {
 		calls <- spec
-		<-release
 		if spec.Upstream == "backup" {
+			<-releaseBackup
 			return readinessTestSuccess(2)
 		}
+		<-releasePrimary
 		return readinessTestSuccess(1)
 	}
 
@@ -44,23 +46,27 @@ func TestManagerPoolRefreshActiveUsesUniqueExecutions(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("unexpected refresh status %d: %s", response.Code, response.Body.String())
 	}
-	close(release)
-	m.probeWait.Wait()
 	executions := poolRefreshExecutions([]probeSpec{<-calls, <-calls})
+	close(releasePrimary)
+	eventually(t, time.Second, func() bool { return len(poolRoutingEvents(m, EventUpstreamProbed)) == 1 })
+	close(releaseBackup)
+	m.probeWait.Wait()
 	got := struct {
 		Status     int
 		Executions []poolRefreshExecution
 		Readiness  []PoolReadiness
 		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Events     []map[string]any
 	}{response.Code, executions, []PoolReadiness{
 		m.poolReadiness("coding-ha", "primary"), m.poolReadiness("coding-ha", "backup"),
-	}, maps.Clone(m.probeSchedules)}
+	}, maps.Clone(m.probeSchedules), poolRoutingEvents(m, EventUpstreamProbed)}
 	checkedAt := now
 	want := struct {
 		Status     int
 		Executions []poolRefreshExecution
 		Readiness  []PoolReadiness
 		Schedules  map[poolProbeScheduleKey]poolProbeSchedule
+		Events     []map[string]any
 	}{http.StatusOK, []poolRefreshExecution{
 		{probeExecutionKey{Upstream: "backup", ProxyURL: "http://proxy.example"}, "backup", "http://proxy.example", []string{"coding-ha"}, ProbeScheduleManual},
 		{probeExecutionKey{Upstream: "primary", ProxyURL: "http://proxy.example"}, "primary", "http://proxy.example", []string{"coding-ha"}, ProbeScheduleManual},
@@ -70,6 +76,9 @@ func TestManagerPoolRefreshActiveUsesUniqueExecutions(t *testing.T) {
 	}, map[poolProbeScheduleKey]poolProbeSchedule{
 		{Pool: "coding-ha", Upstream: "primary"}: {NextProbeAt: now.Add(15 * time.Minute), Reason: ProbeScheduleStable},
 		{Pool: "coding-ha", Upstream: "backup"}:  {NextProbeAt: now.Add(15 * time.Minute), Reason: ProbeScheduleStable},
+	}, []map[string]any{
+		{"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(1), "probe_state": PoolProbeStateAlert, "next_probe_at": now.Format(time.RFC3339), "reason": ProbeScheduleManual},
+		{"upstream": "backup", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol, "authoritative": true, "readiness": ReadinessStateReady, "eligible": true, "checked_at": checkedAt.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK, "latency_ms": int64(2), "probe_state": PoolProbeStateStable, "next_probe_at": now.Add(15 * time.Minute).Format(time.RFC3339), "reason": ProbeScheduleManual},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected active refresh result:\n got %#v\nwant %#v", got, want)

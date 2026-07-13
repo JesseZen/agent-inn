@@ -194,6 +194,17 @@ func TestManagerAdaptiveProbeCadence(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected startup cadence:\n got %#v\nwant %#v", got, want)
 	}
+	startupEvents := poolRoutingEvents(m, EventUpstreamProbed)
+	wantStartupEvents := []map[string]any{{
+		"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol,
+		"authoritative": true, "readiness": ReadinessStateReady, "eligible": true,
+		"checked_at": now.Format(time.RFC3339), "ok": true, "status_code": http.StatusOK,
+		"latency_ms": int64(1), "probe_state": PoolProbeStateStable,
+		"next_probe_at": wantSchedule.NextProbeAt.Format(time.RFC3339), "reason": ProbeScheduleStartup,
+	}}
+	if !reflect.DeepEqual(startupEvents, wantStartupEvents) {
+		t.Fatalf("startup authority did not publish complete event:\n got %#v\nwant %#v", startupEvents, wantStartupEvents)
+	}
 
 	now = now.Add(defaultUpstreamProbeInterval)
 	m.probeAllUpstreams(t.Context())
@@ -235,6 +246,7 @@ func TestManagerProbeFailureBackoffCapsAtStableInterval(t *testing.T) {
 	}
 	key := poolProbeScheduleKey{Pool: "coding-ha", Upstream: "primary"}
 	wantExecutions := make([]probeSpec, 0, 6)
+	wantEvents := make([]map[string]any, 0, 6)
 
 	for failure, wantDelay := range []time.Duration{
 		time.Minute,
@@ -257,14 +269,23 @@ func TestManagerProbeFailureBackoffCapsAtStableInterval(t *testing.T) {
 			ConsecutiveFailures: failure + 1,
 			Reason:              ProbeScheduleRecovery,
 		}
+		wantEvents = append(wantEvents, map[string]any{
+			"upstream": "primary", "pool": "coding-ha", "mode": upstream.ProbeModeProtocol,
+			"authoritative": true, "readiness": ReadinessStateNotReady, "eligible": false,
+			"checked_at": now.Format(time.RFC3339), "ok": false, "status_code": 0,
+			"latency_ms": int64(0), "error": "protocol_error", "probe_state": PoolProbeStateAlert,
+			"next_probe_at": wantSchedule.NextProbeAt.Format(time.RFC3339), "reason": wantReason,
+		})
 		got := struct {
 			Executions []probeSpec
 			Schedules  []poolProbeSchedule
-		}{append([]probeSpec(nil), executions...), []poolProbeSchedule{m.probeSchedules[key]}}
+			Events     []map[string]any
+		}{append([]probeSpec(nil), executions...), []poolProbeSchedule{m.probeSchedules[key]}, poolRoutingEvents(m, EventUpstreamProbed)}
 		want := struct {
 			Executions []probeSpec
 			Schedules  []poolProbeSchedule
-		}{append([]probeSpec(nil), wantExecutions...), []poolProbeSchedule{wantSchedule}}
+			Events     []map[string]any
+		}{append([]probeSpec(nil), wantExecutions...), []poolProbeSchedule{wantSchedule}, append([]map[string]any(nil), wantEvents...)}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("unexpected failure cadence after failure %d:\n got %#v\nwant %#v", failure+1, got, want)
 		}
