@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/worker"
@@ -183,6 +184,32 @@ func (e Event) AsUpstreamPoolModeChanged() (pool string, previous config.Upstrea
 		mode = config.UpstreamPoolMode(value)
 	}
 	return pool, previous, mode, true
+}
+
+// AsUpstreamPoolStateChanged 解析 upstream.pool.state.changed 事件。ok=false 表示类型不匹配或截止时间无效。
+func (e Event) AsUpstreamPoolStateChanged() (pool string, state PoolProbeState, nextProbeAt *time.Time, ok bool) {
+	if e.Type != EventUpstreamPoolStateChanged {
+		return "", "", nil, false
+	}
+	pool, _ = e.Payload["pool"].(string)
+	switch value := e.Payload["probe_state"].(type) {
+	case PoolProbeState:
+		state = value
+	case string:
+		state = PoolProbeState(value)
+	}
+	if raw, exists := e.Payload["next_probe_at"]; exists {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return "", "", nil, false
+		}
+		var parsed time.Time
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return "", "", nil, false
+		}
+		nextProbeAt = &parsed
+	}
+	return pool, state, nextProbeAt, true
 }
 
 // AsConfigStatusChanged 解析 config.status.changed 事件。ok=false 表示类型不匹配。

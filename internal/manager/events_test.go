@@ -22,6 +22,26 @@ func TestEventBusPublishesAndReplaysEvents(t *testing.T) {
 	}
 }
 
+func TestEventAsUpstreamPoolStateChanged(t *testing.T) {
+	next := time.Date(2026, time.July, 14, 6, 7, 8, 0, time.UTC)
+	event := Event{Type: EventUpstreamPoolStateChanged, Payload: map[string]any{
+		"pool": "coding-ha", "probe_state": PoolProbeStateAlert, "next_probe_at": next.Format(time.RFC3339),
+	}}
+	pool, state, gotNext, ok := event.AsUpstreamPoolStateChanged()
+	if !ok || pool != "coding-ha" || state != PoolProbeStateAlert || gotNext == nil || !gotNext.Equal(next) {
+		t.Fatalf("unexpected pool state accessor: %#v %#v %#v %#v", pool, state, gotNext, ok)
+	}
+	pool, state, gotNext, ok = (Event{Type: EventUpstreamPoolStateChanged, Payload: map[string]any{
+		"pool": "coding-ha", "probe_state": PoolProbeStateIdle,
+	}}).AsUpstreamPoolStateChanged()
+	if !ok || pool != "coding-ha" || state != PoolProbeStateIdle || gotNext != nil {
+		t.Fatalf("unexpected pool state accessor without deadline: %#v %#v %#v %#v", pool, state, gotNext, ok)
+	}
+	if _, _, _, ok := (Event{Type: EventUpstreamProbed}).AsUpstreamPoolStateChanged(); ok {
+		t.Fatal("wrong event type should not parse as pool state")
+	}
+}
+
 func TestEventBusSubscribeReceivesPublishedEvent(t *testing.T) {
 	bus := newEventBus(2)
 	sub := bus.Subscribe(0)
