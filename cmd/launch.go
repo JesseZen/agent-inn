@@ -78,8 +78,6 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 	})
 }
 
-var hostedTurnWatcherSidecarStarter = startHostedTurnWatcherSidecar
-
 func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags := flag.NewFlagSet("launch", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -256,12 +254,14 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	}
 
 	hostCreated := false
+	serverMissing := false
 	if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(settings)); err != nil {
 		if !isTmuxHostMissingError(err) {
 			fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 			return 1
 		}
 		hostCreated = true
+		serverMissing = isTmuxServerMissingError(err)
 	}
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(settings.StateDir))
@@ -276,7 +276,13 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			return 1
 		}
 		if hostCreated {
-			if _, err := runner.Run(manager.TmuxStartHostCommandForSettings(settings)); err != nil {
+			var err error
+			if serverMissing {
+				_, err = startHostedTmuxServer(settings, configDir, manager.TmuxStartHostCommandForSettings(settings))
+			} else {
+				_, err = runner.Run(manager.TmuxStartHostCommandForSettings(settings))
+			}
+			if err != nil {
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
@@ -405,7 +411,13 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 	launchCmd := hostedSessionLaunchCommand(freshCommand, configDir, session.SessionID, settings.Terminal.Tmux.TurnStatusHooks)
 	reuseFirstWindow := hostCreated && settings.Terminal.Tmux.HostStartMode == config.TmuxHostStartModeReuseFirstWindow
 	if reuseFirstWindow {
-		windowDetails, err := runner.Run(manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, opts.Workspace, launchCmd))
+		initialCommand := manager.TmuxStartHostWithWindowCommandForSettings(settings, windowName, opts.Workspace, launchCmd)
+		windowDetails := ""
+		if serverMissing {
+			windowDetails, err = startHostedTmuxServer(settings, configDir, initialCommand)
+		} else {
+			windowDetails, err = runner.Run(initialCommand)
+		}
 		if err != nil {
 			cleanupIncompleteSession()
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
@@ -428,7 +440,12 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		}
 	} else {
 		if hostCreated {
-			if _, err := runner.Run(manager.TmuxStartHostCommandForSettings(settings)); err != nil {
+			if serverMissing {
+				_, err = startHostedTmuxServer(settings, configDir, manager.TmuxStartHostCommandForSettings(settings))
+			} else {
+				_, err = runner.Run(manager.TmuxStartHostCommandForSettings(settings))
+			}
+			if err != nil {
 				cleanupIncompleteSession()
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
@@ -487,46 +504,6 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 		return 1
 	}
 	return finishHostedTerminalLaunch(settings, configDir, runner, stderr, noAttach)
-}
-
-func finishHostedTerminalLaunch(settings config.Settings, configDir string, runner launchRunner, stderr io.Writer, noAttach bool) int {
-	if settings.Terminal.Tmux.TurnStatusHooks && !noAttach {
-		if err := hostedTurnWatcherSidecarStarter(configDir); err != nil {
-			fmt.Fprintf(stderr, "failed to start hosted turn watcher: %v\n", err)
-			return 1
-		}
-	}
-	if noAttach {
-		return 0
-	}
-	if _, err := runner.Run(manager.TmuxAttachCommandForSettings(settings)); err != nil {
-		fmt.Fprintf(stderr, "failed to attach tmux host: %v\n", err)
-		return 1
-	}
-	return 0
-}
-
-func startHostedTurnWatcherSidecar(configDir string) error {
-	rootLock, err := rootLockPath(configDir)
-	if err != nil {
-		return err
-	}
-	release, err := rootLockerFactory(rootLock).Acquire()
-	if err == nil {
-		release()
-	} else if err == errAlreadyLocked {
-		return nil
-	} else {
-		return err
-	}
-
-	cmd := exec.Command(hostedSessionExecutable(), "hosted-session", "watch-all", "--config-dir", configDir)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
 }
 
 func installTmuxTurnStatusHooks(runner launchRunner, settings config.Settings, configDir string, executable string) error {

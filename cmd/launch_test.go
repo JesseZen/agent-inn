@@ -249,6 +249,47 @@ func TestLaunchRunnerBuffersTmuxControlOutput(t *testing.T) {
 	}
 }
 
+func TestFinishHostedTerminalLaunchLogsUnexpectedTmuxClientExit(t *testing.T) {
+	configDir := t.TempDir()
+	settings := config.Settings{
+		LogDir: filepath.Join(configDir, "logs"),
+		Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{
+			SocketName:  "ainn-test",
+			HostSession: "ainn-test-host",
+		}},
+	}
+	runner := launchRunnerFunc(func(args []string) (string, error) {
+		return "[server exited unexpectedly]\n", errors.New("exit status 1")
+	})
+	var stderr bytes.Buffer
+	code := finishHostedTerminalLaunch(settings, configDir, runner, &stderr, false)
+	logPath := filepath.Join(settings.LogDir, "tmux-ainn-test.log")
+	data, readErr := os.ReadFile(logPath)
+	got := struct {
+		Code    int
+		ReadErr string
+		Event   string
+	}{Code: code}
+	if readErr != nil {
+		got.ReadErr = readErr.Error()
+	} else if line := strings.TrimSpace(string(data)); line != "" {
+		if index := strings.Index(line, "tmux.supervisor tmux.client.exit "); index >= 0 {
+			got.Event = line[index:]
+		}
+	}
+	want := struct {
+		Code    int
+		ReadErr string
+		Event   string
+	}{
+		Code:  1,
+		Event: "tmux.supervisor tmux.client.exit socket=ainn-test host_session=ainn-test-host reason=server_unexpected exit_code=1 error=\"exit status 1\"",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("hosted tmux client exit mismatch:\n got %#v\nwant %#v\nstderr %q", got, want, stderr.String())
+	}
+}
+
 func TestRunLaunchRunsBuiltCommandWithEncodedProfile(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
@@ -498,6 +539,13 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
 
 	var got [][]string
+	var startRequest tmuxServerStartRequest
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		startRequest = request
+		return tmuxServerStartResponse{}, nil
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
@@ -509,7 +557,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 				// Simulate fresh tmux host: has-session and select-window fail.
 				// tmux subcommand sits at args[3] after `tmux -L ainn`.
 				if len(args) > 3 && args[3] == "has-session" {
-					return "", errors.New("can't find session")
+					return "", errors.New("no server running")
 				}
 				if len(args) > 3 && args[3] == "select-window" {
 					return "", errors.New("can't find window")
@@ -533,7 +581,6 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "mouse", "on"},
 		tmuxExtendedKeysCommand("ainn-test"),
@@ -546,13 +593,18 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 		append([]string{"tmux", "-L", "ainn-test", "new-window", "-t", "ainn-test-host", "-c", "/tmp/work", "-n", "solve problem A", "-P", "-F", "#{window_id}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai", "--cd", "/tmp/work")...),
 		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	)
-	if len(got) != len(want) {
-		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tmux command sequence mismatch:\n got %#v\nwant %#v", got, want)
 	}
-	for i, w := range want {
-		if strings.Join(got[i], " ") != strings.Join(w, " ") {
-			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
-		}
+	wantStartRequest := tmuxServerStartRequest{
+		ConfigDir:      configDir,
+		LogDir:         filepath.Join(configDir, "logs"),
+		SocketName:     "ainn-test",
+		HostSession:    "ainn-test-host",
+		InitialCommand: manager.TmuxStartHostCommandForSettings(tmuxSettings),
+	}
+	if !reflect.DeepEqual(startRequest, wantStartRequest) {
+		t.Fatalf("tmux server start request mismatch:\n got %#v\nwant %#v", startRequest, wantStartRequest)
 	}
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
@@ -718,6 +770,13 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
 
 	var got [][]string
+	var startRequest tmuxServerStartRequest
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		startRequest = request
+		return tmuxServerStartResponse{}, nil
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
@@ -763,7 +822,6 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		manager.TmuxHasSessionCommandForSettings(cfg.Settings),
-		manager.TmuxStartHostCommandForSettings(cfg.Settings),
 		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
 		manager.TmuxEnableExtendedKeysCommandForSettings(cfg.Settings),
 	}
@@ -777,6 +835,16 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	wantStartRequest := tmuxServerStartRequest{
+		ConfigDir:      configDir,
+		LogDir:         filepath.Join(configDir, "logs"),
+		SocketName:     "ainn-test",
+		HostSession:    "ainn-test-host",
+		InitialCommand: manager.TmuxStartHostCommandForSettings(cfg.Settings),
+	}
+	if !reflect.DeepEqual(startRequest, wantStartRequest) {
+		t.Fatalf("tmux server start request mismatch:\n got %#v\nwant %#v", startRequest, wantStartRequest)
 	}
 }
 
@@ -2422,6 +2490,97 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSessionWithEncodedProfile(t *te
 	}
 }
 
+func TestRunLaunchHostedTerminalReopensSessionThroughManagedMissingServer(t *testing.T) {
+	dir := hostedTestTempDir(t)
+	configDir := filepath.Join(dir, "config")
+	stateDir := filepath.Join(dir, "state")
+	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "solve problem A",
+		WorkerID:     "cli-openai",
+		WorkerName:   "cli-openai",
+		WorkerPort:   11199,
+		Workspace:    "/tmp/work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.UpdateWindowID(created.SessionID, "@12"); err != nil {
+		t.Fatal(err)
+	}
+
+	var startRequest tmuxServerStartRequest
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		startRequest = request
+		return tmuxServerStartResponse{}, nil
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
+	previousRunner := launchRunnerFactory
+	launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
+		return launchRunnerFunc(func(args []string) (string, error) {
+			switch tmuxSubcommand(args) {
+			case "has-session":
+				return "", errors.New(tmuxMissingSocketErrorText)
+			case "show":
+				return "on\n", nil
+			case "new-window":
+				return "@77\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { launchRunnerFactory = previousRunner }()
+
+	var stderr bytes.Buffer
+	code := runLaunch([]string{
+		"--config-dir", configDir,
+		"--worker", "11199",
+		"--profile", "cli-openai",
+		"--mode", "hosted-terminal",
+		"--session-id", created.SessionID,
+		"--no-attach",
+	}, &bytes.Buffer{}, &stderr)
+	updated, ok, getErr := registry.Get(created.SessionID)
+	got := struct {
+		Code          int
+		StartRequest  tmuxServerStartRequest
+		WindowID      string
+		RecordPresent bool
+		GetError      string
+	}{
+		Code:          code,
+		StartRequest:  startRequest,
+		WindowID:      updated.TmuxWindowID,
+		RecordPresent: ok,
+	}
+	if getErr != nil {
+		got.GetError = getErr.Error()
+	}
+	want := struct {
+		Code          int
+		StartRequest  tmuxServerStartRequest
+		WindowID      string
+		RecordPresent bool
+		GetError      string
+	}{
+		StartRequest: tmuxServerStartRequest{
+			ConfigDir:      configDir,
+			LogDir:         filepath.Join(configDir, "logs"),
+			SocketName:     "ainn-test",
+			HostSession:    "ainn-test-host",
+			InitialCommand: manager.TmuxStartHostCommandForSettings(hostedTestTmuxSettings("ainn-test", "ainn-test-host")),
+		},
+		WindowID:      "@77",
+		RecordPresent: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("managed reopen mismatch:\n got %#v\nwant %#v\nstderr %q", got, want, stderr.String())
+	}
+}
+
 func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSessionWithEncodedProfile(t *testing.T) {
 	dir := hostedTestTempDir(t)
 	configDir := filepath.Join(dir, "config")
@@ -2809,6 +2968,13 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
 
 	var got [][]string
+	var startRequest tmuxServerStartRequest
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		startRequest = request
+		return tmuxServerStartResponse{Stdout: "@1\t0\n"}, nil
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
@@ -2818,10 +2984,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 					return "on\n", nil
 				}
 				if len(args) > 3 && args[3] == "has-session" {
-					return "", errors.New("can't find session")
-				}
-				if len(args) > 3 && args[3] == "new-session" {
-					return "@1\t0\n", nil
+					return "", errors.New("no server running")
 				}
 				return "", nil
 			})
@@ -2839,7 +3002,6 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
-		append([]string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}"}, hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...),
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),
 	}
@@ -2849,13 +3011,21 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
 	)
-	if len(got) != len(want) {
-		t.Fatalf("expected %d commands, got %d: %#v", len(want), len(got), got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tmux command sequence mismatch:\n got %#v\nwant %#v", got, want)
 	}
-	for i, w := range want {
-		if strings.Join(got[i], " ") != strings.Join(w, " ") {
-			t.Fatalf("command %d:\n got %#v\nwant %#v", i, got[i], w)
-		}
+	wantStartRequest := tmuxServerStartRequest{
+		ConfigDir:   configDir,
+		LogDir:      filepath.Join(configDir, "logs"),
+		SocketName:  "ainn-test",
+		HostSession: "ainn-test-host",
+		InitialCommand: append(
+			[]string{"tmux", "-L", "ainn-test", "new-session", "-d", "-s", "ainn-test-host", "-n", "solve problem A", "-P", "-F", "#{window_id}\t#{window_index}"},
+			hostedTestLaunchCommand(t, configDir, "hs_1", "codex", "--profile", "cli-openai")...,
+		),
+	}
+	if !reflect.DeepEqual(startRequest, wantStartRequest) {
+		t.Fatalf("tmux server start request mismatch:\n got %#v\nwant %#v", startRequest, wantStartRequest)
 	}
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(stateDir))
@@ -2959,6 +3129,11 @@ func TestRunLaunchHostedTerminalReuseFirstWindowCapturesNewSessionIDWhenLabelIsA
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "reuse-first-window")
 	installFakeTmuxOnPath(t)
 	t.Setenv("FAKE_TMUX_NEW_SESSION_STDOUT", "@1\t0\n")
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		return tmuxServerStartResponse{Stdout: "@1\t0\n"}, nil
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -3161,15 +3336,17 @@ func TestRunLaunchHostedTerminalDeletesNewRecordWhenFreshHostSetupFails(t *testi
 	stateDir := filepath.Join(dir, "state")
 	writeLaunchConfig(t, configDir, stateDir, "ainn-test", "ainn-test-host", "new-window")
 
+	previousStarter := managedTmuxServerStarter
+	managedTmuxServerStarter = func(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
+		return tmuxServerStartResponse{}, errors.New("managed server failed")
+	}
+	defer func() { managedTmuxServerStarter = previousStarter }()
 	restore := func() func() {
 		previous := launchRunnerFactory
 		launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner {
 			return launchRunnerFunc(func(args []string) (string, error) {
 				if len(args) > 3 && args[3] == "has-session" {
-					return "", errors.New("can't find session")
-				}
-				if len(args) > 3 && args[3] == "new-session" {
-					return "", errors.New("new-session failed")
+					return "", errors.New("no server running")
 				}
 				return "", nil
 			})

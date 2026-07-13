@@ -153,6 +153,14 @@ tmux supervisor 先记录并转发信号时出现；`external_or_unknown` 能排
 - **用途**：保留 tmux 文档定义的 client 视角；`server_unexpected` 必须与同一 `tmux-<socket>.log` 中紧邻的 `tmux.server.exit` 联合判断
 - **注意**：AINN 不启用 tmux `-v`，因为原生日志会包含完整 client 环境变量
 
+tmux server 意外退出时直接按配置的 socket 查看同一文件；主 TUI 和
+hosted-terminal 首次创建 server 都写入这里：
+
+```bash
+SOCKET=ainn # 使用 settings.terminal.tmux.socket_name 的实际值
+grep -E 'tmux\.(server|client)\.(start|signal|exit)' "$HOME/.ainn/logs/tmux-$SOCKET.log" | tail -40
+```
+
 ### root（主进程与 TUI）
 
 #### `root.start`
