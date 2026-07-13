@@ -169,17 +169,7 @@ func TestTmuxThemeCommandForSettingsPinsMainWindowAndIncludesHostedSessions(t *t
 	}
 }
 
-func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInWindowList(t *testing.T) {
-	settings := config.Settings{
-		Terminal: config.TerminalSettings{
-			Tmux: config.TmuxSettings{
-				SocketName:    "ainn-test",
-				HostSession:   "ainn-test-host",
-				HostStartMode: config.TmuxHostStartModeNewWindow,
-			},
-		},
-	}
-	got := TmuxThemeCommandForSettings(settings)
+func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInNonMainModes(t *testing.T) {
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"set-option", "-g", "status", "on", ";",
@@ -190,8 +180,22 @@ func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInWindowList(t *testin
 		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
 		"set-window-option", "-g", "automatic-rename", "off",
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %#v, want %#v", got, want)
+	for _, mode := range []string{config.TmuxHostStartModeNewWindow, config.TmuxHostStartModeReuseFirstWindow} {
+		t.Run(mode, func(t *testing.T) {
+			settings := config.Settings{
+				Terminal: config.TerminalSettings{
+					Tmux: config.TmuxSettings{
+						SocketName:    "ainn-test",
+						HostSession:   "ainn-test-host",
+						HostStartMode: mode,
+					},
+				},
+			}
+			got := TmuxThemeCommandForSettings(settings)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 

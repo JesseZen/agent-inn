@@ -223,6 +223,13 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 		fmt.Fprintf(stderr, "failed to reset main tmux window status: %v\n", err)
 		return 1
 	}
+	if _, err := runner.Run(tmuxHostCommand(manager.TmuxThemeCommandForSettings(cfg.Settings))); err != nil {
+		if printTmuxTraceWriteError(stderr, err) {
+			return 1
+		}
+		fmt.Fprintf(stderr, "failed to apply tmux theme: %v\n", err)
+		return 1
+	}
 	if _, err := runner.Run(tmuxHostCommand(manager.TmuxEnableExtendedKeysCommandForSettings(cfg.Settings))); err != nil {
 		if printTmuxTraceWriteError(stderr, err) {
 			return 1
