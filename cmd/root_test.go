@@ -2423,7 +2423,7 @@ func TestRunRootMainTUIWindowLogsFailedCommandBeforeReturningError(t *testing.T)
 		{Argv: tmuxMainWindowThemeCommand("ainn-test", "ainn-test-host"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: tmuxExtendedKeysCommand("ainn-test"), Stdout: "", Stderr: "", Err: "", HasDuration: true},
 		{Argv: []string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"}, Stdout: "", Stderr: "", Err: "", HasDuration: true},
-		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "", Err: "exit status 1", HasDuration: true},
+		{Argv: []string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"}, Stdout: "", Stderr: "attach failed\n", Err: "exit status 1", HasDuration: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -2776,7 +2776,7 @@ func TestRunRootMainTUIWindowWithoutDebugDoesNotCreateTraceFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"config/config.yaml"}
+	want := []string{"config/config.yaml", "config/logs/tmux-ainn-test.log"}
 	if !reflect.DeepEqual(files, want) {
 		t.Fatalf("expected sandbox files %#v, got %#v", want, files)
 	}

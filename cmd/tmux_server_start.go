@@ -35,6 +35,21 @@ type tmuxClientExit struct {
 	Error    string
 }
 
+type tmuxServerStartRequest struct {
+	ConfigDir      string
+	LogDir         string
+	SocketName     string
+	HostSession    string
+	InitialCommand []string
+}
+
+type tmuxServerStartResponse struct {
+	Stdout        string `json:"stdout"`
+	Error         string `json:"error"`
+	SupervisorPID int    `json:"supervisor_pid"`
+	ServerPID     int    `json:"server_pid"`
+}
+
 func classifyTmuxClientExit(output string, err error) tmuxClientExit {
 	exit := tmuxClientExit{}
 	if err != nil {

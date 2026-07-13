@@ -52,6 +52,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return runHostedSession(args[1:], stdout, stderr)
 		case "hooks":
 			return runHooks(args[1:], stdout, stderr)
+		case "tmux-server":
+			return runTmuxServer(args[1:], stderr)
 		}
 	}
 
