@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,7 +18,8 @@ import (
 func TestStartManagedTmuxServer(t *testing.T) {
 	if os.Getenv("AINN_TMUX_START_HELPER") == "1" {
 		responseWriter := os.NewFile(tmuxServerResponseFD, "tmux-test-response")
-		if responseWriter == nil {
+		controlReader := os.NewFile(tmuxServerStartupControlFD, "tmux-test-control")
+		if responseWriter == nil || controlReader == nil {
 			os.Exit(2)
 		}
 		args := flag.Args()
@@ -33,7 +35,12 @@ func TestStartManagedTmuxServer(t *testing.T) {
 		if err := json.NewEncoder(responseWriter).Encode(response); err != nil {
 			os.Exit(4)
 		}
+		var ack [1]byte
+		if _, err := io.ReadFull(controlReader, ack[:]); err != nil || ack[0] != tmuxServerStartupControlAck {
+			os.Exit(5)
+		}
 		_ = responseWriter.Close()
+		_ = controlReader.Close()
 		os.Exit(0)
 	}
 

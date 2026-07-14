@@ -11,3 +11,7 @@ import (
 func flockTryLock(f *os.File) error {
 	return nil
 }
+
+func flockLock(f *os.File) error {
+	return nil
+}

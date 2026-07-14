@@ -89,9 +89,9 @@ grep "run=$RUN" "$LOG_DIR/ainn.log" "$LOG_DIR"/worker-*.log 2>/dev/null | tail -
 遗留的 `active-root.json` 产生 `root.previous_unclean`。
 
 tmux 的 wait status 同样不包含发信号者 PID。`initiator=ainn` 只在 AINN 的
-tmux supervisor 因自身 setup failure 主动终止 server 时出现；supervisor 收到
-外部信号后再转发仍记为 `external_or_unknown`。该值无法区分其他进程、用户操作
-和操作系统，精确追踪外部发信号者需要特权系统审计。
+tmux supervisor 因启动/setup/信号转发失败而主动清理 server 时出现；supervisor
+收到外部信号后正常转发仍记为 `external_or_unknown`。该值无法区分其他进程、
+用户操作和操作系统，精确追踪外部发信号者需要特权系统审计。
 
 ---
 
@@ -141,7 +141,7 @@ tmux supervisor 因自身 setup failure 主动终止 server 时出现；supervis
 - **触发**：AINN 的 tmux supervisor 即将向 server 转发信号
 - **字段**：`pid`，`signal`，`initiator`（`ainn/external_or_unknown`）
 - **LEVEL**：WARN
-- **用途**：证明信号经过 AINN supervisor 转发；`initiator=ainn` 表示 supervisor 因 setup failure 主动终止，收到外部信号再转发则为 `external_or_unknown`
+- **用途**：证明信号经过 AINN supervisor 转发；`initiator=ainn` 表示 supervisor 因启动/setup/转发失败主动清理，收到外部信号再正常转发则为 `external_or_unknown`
 
 #### `tmux.server.exit`
 - **触发**：tmux supervisor 已 `Wait` 到 server 的真实退出状态

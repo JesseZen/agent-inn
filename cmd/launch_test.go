@@ -613,6 +613,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	want := [][]string{
 		manager.TmuxDetectCommand(),
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		{"tmux", "-L", "ainn-test", "set-option", "-g", "mouse", "on"},
 		tmuxExtendedKeysCommand("ainn-test"),
@@ -853,6 +854,7 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	launchCmd := hostedTestLaunchCommand(t, configDir, "hs_1", codexCmd...)
 	want := [][]string{
 		manager.TmuxDetectCommand(),
+		manager.TmuxHasSessionCommandForSettings(cfg.Settings),
 		manager.TmuxHasSessionCommandForSettings(cfg.Settings),
 		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
 		manager.TmuxEnableExtendedKeysCommandForSettings(cfg.Settings),
@@ -3033,6 +3035,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	tmuxSettings := hostedTestTmuxSettings("ainn-test", "ainn-test-host")
 	want := [][]string{
 		manager.TmuxDetectCommand(),
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "show", "-gv", "mouse"},
 		tmuxExtendedKeysCommand("ainn-test"),

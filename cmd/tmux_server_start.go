@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +60,28 @@ var (
 	managedTmuxServerExecutable = os.Executable
 )
 
+func acquireTmuxServerStartupLock(socketName string) (func(), error) {
+	tmuxTmpDir := os.Getenv("TMUX_TMPDIR")
+	if tmuxTmpDir == "" {
+		tmuxTmpDir = tmuxServerDefaultTmpDir
+	}
+	socketDir := filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		return nil, fmt.Errorf("create tmux startup lock directory %s: %w", socketDir, err)
+	}
+	lockName := fmt.Sprintf(".ainn-start-%x.lock", sha256.Sum256([]byte(socketName)))
+	lockPath := filepath.Join(socketDir, lockName)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open tmux startup lock %s: %w", lockPath, err)
+	}
+	if err := flockLock(lockFile); err != nil {
+		_ = lockFile.Close()
+		return nil, fmt.Errorf("lock tmux startup %s: %w", socketName, err)
+	}
+	return func() { _ = lockFile.Close() }, nil
+}
+
 func startManagedTmuxServer(request tmuxServerStartRequest) (tmuxServerStartResponse, error) {
 	executable, err := managedTmuxServerExecutable()
 	if err != nil {
@@ -68,7 +91,14 @@ func startManagedTmuxServer(request tmuxServerStartRequest) (tmuxServerStartResp
 	if err != nil {
 		return tmuxServerStartResponse{}, fmt.Errorf("create tmux supervisor response pipe: %w", err)
 	}
+	controlReader, controlWriter, err := os.Pipe()
+	if err != nil {
+		_ = responseReader.Close()
+		_ = responseWriter.Close()
+		return tmuxServerStartResponse{}, fmt.Errorf("create tmux supervisor control pipe: %w", err)
+	}
 	defer responseReader.Close()
+	defer controlWriter.Close()
 
 	args := []string{
 		"tmux-server",
@@ -80,13 +110,15 @@ func startManagedTmuxServer(request tmuxServerStartRequest) (tmuxServerStartResp
 	}
 	args = append(args, request.InitialCommand...)
 	cmd := exec.Command(executable, args...)
-	cmd.ExtraFiles = []*os.File{responseWriter}
+	cmd.ExtraFiles = []*os.File{responseWriter, controlReader}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		_ = responseWriter.Close()
+		_ = controlReader.Close()
 		return tmuxServerStartResponse{}, fmt.Errorf("start tmux supervisor: %w", err)
 	}
 	_ = responseWriter.Close()
+	_ = controlReader.Close()
 
 	responseResult := make(chan struct {
 		response tmuxServerStartResponse
@@ -105,23 +137,26 @@ func startManagedTmuxServer(request tmuxServerStartRequest) (tmuxServerStartResp
 	select {
 	case result := <-responseResult:
 		if result.err != nil {
-			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
+			_ = controlWriter.Close()
+			go func() { _, _ = cmd.Process.Wait() }()
 			return tmuxServerStartResponse{}, fmt.Errorf("read tmux supervisor startup response: %w", result.err)
 		}
 		response = result.response
 	case <-time.After(tmuxServerResponseTimeout):
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
+		_ = controlWriter.Close()
+		go func() { _, _ = cmd.Process.Wait() }()
 		return tmuxServerStartResponse{}, errors.New("wait for tmux supervisor startup response: timeout")
 	}
 	if response.Error != "" {
 		_, _ = cmd.Process.Wait()
 		return response, errors.New(response.Error)
 	}
-	if err := cmd.Process.Release(); err != nil {
-		return tmuxServerStartResponse{}, fmt.Errorf("release tmux supervisor: %w", err)
+	if _, err := controlWriter.Write([]byte{tmuxServerStartupControlAck}); err != nil {
+		go func() { _, _ = cmd.Process.Wait() }()
+		return tmuxServerStartResponse{}, fmt.Errorf("acknowledge tmux supervisor startup: %w", err)
 	}
+	_ = controlWriter.Close()
+	go func() { _, _ = cmd.Process.Wait() }()
 	return response, nil
 }
 

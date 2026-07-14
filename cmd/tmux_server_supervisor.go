@@ -25,14 +25,20 @@ import (
 )
 
 const (
-	tmuxServerStartupTimeout      = 5 * time.Second
-	tmuxServerStartupPollInterval = 20 * time.Millisecond
-	tmuxServerOutputTailBytes     = 32 * 1024
-	tmuxServerResponseFD          = 3
-	tmuxServerDefaultTmpDir       = "/tmp"
+	tmuxServerStartupTimeout              = 5 * time.Second
+	tmuxServerStartupPollInterval         = 20 * time.Millisecond
+	tmuxServerOutputTailBytes             = 32 * 1024
+	tmuxServerOutputRedactionOverlapBytes = 4 * 1024
+	tmuxServerResponseFD                  = 3
+	tmuxServerStartupControlFD            = 4
+	tmuxServerStartupControlAck           = byte(1)
+	tmuxServerDefaultTmpDir               = "/tmp"
 )
 
-var tmuxServerCommandTimeout = 5 * time.Second
+var (
+	tmuxServerCommandTimeout = 5 * time.Second
+	tmuxServerForwardSignal  = func(process *os.Process, signal os.Signal) error { return process.Signal(signal) }
+)
 
 type tmuxServerExitReason string
 type tmuxServerInitiator string
@@ -57,8 +63,9 @@ func (w *tmuxServerOutputTail) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.data = append(w.data, p...)
-	if len(w.data) > tmuxServerOutputTailBytes {
-		w.data = append([]byte(nil), w.data[len(w.data)-tmuxServerOutputTailBytes:]...)
+	storageLimit := tmuxServerOutputTailBytes + tmuxServerOutputRedactionOverlapBytes
+	if len(w.data) > storageLimit {
+		w.data = append([]byte(nil), w.data[len(w.data)-storageLimit:]...)
 	}
 	return len(p), nil
 }
@@ -108,7 +115,16 @@ func runTmuxServer(args []string, stderr io.Writer) int {
 		return 1
 	}
 	defer responseWriter.Close()
-	if err := superviseTmuxServer(request, responseWriter); err != nil {
+	var startupControl io.ReadCloser
+	controlCandidate := os.NewFile(tmuxServerStartupControlFD, "tmux-server-control")
+	if controlCandidate != nil {
+		if _, statErr := controlCandidate.Stat(); statErr == nil {
+			startupControl = controlCandidate
+		} else {
+			_ = controlCandidate.Close()
+		}
+	}
+	if err := superviseTmuxServerWithControl(request, responseWriter, startupControl); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -119,10 +135,21 @@ func superviseTmuxServer(request tmuxServerStartRequest, responseWriter io.Write
 	stopSignals := make(chan os.Signal, 4)
 	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer signal.Stop(stopSignals)
-	return superviseTmuxServerWithSignals(request, responseWriter, stopSignals)
+	return superviseTmuxServerWithSignalsAndControl(request, responseWriter, stopSignals, nil)
 }
 
 func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWriter io.Writer, stopSignals <-chan os.Signal) error {
+	return superviseTmuxServerWithSignalsAndControl(request, responseWriter, stopSignals, nil)
+}
+
+func superviseTmuxServerWithControl(request tmuxServerStartRequest, responseWriter io.Writer, startupControl io.ReadCloser) error {
+	stopSignals := make(chan os.Signal, 4)
+	signal.Notify(stopSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	defer signal.Stop(stopSignals)
+	return superviseTmuxServerWithSignalsAndControl(request, responseWriter, stopSignals, startupControl)
+}
+
+func superviseTmuxServerWithSignalsAndControl(request tmuxServerStartRequest, responseWriter io.Writer, stopSignals <-chan os.Signal, startupControl io.ReadCloser) error {
 	settings := config.Settings{
 		LogDir: request.LogDir,
 		Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{
@@ -163,6 +190,59 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 		_, _ = io.Copy(&outputTail, ptyFile)
 		close(outputDone)
 	}()
+	var startupControlResult <-chan bool
+	if startupControl != nil {
+		controlResult := make(chan bool, 1)
+		startupControlResult = controlResult
+		defer startupControl.Close()
+		go func() {
+			var ack [1]byte
+			readCount, readErr := io.ReadFull(startupControl, ack[:])
+			controlResult <- readErr == nil && readCount == len(ack) && ack[0] == tmuxServerStartupControlAck
+		}()
+	}
+	startupControlReceived := false
+	startupControlAcknowledged := false
+	collectTmuxServerExit := func(waitErr error, initiator tmuxServerInitiator, extraErr error) ([]any, error) {
+		_ = ptyFile.Close()
+		<-outputDone
+		completedAt := time.Now()
+		exitCode := 0
+		reason := tmuxServerExitReasonClean
+		signalName := ""
+		if waitErr != nil {
+			exitCode = -1
+			reason = tmuxServerExitReasonWaitError
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) && exitErr.ProcessState != nil {
+				exitCode = exitErr.ProcessState.ExitCode()
+				if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+					reason = tmuxServerExitReasonSignal
+					signalName = status.Signal().String()
+				} else {
+					reason = tmuxServerExitReasonExitCode
+				}
+			}
+		}
+		logArgs := []any{
+			"pid", tmuxCmd.Process.Pid,
+			"exit_code", exitCode,
+			"reason", string(reason),
+			"signal", signalName,
+			"initiator", string(initiator),
+			"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
+			"completed_at", completedAt.UTC().Format(time.RFC3339Nano),
+		}
+		if extraErr != nil {
+			logArgs = append(logArgs, "error", extraErr.Error())
+		} else if waitErr != nil {
+			logArgs = append(logArgs, "error", waitErr.Error())
+		}
+		if output := strings.TrimSpace(outputTail.RedactedString()); output != "" {
+			logArgs = append(logArgs, "output_tail", output)
+		}
+		return logArgs, errors.Join(extraErr, waitErr)
+	}
 
 	logger.Info(logging.EventTmuxServerStart,
 		"pid", tmuxCmd.Process.Pid,
@@ -180,6 +260,19 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 	socketPath := filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()), request.SocketName)
 	deadline := time.Now().Add(tmuxServerStartupTimeout)
 	for {
+		if startupControlResult != nil && !startupControlReceived {
+			select {
+			case startupControlAcknowledged = <-startupControlResult:
+				startupControlReceived = true
+				if !startupControlAcknowledged {
+					err = errors.New("tmux supervisor startup client disconnected")
+				}
+			default:
+			}
+		}
+		if err != nil {
+			break
+		}
 		if connection, dialErr := net.DialTimeout("unix", socketPath, tmuxServerStartupPollInterval); dialErr == nil {
 			_ = connection.Close()
 			break
@@ -227,44 +320,18 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 			"signal", syscall.SIGTERM.String(),
 			"initiator", string(tmuxServerInitiatorAINN),
 		)
-		_ = tmuxCmd.Process.Signal(syscall.SIGTERM)
-		waitErr := tmuxCmd.Wait()
-		_ = ptyFile.Close()
-		<-outputDone
-		completedAt := time.Now()
-		exitCode := 0
-		reason := tmuxServerExitReasonClean
-		signalName := ""
-		if waitErr != nil {
-			exitCode = -1
-			reason = tmuxServerExitReasonWaitError
-			var exitErr *exec.ExitError
-			if errors.As(waitErr, &exitErr) && exitErr.ProcessState != nil {
-				exitCode = exitErr.ProcessState.ExitCode()
-				if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-					reason = tmuxServerExitReasonSignal
-					signalName = status.Signal().String()
-				} else {
-					reason = tmuxServerExitReasonExitCode
-				}
-			}
+		if signalErr := tmuxCmd.Process.Signal(syscall.SIGTERM); signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+			_ = tmuxCmd.Process.Kill()
 		}
-		logger.Info(logging.EventTmuxServerExit,
-			"pid", tmuxCmd.Process.Pid,
-			"exit_code", exitCode,
-			"reason", string(reason),
-			"signal", signalName,
-			"initiator", string(tmuxServerInitiatorAINN),
-			"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
-			"completed_at", completedAt.UTC().Format(time.RFC3339Nano),
-			"error", err.Error(),
-		)
+		waitErr := tmuxCmd.Wait()
+		logArgs, returnErr := collectTmuxServerExit(waitErr, tmuxServerInitiatorAINN, err)
+		logger.Info(logging.EventTmuxServerExit, logArgs...)
 		_ = json.NewEncoder(responseWriter).Encode(tmuxServerStartResponse{
 			Error:         err.Error(),
 			SupervisorPID: os.Getpid(),
 			ServerPID:     tmuxCmd.Process.Pid,
 		})
-		return errors.Join(err, waitErr)
+		return returnErr
 	}
 
 	response := tmuxServerStartResponse{
@@ -279,39 +346,32 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 			"signal", syscall.SIGTERM.String(),
 			"initiator", string(tmuxServerInitiatorAINN),
 		)
-		_ = tmuxCmd.Process.Signal(syscall.SIGTERM)
-		waitErr := tmuxCmd.Wait()
-		_ = ptyFile.Close()
-		<-outputDone
-		completedAt := time.Now()
-		exitCode := 0
-		reason := tmuxServerExitReasonClean
-		signalName := ""
-		if waitErr != nil {
-			exitCode = -1
-			reason = tmuxServerExitReasonWaitError
-			var exitErr *exec.ExitError
-			if errors.As(waitErr, &exitErr) && exitErr.ProcessState != nil {
-				exitCode = exitErr.ProcessState.ExitCode()
-				if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-					reason = tmuxServerExitReasonSignal
-					signalName = status.Signal().String()
-				} else {
-					reason = tmuxServerExitReasonExitCode
-				}
-			}
+		if signalErr := tmuxCmd.Process.Signal(syscall.SIGTERM); signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+			_ = tmuxCmd.Process.Kill()
 		}
-		logger.Info(logging.EventTmuxServerExit,
+		waitErr := tmuxCmd.Wait()
+		logArgs, returnErr := collectTmuxServerExit(waitErr, tmuxServerInitiatorAINN, responseErr)
+		logger.Info(logging.EventTmuxServerExit, logArgs...)
+		return returnErr
+	}
+	if startupControlResult != nil && !startupControlReceived {
+		startupControlAcknowledged = <-startupControlResult
+		startupControlReceived = true
+	}
+	if startupControlResult != nil && !startupControlAcknowledged {
+		startupErr := errors.New("tmux supervisor startup client disconnected")
+		logger.Warn(logging.EventTmuxServerSignal,
 			"pid", tmuxCmd.Process.Pid,
-			"exit_code", exitCode,
-			"reason", string(reason),
-			"signal", signalName,
+			"signal", syscall.SIGTERM.String(),
 			"initiator", string(tmuxServerInitiatorAINN),
-			"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
-			"completed_at", completedAt.UTC().Format(time.RFC3339Nano),
-			"error", responseErr.Error(),
 		)
-		return errors.Join(responseErr, waitErr)
+		if signalErr := tmuxCmd.Process.Signal(syscall.SIGTERM); signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+			_ = tmuxCmd.Process.Kill()
+		}
+		waitErr := tmuxCmd.Wait()
+		logArgs, returnErr := collectTmuxServerExit(waitErr, tmuxServerInitiatorAINN, startupErr)
+		logger.Info(logging.EventTmuxServerExit, logArgs...)
+		return returnErr
 	}
 
 	waitResult := make(chan error, 1)
@@ -333,51 +393,28 @@ waitForServer:
 				"signal", signalValue.String(),
 				"initiator", string(initiator),
 			)
-			if signalErr := tmuxCmd.Process.Signal(signalValue); signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
-				waitErr = fmt.Errorf("forward tmux server signal %s: %w", signalValue, signalErr)
+			if signalErr := tmuxServerForwardSignal(tmuxCmd.Process, signalValue); signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+				forwardErr := fmt.Errorf("forward tmux server signal %s: %w", signalValue, signalErr)
+				initiator = tmuxServerInitiatorAINN
+				logger.Warn(logging.EventTmuxServerSignal,
+					"pid", tmuxCmd.Process.Pid,
+					"signal", syscall.SIGKILL.String(),
+					"initiator", string(initiator),
+				)
+				killErr := tmuxCmd.Process.Kill()
+				if errors.Is(killErr, os.ErrProcessDone) {
+					killErr = nil
+				}
+				waitErr = errors.Join(forwardErr, killErr, <-waitResult)
 				break waitForServer
 			}
 		}
 	}
-	_ = ptyFile.Close()
-	<-outputDone
-	completedAt := time.Now()
-	exitCode := 0
-	reason := tmuxServerExitReasonClean
-	signalName := ""
-	if waitErr != nil {
-		exitCode = -1
-		reason = tmuxServerExitReasonWaitError
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) && exitErr.ProcessState != nil {
-			exitCode = exitErr.ProcessState.ExitCode()
-			if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				reason = tmuxServerExitReasonSignal
-				signalName = status.Signal().String()
-			} else {
-				reason = tmuxServerExitReasonExitCode
-			}
-		}
-	}
-	logArgs := []any{
-		"pid", tmuxCmd.Process.Pid,
-		"exit_code", exitCode,
-		"reason", string(reason),
-		"signal", signalName,
-		"initiator", string(initiator),
-		"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
-		"completed_at", completedAt.UTC().Format(time.RFC3339Nano),
-	}
-	if waitErr != nil {
-		logArgs = append(logArgs, "error", waitErr.Error())
-	}
-	if output := strings.TrimSpace(outputTail.RedactedString()); output != "" {
-		logArgs = append(logArgs, "output_tail", output)
-	}
+	logArgs, returnErr := collectTmuxServerExit(waitErr, initiator, nil)
 	if waitErr == nil {
 		logger.Info(logging.EventTmuxServerExit, logArgs...)
 	} else {
 		logger.Error(logging.EventTmuxServerExit, logArgs...)
 	}
-	return waitErr
+	return returnErr
 }

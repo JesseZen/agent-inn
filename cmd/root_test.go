@@ -1423,6 +1423,7 @@ func TestRunRootMainTUIWindowCreatesHostAndAttaches(t *testing.T) {
 	want := [][]string{
 		{"tmux", "-V"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
 		tmuxMainWindowThemeCommand("ainn-test", "ainn-test-host"),
 		tmuxExtendedKeysCommand("ainn-test"),
@@ -1605,6 +1606,7 @@ func TestRunRootMainTUIWindowCreatesHostWhenTmuxSocketMissing(t *testing.T) {
 
 	want := [][]string{
 		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
 		tmuxMainWindowThemeCommand("ainn-test", "ainn-test-host"),
@@ -2710,6 +2712,7 @@ func TestRunRootMainTUIWindowAbortsWhenManagedServerStartFails(t *testing.T) {
 	}
 	wantCalls := [][]string{
 		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
 	}
 	gotView := struct {

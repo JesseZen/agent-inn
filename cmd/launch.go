@@ -256,13 +256,33 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 
 	hostCreated := false
 	serverMissing := false
+	releaseTmuxStartupLock := func() {}
 	if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(settings)); err != nil {
 		if !isTmuxHostMissingError(err) {
 			fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 			return 1
 		}
-		hostCreated = true
 		serverMissing = isTmuxServerMissingError(err)
+		if serverMissing {
+			releaseTmuxStartupLock, err = acquireTmuxServerStartupLock(settings.Terminal.Tmux.SocketName)
+			if err != nil {
+				fmt.Fprintf(stderr, "failed to lock tmux host startup: %v\n", err)
+				return 1
+			}
+			defer releaseTmuxStartupLock()
+			if _, err := runner.Run(manager.TmuxHasSessionCommandForSettings(settings)); err != nil {
+				if !isTmuxHostMissingError(err) {
+					fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
+					return 1
+				}
+				hostCreated = true
+				serverMissing = isTmuxServerMissingError(err)
+			} else {
+				releaseTmuxStartupLock()
+			}
+		} else {
+			hostCreated = true
+		}
 	}
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(settings.StateDir))
@@ -287,6 +307,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
+			releaseTmuxStartupLock()
 		}
 		mouse, err := runner.Run(manager.TmuxShowMouseCommandForSettings(settings))
 		if err != nil {
@@ -424,6 +445,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 			fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 			return 1
 		}
+		releaseTmuxStartupLock()
 		parts := strings.Split(strings.TrimSpace(windowDetails), "\t")
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 			cleanupIncompleteSession()
@@ -451,6 +473,7 @@ func runHostedTerminalLaunch(cfg config.Config, opts manager.LaunchOptions, conf
 				fmt.Fprintf(stderr, "failed to start tmux host: %v\n", err)
 				return 1
 			}
+			releaseTmuxStartupLock()
 		}
 	}
 	mouse, err := runner.Run(manager.TmuxShowMouseCommandForSettings(settings))

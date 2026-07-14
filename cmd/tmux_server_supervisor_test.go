@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -50,6 +52,35 @@ func TestTmuxServerOutputTailRedactsWithinLimit(t *testing.T) {
 	}
 }
 
+func TestTmuxServerOutputTailRedactsCredentialAcrossLimitBoundary(t *testing.T) {
+	var tail tmuxServerOutputTail
+	credential := "Authorization: Bearer sk-boundary-secret"
+	boundaryOffset := strings.Index(credential, "Bearer") + len("Be")
+	suffixLength := tmuxServerOutputTailBytes - (len(credential) - boundaryOffset)
+	input := strings.Repeat("x", tmuxServerOutputRedactionOverlapBytes+100) + credential + strings.Repeat("y", suffixLength)
+	if _, err := tail.Write([]byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	output := tail.RedactedString()
+	got := struct {
+		WithinLimit bool
+		Leaked      bool
+		Redacted    bool
+	}{
+		WithinLimit: len(output) <= tmuxServerOutputTailBytes,
+		Leaked:      strings.Contains(output, "sk-boundary-secret"),
+		Redacted:    strings.Contains(output, "Bearer ***REDACTED***"),
+	}
+	want := struct {
+		WithinLimit bool
+		Leaked      bool
+		Redacted    bool
+	}{WithinLimit: true, Redacted: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("boundary redaction mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestParseTmuxServerStartRequest(t *testing.T) {
 	got, err := parseTmuxServerStartRequest([]string{
 		"--config-dir", "/tmp/ainn-config",
@@ -73,6 +104,110 @@ func TestParseTmuxServerStartRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tmux server request mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestConcurrentTmuxServerStartupLockSerializesFreshServer(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	tmuxTmpDir, err := os.MkdirTemp("/tmp", "ainn-tmux-concurrent-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmuxTmpDir) })
+	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	socketName := "ainn-concurrent-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	hostSession := "ainn-concurrent-host"
+	request := tmuxServerStartRequest{
+		ConfigDir:   t.TempDir(),
+		LogDir:      logDir,
+		SocketName:  socketName,
+		HostSession: hostSession,
+		InitialCommand: []string{
+			"tmux", "-L", socketName, "new-session", "-d", "-s", hostSession, "sleep 60",
+		},
+	}
+	type startupResult struct {
+		Started          bool
+		Response         tmuxServerStartResponse
+		SupervisorResult <-chan error
+		Error            string
+	}
+	results := make(chan startupResult, 2)
+	var startCountMu sync.Mutex
+	startCount := 0
+	for range 2 {
+		go func() {
+			release, lockErr := acquireTmuxServerStartupLock(socketName)
+			if lockErr != nil {
+				results <- startupResult{Error: lockErr.Error()}
+				return
+			}
+			defer release()
+			if err := exec.Command("tmux", "-L", socketName, "has-session", "-t", hostSession).Run(); err == nil {
+				results <- startupResult{}
+				return
+			}
+			startCountMu.Lock()
+			startCount++
+			startCountMu.Unlock()
+			responseReader, responseWriter := io.Pipe()
+			supervisorResult := make(chan error, 1)
+			go func() {
+				supervisorResult <- superviseTmuxServer(request, responseWriter)
+				_ = responseWriter.Close()
+			}()
+			var response tmuxServerStartResponse
+			if err := json.NewDecoder(responseReader).Decode(&response); err != nil {
+				results <- startupResult{Error: err.Error()}
+				return
+			}
+			_ = responseReader.Close()
+			if response.Error != "" {
+				results <- startupResult{Error: response.Error}
+				return
+			}
+			results <- startupResult{Started: true, Response: response, SupervisorResult: supervisorResult}
+		}()
+	}
+	var started startupResult
+	startedCount := 0
+	var startupErrors []string
+	for range 2 {
+		result := <-results
+		if result.Error != "" {
+			startupErrors = append(startupErrors, result.Error)
+		}
+		if result.Started {
+			started = result
+			startedCount++
+		}
+	}
+	startCountMu.Lock()
+	observedStartCount := startCount
+	startCountMu.Unlock()
+	got := struct {
+		ObservedStartCount int
+		StartedCount       int
+		ValidServerPID     bool
+		Errors             []string
+	}{ObservedStartCount: observedStartCount, StartedCount: startedCount, ValidServerPID: started.Response.ServerPID > 0, Errors: startupErrors}
+	want := struct {
+		ObservedStartCount int
+		StartedCount       int
+		ValidServerPID     bool
+		Errors             []string
+	}{ObservedStartCount: 1, StartedCount: 1, ValidServerPID: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("concurrent startup mismatch:\n got %#v\nwant %#v", got, want)
+	}
+	if output, err := exec.Command("tmux", "-L", socketName, "kill-session", "-t", hostSession).CombinedOutput(); err != nil {
+		t.Fatalf("kill final tmux session: %v: %s", err, output)
+	}
+	if err := <-started.SupervisorResult; err != nil {
+		t.Fatalf("clean tmux exit returned error: %v", err)
 	}
 }
 
@@ -353,6 +488,179 @@ func TestSuperviseTmuxServerRecordsExternalForwardedSignal(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("forwarded tmux signal mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestSuperviseTmuxServerReapsServerWhenSignalForwardingFails(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	tmuxTmpDir, err := os.MkdirTemp("/tmp", "ainn-tmux-forward-fail-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmuxTmpDir) })
+	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	socketName := "ainn-forward-fail-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	hostSession := "ainn-forward-fail-host"
+	request := tmuxServerStartRequest{
+		ConfigDir:   t.TempDir(),
+		LogDir:      logDir,
+		SocketName:  socketName,
+		HostSession: hostSession,
+		InitialCommand: []string{
+			"tmux", "-L", socketName, "new-session", "-d", "-s", hostSession, "sleep 60",
+		},
+	}
+	previousForwardSignal := tmuxServerForwardSignal
+	tmuxServerForwardSignal = func(*os.Process, os.Signal) error { return errors.New("injected signal failure") }
+	defer func() { tmuxServerForwardSignal = previousForwardSignal }()
+	responseReader, responseWriter := io.Pipe()
+	signals := make(chan os.Signal, 1)
+	supervisorResult := make(chan error, 1)
+	go func() {
+		supervisorResult <- superviseTmuxServerWithSignals(request, responseWriter, signals)
+		_ = responseWriter.Close()
+	}()
+
+	var response tmuxServerStartResponse
+	if err := json.NewDecoder(responseReader).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	signals <- syscall.SIGTERM
+	waitErr := <-supervisorResult
+	logPath := filepath.Join(logDir, "tmux-"+socketName+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := readTmuxServerExitView(t, logPath)
+	processErr := syscall.Kill(response.ServerPID, 0)
+	got := struct {
+		ReturnedError bool
+		ForwardError  bool
+		ProcessGone   bool
+		Exit          tmuxServerExitView
+	}{
+		ReturnedError: waitErr != nil,
+		ForwardError:  strings.Contains(string(data), "injected signal failure"),
+		ProcessGone:   errors.Is(processErr, syscall.ESRCH),
+		Exit:          exit,
+	}
+	want := struct {
+		ReturnedError bool
+		ForwardError  bool
+		ProcessGone   bool
+		Exit          tmuxServerExitView
+	}{
+		ReturnedError: true,
+		ForwardError:  true,
+		ProcessGone:   true,
+		Exit: tmuxServerExitView{
+			PID:       response.ServerPID,
+			ExitCode:  -1,
+			Reason:    tmuxServerExitReasonSignal,
+			Signal:    "killed",
+			Initiator: tmuxServerInitiatorAINN,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("signal-forward cleanup mismatch:\n got %#v\nwant %#v\nlog %s", got, want, data)
+	}
+}
+
+func TestSuperviseTmuxServerStopsWhenStartupClientDisconnects(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	tmuxTmpDir, err := os.MkdirTemp("/tmp", "ainn-tmux-control-loss-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmuxTmpDir) })
+	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	socketName := "ainn-control-loss-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	hostSession := "ainn-control-loss-host"
+	request := tmuxServerStartRequest{
+		ConfigDir:   t.TempDir(),
+		LogDir:      logDir,
+		SocketName:  socketName,
+		HostSession: hostSession,
+		InitialCommand: []string{
+			"tmux", "-L", socketName, "new-session", "-d", "-s", hostSession, "sleep 60",
+		},
+	}
+	controlReader, controlWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response bytes.Buffer
+	supervisorResult := make(chan error, 1)
+	go func() {
+		supervisorResult <- superviseTmuxServerWithControl(request, &response, controlReader)
+	}()
+	if err := controlWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitErr := <-supervisorResult
+	logPath := filepath.Join(logDir, "tmux-"+socketName+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := readTmuxServerExitView(t, logPath)
+	processErr := syscall.Kill(exit.PID, 0)
+	got := struct {
+		ReturnedError bool
+		ControlError  bool
+		ProcessGone   bool
+		Exit          tmuxServerExitView
+	}{
+		ReturnedError: waitErr != nil,
+		ControlError:  strings.Contains(string(data), "startup client disconnected"),
+		ProcessGone:   errors.Is(processErr, syscall.ESRCH),
+		Exit:          exit,
+	}
+	want := []struct {
+		ReturnedError bool
+		ControlError  bool
+		ProcessGone   bool
+		Exit          tmuxServerExitView
+	}{
+		{
+			ReturnedError: true,
+			ControlError:  true,
+			ProcessGone:   true,
+			Exit: tmuxServerExitView{
+				PID:       exit.PID,
+				Reason:    tmuxServerExitReasonClean,
+				Initiator: tmuxServerInitiatorAINN,
+			},
+		},
+		{
+			ReturnedError: true,
+			ControlError:  true,
+			ProcessGone:   true,
+			Exit: tmuxServerExitView{
+				PID:       exit.PID,
+				ExitCode:  -1,
+				Reason:    tmuxServerExitReasonSignal,
+				Signal:    "terminated",
+				Initiator: tmuxServerInitiatorAINN,
+			},
+		},
+	}
+	matched := false
+	for _, candidate := range want {
+		if reflect.DeepEqual(got, candidate) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("startup control cleanup mismatch:\n got %#v\nwant %#v\nresponse %s\nlog %s", got, want, response.String(), data)
 	}
 }
 
