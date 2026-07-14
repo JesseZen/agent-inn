@@ -360,7 +360,7 @@ export const {
         setStore("hosted_sessions", reconcile(sessions))
         setStore("hosted_session_cursor", cursor)
       }),
-      onManagerEvent: handleManagerEvent,
+      onManagerEvent: args.hostedTerminalPopup ? undefined : handleManagerEvent,
       onError: (error) => setStore("error", error instanceof Error ? error.message : String(error)),
       initialCursor: store.hosted_session_cursor,
     })

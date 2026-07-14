@@ -73,6 +73,37 @@ test("popup mode renders hosted terminal picker without home route", async () =>
   }
 })
 
+test("popup mode ignores unrelated worker health errors", async () => {
+  const failedWorker = { ...defaultWorker, id: "test", name: "test", status: "failed" }
+  const app = await mountHostedTerminalPopupApp((url) => {
+    if (url.pathname === "/api/workers") return json({ workers: [defaultWorker, failedWorker] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession], event_cursor: "0" })
+    if (url.pathname === "/api/events")
+      return new Response(
+        'id: 1\nevent: worker.health.changed\ndata: {"worker":"test","status":"failed","error":"upstream \\"shuai-1\\" not found"}\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      )
+    return undefined
+  })
+
+  try {
+    await wait(async () => {
+      await app.setup.renderOnce()
+      const frame = app.setup.captureCharFrame()
+      return frame.includes("Create new session") || frame.includes('upstream "shuai-1" not found')
+    }, 5000)
+
+    const frame = app.setup.captureCharFrame()
+    expect({ hasPicker: frame.includes("Create new session"), hasWorkerError: frame.includes('upstream "shuai-1" not found') }).toEqual({
+      hasPicker: true,
+      hasWorkerError: false,
+    })
+  } finally {
+    if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
+    await app.cleanup()
+  }
+})
+
 test("popup mode renders the hosted terminal root directly in the right rail", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
