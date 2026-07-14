@@ -2,6 +2,7 @@ package manager
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1284,5 +1285,49 @@ func TestHostedSessionRegistrySummariesTreatsReusedWindowIDAsStale(t *testing.T)
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+
+func TestHostedSessionRegistryReadPathsDoNotRewriteFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	registry := NewHostedSessionRegistry(path)
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:      "read-stable",
+		WorkerName:        "cli",
+		WorkerPort:        22222,
+		LauncherSessionID: "launcher-read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.MarkTurnStateWithWatch(created.SessionID, HostedTurnStateRunning, "", "launcher-read", "", "", HostedTurnWatchKindCodex); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := registry.List(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := registry.Get(created.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.WatchedTurns(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.GoalCandidates(); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+		t.Fatalf("read paths rewrote registry: before mtime=%v size=%d after mtime=%v size=%d", before.ModTime(), before.Size(), after.ModTime(), after.Size())
 	}
 }

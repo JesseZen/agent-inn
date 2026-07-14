@@ -22,6 +22,9 @@ const (
 	hostedTurnTranscriptMaxLine  = 10 * 1024 * 1024
 	hostedTurnInterruptedReason  = constants.HostedTurnReasonUserInterrupt
 	hostedTurnCodexFailureReason = constants.HostedTurnReasonCodexTaskFailed
+	// Permanent Glob misses (e.g. claude UUIDs under ~/.codex/sessions) must not
+	// rescan thousands of transcript files every 500ms. Retry after this TTL.
+	hostedTurnTranscriptMissTTL  = 30 * time.Second
 	codexTranscriptSessionsDir   = "~/.codex/sessions"
 	codexTranscriptEventMsg      = "event_msg"
 	codexTranscriptTaskStarted   = "task_started"
@@ -43,6 +46,9 @@ type hostedTurnWatcher struct {
 	runner             hostedTMuxRunner
 	files              map[string]hostedTurnTranscriptCursor
 	launcherPaths      map[string]string
+	launcherMissUntil  map[string]time.Time
+	now                func() time.Time
+	globTranscripts    func(pattern string) ([]string, error)
 	onTurnStateChanged func(HostedSessionRecord)
 }
 
@@ -105,13 +111,66 @@ func (m *Manager) StartHostedTurnWatcher(interval time.Duration) func() {
 
 func newHostedTurnWatcher(settings config.Settings, registry *HostedSessionRegistry, runner hostedTMuxRunner) *hostedTurnWatcher {
 	return &hostedTurnWatcher{
-		settings:           settings,
-		registry:           registry,
-		runner:             runner,
-		files:              map[string]hostedTurnTranscriptCursor{},
-		launcherPaths:      map[string]string{},
+		settings:          settings,
+		registry:          registry,
+		runner:            runner,
+		files:             map[string]hostedTurnTranscriptCursor{},
+		launcherPaths:     map[string]string{},
+		launcherMissUntil: map[string]time.Time{},
+		now:               time.Now,
+		globTranscripts:   filepath.Glob,
 		onTurnStateChanged: func(HostedSessionRecord) {},
 	}
+}
+
+func (w *hostedTurnWatcher) currentTime() time.Time {
+	if w.now != nil {
+		return w.now()
+	}
+	return time.Now()
+}
+
+func (w *hostedTurnWatcher) globTranscriptMatches(pattern string) ([]string, error) {
+	if w.globTranscripts != nil {
+		return w.globTranscripts(pattern)
+	}
+	return filepath.Glob(pattern)
+}
+
+func (w *hostedTurnWatcher) rememberLauncherMiss(launcherSessionID string) {
+	if launcherSessionID == "" {
+		return
+	}
+	if w.launcherMissUntil == nil {
+		w.launcherMissUntil = map[string]time.Time{}
+	}
+	w.launcherMissUntil[launcherSessionID] = w.currentTime().Add(hostedTurnTranscriptMissTTL)
+}
+
+func (w *hostedTurnWatcher) launcherMissActive(launcherSessionID string) bool {
+	if launcherSessionID == "" || len(w.launcherMissUntil) == 0 {
+		return false
+	}
+	until, ok := w.launcherMissUntil[launcherSessionID]
+	return ok && w.currentTime().Before(until)
+}
+
+// expireLauncherMisses drops elapsed miss TTLs. Returns true when at least one
+// miss expired so watchPlans can rebuild and Glob again.
+func (w *hostedTurnWatcher) expireLauncherMisses() bool {
+	if len(w.launcherMissUntil) == 0 {
+		return false
+	}
+	now := w.currentTime()
+	expired := false
+	for launcherSessionID, until := range w.launcherMissUntil {
+		if now.Before(until) {
+			continue
+		}
+		delete(w.launcherMissUntil, launcherSessionID)
+		expired = true
+	}
+	return expired
 }
 
 func (w *hostedTurnWatcher) pollOnce() error {
@@ -264,11 +323,12 @@ func (w *hostedTurnWatcher) pollOnce() error {
 }
 
 func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
+	missesExpired := w.expireLauncherMisses()
 	stat, err := os.Stat(w.registry.path)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	if err == nil && stat.Size() == w.registryCursor.Size && stat.ModTime().Equal(w.registryCursor.ModTime) {
+	if err == nil && !missesExpired && stat.Size() == w.registryCursor.Size && stat.ModTime().Equal(w.registryCursor.ModTime) {
 		return w.registryCursor.Plans, nil
 	}
 
@@ -301,15 +361,27 @@ func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
 				}
 			}
 			if transcriptPath == "" {
+				if watch.GoalCandidate && w.launcherMissActive(watch.LauncherSessionID) {
+					// Permanent/noisy misses (e.g. claude UUIDs) skip expensive rescans.
+					continue
+				}
 				pattern := filepath.Join(expandHomePath(codexTranscriptSessionsDir), "*", "*", "*", "*"+watch.LauncherSessionID+".jsonl")
-				matches, err := filepath.Glob(pattern)
+				matches, err := w.globTranscriptMatches(pattern)
 				if err != nil {
 					return nil, err
 				}
 				if len(matches) == 0 {
+					if watch.GoalCandidate {
+						// Goal candidates without a codex transcript can stay unresolved forever.
+						// Cache the miss so watchPlans remains cacheable and cheap.
+						w.rememberLauncherMiss(watch.LauncherSessionID)
+						continue
+					}
+					// Active codex launcher watches must re-Glob until the transcript appears.
 					unresolvedLauncherWatch = true
 					continue
 				}
+				delete(w.launcherMissUntil, watch.LauncherSessionID)
 				sort.Strings(matches)
 				transcriptPath = matches[len(matches)-1]
 				w.launcherPaths[watch.LauncherSessionID] = transcriptPath

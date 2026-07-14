@@ -121,7 +121,7 @@ func NewHostedSessionRegistry(path string) *HostedSessionRegistry {
 
 func (r *HostedSessionRegistry) List() ([]HostedSessionRecord, error) {
 	var records []HostedSessionRecord
-	err := r.withLockedFile(func(file *hostedSessionFile) error {
+	err := r.withReadLockedFile(func(file *hostedSessionFile) error {
 		records = make([]HostedSessionRecord, 0, len(file.Sessions))
 		for _, session := range file.Sessions {
 			records = append(records, session)
@@ -188,7 +188,7 @@ func (r *HostedSessionRegistry) RemoveForSettings(sessionID string, settings con
 func (r *HostedSessionRegistry) Get(sessionID string) (HostedSessionRecord, bool, error) {
 	var out HostedSessionRecord
 	found := false
-	err := r.withLockedFile(func(file *hostedSessionFile) error {
+	err := r.withReadLockedFile(func(file *hostedSessionFile) error {
 		session, ok := file.Sessions[sessionID]
 		if !ok {
 			return nil
@@ -525,7 +525,7 @@ func (r *HostedSessionRegistry) StartNextGoalTurn(sessionID string, turnGenerati
 
 func (r *HostedSessionRegistry) WatchedTurns() ([]HostedTurnWatch, error) {
 	var watched []HostedTurnWatch
-	err := r.withLockedFile(func(file *hostedSessionFile) error {
+	err := r.withReadLockedFile(func(file *hostedSessionFile) error {
 		for _, session := range file.Sessions {
 			if session.TurnGeneration <= 0 {
 				continue
@@ -569,7 +569,7 @@ func (r *HostedSessionRegistry) WatchedTurns() ([]HostedTurnWatch, error) {
 
 func (r *HostedSessionRegistry) GoalCandidates() ([]HostedTurnWatch, error) {
 	var candidates []HostedTurnWatch
-	err := r.withLockedFile(func(file *hostedSessionFile) error {
+	err := r.withReadLockedFile(func(file *hostedSessionFile) error {
 		for _, session := range file.Sessions {
 			if session.LauncherSessionID == "" || session.TurnWatchKind != "" {
 				continue
@@ -694,6 +694,26 @@ func (r *HostedSessionRegistry) withLockedFile(fn func(*hostedSessionFile) error
 		return err
 	}
 	return r.saveFile(file)
+}
+
+// withReadLockedFile loads the registry under the same lock as writers, but never
+// rewrites the file. Read paths must use this so watchers can trust mtime/size
+// cursors instead of thrashing disk every poll.
+func (r *HostedSessionRegistry) withReadLockedFile(fn func(*hostedSessionFile) error) error {
+	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
+		return err
+	}
+	unlock, err := lockFile(r.lock)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	file, err := r.loadFile()
+	if err != nil {
+		return err
+	}
+	return fn(file)
 }
 
 func (r *HostedSessionRegistry) loadFile() (*hostedSessionFile, error) {

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
 )
@@ -940,5 +941,96 @@ func TestHostedTurnWatcherPollOnceSkipsUnchangedTranscript(t *testing.T) {
 	after := watcher.files[transcriptPath]
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("got cursor %#v, want %#v", after, before)
+	}
+}
+
+
+func TestHostedTurnWatcherBacksOffMissingTranscriptGlob(t *testing.T) {
+	stateDir := t.TempDir()
+	settings := config.Settings{StateDir: stateDir}
+	registry := NewHostedSessionRegistry(HostedSessionRegistryPath(stateDir))
+	created, err := registry.Create(HostedSessionRecord{
+		SessionLabel:      "missing-transcript",
+		WorkerName:        "cli",
+		WorkerPort:        33333,
+		LauncherSessionID: "claude-uuid-never-in-codex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	globCalls := 0
+	watcher := newHostedTurnWatcher(settings, registry, hostedTMuxRunnerFunc(func(args []string) (string, error) {
+		t.Fatalf("unexpected tmux call: %#v", args)
+		return "", nil
+	}))
+	watcher.now = func() time.Time { return now }
+	watcher.globTranscripts = func(pattern string) ([]string, error) {
+		globCalls++
+		if !strings.Contains(pattern, "claude-uuid-never-in-codex") {
+			t.Fatalf("unexpected glob pattern %q", pattern)
+		}
+		return nil, nil
+	}
+
+	if _, err := watcher.watchPlans(); err != nil {
+		t.Fatal(err)
+	}
+	if globCalls != 1 {
+		t.Fatalf("first watchPlans globCalls=%d, want 1", globCalls)
+	}
+	if _, err := watcher.watchPlans(); err != nil {
+		t.Fatal(err)
+	}
+	if globCalls != 1 {
+		t.Fatalf("second watchPlans during miss TTL globCalls=%d, want 1", globCalls)
+	}
+	if watcher.registryCursor.Plans == nil {
+		t.Fatal("expected registryCursor to cache plans after Glob miss")
+	}
+
+	// Force rebuild with same registry mtime; miss TTL still active so no Glob.
+	watcher.registryCursor = hostedTurnRegistryCursor{}
+	if _, err := watcher.watchPlans(); err != nil {
+		t.Fatal(err)
+	}
+	if globCalls != 1 {
+		t.Fatalf("rebuild during miss TTL globCalls=%d, want 1", globCalls)
+	}
+
+	// After TTL, miss expires and Glob runs again.
+	now = now.Add(hostedTurnTranscriptMissTTL + time.Second)
+	watcher.registryCursor = hostedTurnRegistryCursor{}
+	if _, err := watcher.watchPlans(); err != nil {
+		t.Fatal(err)
+	}
+	if globCalls != 2 {
+		t.Fatalf("after miss TTL globCalls=%d, want 2", globCalls)
+	}
+
+	// Positive path still works and clears miss cache.
+	transcriptPath := filepath.Join(stateDir, "found.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn_1"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(hostedTurnTranscriptMissTTL + time.Second)
+	watcher.registryCursor = hostedTurnRegistryCursor{}
+	watcher.globTranscripts = func(pattern string) ([]string, error) {
+		globCalls++
+		return []string{transcriptPath}, nil
+	}
+	plans, err := watcher.watchPlans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if globCalls != 3 {
+		t.Fatalf("found-path globCalls=%d, want 3", globCalls)
+	}
+	if len(plans) != 1 || plans[0].TranscriptPath != transcriptPath {
+		t.Fatalf("got plans %#v, want transcript %q", plans, transcriptPath)
+	}
+	if _, active := watcher.launcherMissUntil[created.LauncherSessionID]; active {
+		t.Fatal("expected miss cache cleared after successful Glob")
 	}
 }
