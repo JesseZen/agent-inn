@@ -6,6 +6,7 @@ import { fitDashboardText } from "./model"
 import type { DashboardRow } from "./navigation"
 import { isValidDashboardDrop } from "./drag"
 import { useLanguage } from "../../context/language"
+import { hostedSessionMarker, hostedSessionMarkerColor } from "../hosted-session-presentation"
 
 export function DashboardSummary(props: { model: DashboardModel; theme: Theme }) {
   const { t } = useLanguage()
@@ -78,6 +79,10 @@ export function DashboardRows(props: {
           return ""
         }
         const fitted = () => fitDashboardText(node()?.label ?? "", meta(), props.availableWidth - row.depth * 3)
+        const marker = () => {
+          const value = node()
+          return value?.kind === "session" ? hostedSessionMarker(value.data) : undefined
+        }
         const foreground = () => {
           const value = node()
           if (dimmed()) return props.theme.textMuted
@@ -107,7 +112,7 @@ export function DashboardRows(props: {
               pressedID = row.id
               props.onSelect(row.id)
               const value = node()
-              if (value && value.kind !== "pool" && !(value.kind === "session" && value.data.turn_state === "running")) props.onDragStart(value)
+              if (value && value.kind !== "pool" && !(value.kind === "session" && value.data.turn.state === "running")) props.onDragStart(value)
             }}
             onMouseUp={() => {
               const value = node()
@@ -125,10 +130,29 @@ export function DashboardRows(props: {
               <Show
                 when={row.expandable}
                 fallback={
-                  <text fg={foreground()} selectable={false}>
-                    {"  "}
-                    {label()}
-                  </text>
+                  <Show
+                    when={marker()}
+                    fallback={
+                      <text fg={foreground()} selectable={false}>
+                        {"  "}
+                        {label()}
+                      </text>
+                    }
+                  >
+                    {(value) => (
+                      <>
+                        <text fg={foreground()} selectable={false}>{"  └─ "}</text>
+                        <text
+                          fg={hostedSessionMarkerColor(props.theme, value())}
+                          attributes={value().bold ? TextAttributes.BOLD : undefined}
+                          selectable={false}
+                        >
+                          {value().symbol}
+                        </text>
+                        <text fg={foreground()} selectable={false}> {fitted().label}</text>
+                      </>
+                    )}
+                  </Show>
                 }
               >
                 <text
@@ -208,7 +232,7 @@ export function DashboardInspector(props: { selected: DashboardRow | null; sourc
                 </Match>
                 <Match when={props.selected!.kind === "session"}>
                   <text fg={props.theme.textMuted} selectable={false}>
-                    {props.selected!.node?.kind === "session" && props.selected!.node.data.turn_state === "running"
+                    {props.selected!.node?.kind === "session" && props.selected!.node.data.turn.state === "running"
                       ? t("proxy.dashboard.enterOpenSession")
                       : t("proxy.dashboard.enterOpenSessionRebind")}
                   </text>

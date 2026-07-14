@@ -164,7 +164,7 @@ test("app.restart exits with the restart status after scoped cleanup", async () 
     api?.keymap.dispatchCommand("app.restart")
     await task
 
-    expect(process.exitCode).toBe(75)
+    expect(process.exitCode as number | undefined).toBe(75)
   } finally {
     process.exitCode = 0
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()

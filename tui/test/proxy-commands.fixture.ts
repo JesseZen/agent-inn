@@ -12,7 +12,6 @@ import {
   toAinnUpstreams,
   type BatchRun,
   type CreateBatchRequest,
-  type HostedSessionSummary,
   type MetricsRangeName,
   type MetricsResponse,
   type ProxyConfigStatus,
@@ -26,6 +25,7 @@ import {
   type UpstreamProbeResult,
   type WorkerSummary,
 } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 import type { ProxyLaunchOptions } from "../src/proxy/launch"
 
 type ProxySettingsPatch = Omit<Partial<ProxySettings>, "launch" | "terminal" | "metrics"> & {
@@ -76,7 +76,7 @@ type ProxyHarnessInput = {
   batches?: BatchRun[]
   batchHostedSessionWindowMode?: "present" | "missing"
   batchSessionLauncher?: (opts: ProxyLaunchOptions) => Promise<boolean>
-  hostedSessions?: HostedSessionSummary[]
+  hostedSessions?: HostedSessionSnapshot[]
   hostedSessionsError?: string
   patchWorkerDelayMs?: number
   patchUpstreamError?: string
@@ -168,6 +168,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
   if (input.workers) workers.clear()
   const logs = new Map<number, string[]>([[6767, ["booted", "serving :6767"]]])
   const hostedSessions = [...(input.hostedSessions ?? [])]
+  let managerEventCursor = 0n
   const batches = new Map<string, BatchRun>((input.batches ?? []).map((batchRun) => [batchRun.id, batchRun]))
   const findWorker = (key: string) => workers.get(key) ?? [...workers.values()].find((worker) => String(worker.port) === key)
   const setWorker = (worker: WorkerSummary) => workers.set(worker.id, worker)
@@ -356,7 +357,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         await Bun.sleep(25)
         return json({ error: input.hostedSessionsError }, { status: 500 })
       }
-      return json({ sessions: hostedSessions })
+      return json({ sessions: hostedSessions, event_cursor: managerEventCursor.toString() })
     }
     if (url.pathname.startsWith("/api/hosted-sessions/")) {
       const sessionID = url.pathname.slice("/api/hosted-sessions/".length)
@@ -407,10 +408,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       const index = hostedSessions.findIndex((session) => session.session_id === sessionID)
       const updated = {
         ...hostedSessions[index],
-        worker_id: worker.id,
-        worker_name: worker.name,
-        worker_port: worker.port,
-        worker: { id: worker.id, name: worker.name },
+        worker: { id: worker.id, name: worker.name, port: worker.port, missing: false },
       }
       hostedSessions[index] = updated
       calls.patchHostedSession.push({ session_id: sessionID, worker_id: body.worker_id })
@@ -750,14 +748,15 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
         hostedSessions.push({
           session_id: hostedSessionID,
           session_label: `${body.title} ${number}`,
-          worker_name: body.worker_name,
-          worker_port: workerPort,
+          worker: { id: worker.id, name: worker.name, port: worker.port, missing: false },
           workspace: `${body.source_directory}/.worktrees/${body.title.replace(/\s+/g, "-")}-${number}`,
-          model: body.model,
+          model: body.model ?? "",
+          add_dirs: [],
+          user_marker: "",
+          turn: { state: "idle", reason: "", unread: false, needs_input: false },
           created_at: "2026-07-09T00:00:00Z",
           last_opened_at: "2026-07-09T00:00:00Z",
-          status: "active",
-          ...(batchHostedSessionWindowMode === "present" ? { tmux_window_id: `@${number}` } : {}),
+          status: batchHostedSessionWindowMode === "present" ? "active" : "stale",
         })
         return {
           id: `variant_${number}`,
@@ -817,7 +816,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       workers: HarnessWorker[]
       upstreams: HarnessUpstream[]
       upstreamPools?: UpstreamPool[]
-      hostedSessions: HostedSessionSummary[]
+      hostedSessions: HostedSessionSnapshot[]
     }) {
       providers.clear()
       for (const upstream of next.upstreams) {
@@ -842,9 +841,12 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
       }
       hostedSessions.splice(0, hostedSessions.length, ...next.hostedSessions)
     },
-    emitManagerEvent(type: string, payload: Record<string, unknown> = {}) {
+    emitManagerEvent(type: string, payload: Record<string, unknown> = {}, eventID?: string) {
       if (!managerEvents) throw new Error("manager event source not ready")
-      managerEvents.enqueue(managerEventEncoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`))
+      const id = eventID ?? String(managerEventCursor + 1n)
+      const numericID = BigInt(id)
+      if (numericID > managerEventCursor) managerEventCursor = numericID
+      managerEvents.enqueue(managerEventEncoder.encode(`id: ${id}\nevent: ${type}\ndata: ${JSON.stringify(payload)}\n\n`))
     },
   }
 }

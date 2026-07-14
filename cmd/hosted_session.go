@@ -28,6 +28,18 @@ func runHostedSession(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runHostedSessionAcknowledge(args[1:], stdout, stderr)
 	case "toggle-todo":
 		return runHostedSessionToggleTodo(args[1:], stdout, stderr)
+	case "set-marker":
+		return runHostedSessionSetMarker(args[1:], stdout, stderr)
+	case "mark-unread":
+		return runHostedSessionMarkUnread(args[1:], stdout, stderr)
+	case "rename-current":
+		return runHostedSessionRenameCurrent(args[1:], stdout, stderr)
+	case "rename-or-native":
+		return runHostedSessionRenameOrNative(args[1:], stdout, stderr)
+	case "menu":
+		return runHostedSessionMenu(args[1:], stdout, stderr)
+	case "reset-interactions":
+		return runHostedSessionResetInteractions(args[1:], stdout, stderr)
 	case "watch-all":
 		return runHostedSessionWatchAll(args[1:], stdout, stderr)
 	case "popup-open":
@@ -123,7 +135,8 @@ func runHostedSessionMark(args []string, stdout io.Writer, stderr io.Writer) int
 			return 1
 		}
 	}
-	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, session)); err != nil {
+	snapshot := manager.MapHostedSessionSnapshot(session, manager.HostedSessionStatusActive, manager.HostedSessionWorkerSnapshot{})
+	if _, err := runner.Run(manager.TmuxHostedTurnStatusCommandForSnapshot(cfg.Settings, session.TmuxWindowID, snapshot)); err != nil {
 		fmt.Fprintf(stderr, "failed to update tmux turn status: %v\n", err)
 		return 1
 	}
@@ -227,7 +240,8 @@ func hostedSessionLatestTurnStatusCommand(settings config.Settings, registry *ma
 	if err != nil || !found {
 		return nil, found, err
 	}
-	return manager.TmuxHostedTurnStatusCommandForRecord(settings, latest), true, nil
+	snapshot := manager.MapHostedSessionSnapshot(latest, manager.HostedSessionStatusActive, manager.HostedSessionWorkerSnapshot{})
+	return manager.TmuxHostedTurnStatusCommandForSnapshot(settings, latest.TmuxWindowID, snapshot), true, nil
 }
 
 func acknowledgeHostedSessionDoneIfCurrent(settings config.Settings, registry *manager.HostedSessionRegistry, session manager.HostedSessionRecord, runner launchRunner) (manager.HostedSessionRecord, error) {

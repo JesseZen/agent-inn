@@ -10,7 +10,7 @@ import { useBindings } from "../keymap"
 import { DIALOG_XLARGE_WIDTH, EscHint, useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
 import { getScrollAcceleration } from "../util/scroll"
-import type { HostedSessionSummary, RedactedUpstream, WorkerSummary } from "./backend"
+import type { RedactedUpstream, WorkerSummary } from "./backend"
 import { DialogHostedTerminal } from "./dialog-hosted-terminal"
 import { DialogPoolEditor } from "./dialog-pool"
 import { DialogUpstreamEditor } from "./dialog-upstream"
@@ -53,8 +53,6 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
   const tuiConfig = useTuiConfig()
   const workerFrecency = useWorkerFrecency()
   const { t } = useLanguage()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
-  const [sessionsLoaded, setSessionsLoaded] = createSignal(false)
   const [hoveredID, setHoveredID] = createSignal<string | null>(null)
   const [dragSource, setDragSource] = createSignal<DashboardNode | null>(null)
   const [state, setStateValue] = createSignal<DashboardViewState>(
@@ -68,7 +66,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
       selectedID: null,
     },
   )
-  const model = createMemo(() => buildDashboardModel(sync.data.workers, sync.data.upstreams, sessions(), sync.data.upstreamPools))
+  const model = createMemo(() => buildDashboardModel(sync.data.workers, sync.data.upstreams, Object.values(sync.data.hosted_sessions), sync.data.upstreamPools))
   const rows = createMemo(() => dashboardVisibleRows(model(), state()))
   const selectedRow = createMemo(() => rows().find((row) => row.id === state().selectedID) ?? null)
   const dragTarget = createMemo(() => {
@@ -87,18 +85,10 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     setStateValue(next)
   }
 
-  onMount(() => {
-    dialog.setSize("xlarge")
-    void sdk.client
-      .listHostedSessions()
-      .then(setSessions)
-      .catch(toast.error)
-      .finally(() => setSessionsLoaded(true))
-  })
+  onMount(() => dialog.setSize("xlarge"))
 
   createEffect(
-    on([model, sessionsLoaded], ([next, loaded]) => {
-      if (!loaded) return
+    on(model, (next) => {
       if (!initialized) {
         initialized = true
         setState(dashboardInitialState(next))
@@ -136,6 +126,15 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
         }, 0)
       }
     }),
+  )
+
+  createEffect(
+    on(
+      () => sync.data.error,
+      (error) => {
+        if (error) toast.error(new Error(error))
+      },
+    ),
   )
 
   function revealSelected(selectedID = state().selectedID) {
@@ -199,7 +198,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
       return
     }
     if (node.kind === "session") {
-      dialog.push(() => <DialogHostedTerminal initialSessions={[node.data]} />)
+      dialog.push(() => <DialogHostedTerminal />)
       return
     }
     if (node.kind === "worker") {
@@ -226,7 +225,7 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     if (!source || !isValidDashboardDrop(source, target)) return
     if (source.kind === "session" && target.kind === "worker") {
       try {
-        const { launched } = await rebindHostedSession({
+        const { launched, session } = await rebindHostedSession({
           client: sdk.client,
           session: source.data,
           worker: target.data,
@@ -234,8 +233,8 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
           executable: import.meta.env?.AINN_EXECUTABLE || undefined,
           launchMode: "open",
         })
+        sync.set("hosted_sessions", session.session_id, session)
         if (launched) workerFrecency.record(target.data.id)
-        setSessions(await sdk.client.listHostedSessions())
         toast.show({
           message: t("proxy.dashboard.rebound", { session: source.data.session_label, worker: target.data.name }),
           variant: "success",

@@ -173,6 +173,7 @@ export const proxyIt = {
   "proxy.module.categoryFields": "Campi",
   "proxy.module.categoryTools": "Strumenti",
   "proxy.hosted.title": "Terminale ospitato",
+  "proxy.hosted.waitingForInput": "In attesa di input",
   "proxy.hosted.createTitle": "Crea sessione ospitata",
   "proxy.hosted.createFailed": "Creazione sessione ospitata non riuscita",
   "proxy.hosted.openFailed": "L'apertura della sessione ospitata non è riuscita",

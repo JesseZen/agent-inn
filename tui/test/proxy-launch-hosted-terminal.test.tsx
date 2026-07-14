@@ -6,7 +6,7 @@ import path from "node:path"
 import { chmod, mkdtemp } from "node:fs/promises"
 import { createProxyLaunchCommand, renderProxyLaunchCommand } from "../src/proxy/launch"
 import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalApp, staleHostedSessionA, wait } from "./proxy-hosted-terminal.fixture"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 
 afterEach(() => {
   mock.restore()
@@ -276,15 +276,10 @@ test("launch dialog opens hosted terminal session menu", async () => {
       return json({
         sessions: [
           {
-            session_id: "hs_1",
-            session_label: "solve problem A",
-            worker_name: "test-cli",
-            worker_port: 1234,
-            status: "active",
-            created_at: "2026-06-23T00:00:00Z",
-            last_opened_at: "2026-06-23T00:00:00Z",
+            ...activeHostedSession,
           },
         ],
+        event_cursor: "0",
       })
     return undefined
   })
@@ -313,17 +308,14 @@ test("hosted terminal picker displays backend worker summary and missing worker"
         sessions: [
           {
             ...activeHostedSession,
-            worker_id: "worker-id",
-            worker_name: "legacy worker",
-            worker: { id: "worker-id", name: "Worker Summary" },
+            worker: { id: "worker-id", name: "Worker Summary", port: 1234, missing: false },
           },
           {
             ...staleHostedSessionA,
-            worker_id: "orphan-worker",
-            worker_name: "legacy orphan",
-            worker: { id: "orphan-worker", name: "legacy orphan", missing: true },
+            worker: { id: "orphan-worker", name: "legacy orphan", port: 1234, missing: true },
           },
         ],
+        event_cursor: "0",
       })
     return undefined
   })
@@ -390,16 +382,13 @@ test("hosted terminal create returns to refreshed session list", async () => {
         sessions: hostedSessionCalls > 1
           ? [
               {
+                ...activeHostedSession,
                 session_id: "hs_created",
                 session_label: "test-cli 1",
-                worker_name: "test-cli",
-                worker_port: 1234,
-                status: "active",
-                created_at: "2026-06-23T00:00:00Z",
-                last_opened_at: "2026-06-23T00:00:00Z",
               },
             ]
           : [],
+        event_cursor: "0",
       })
     }
     return undefined
@@ -507,7 +496,7 @@ test("stale hosted session changes worker from session list", async () => {
     port: 11200,
   }
   const patches: Array<{ session_id: string; worker_id: string }> = []
-  let sessions: HostedSessionSummary[] = [{ ...staleHostedSessionA, worker_id: "test-cli" }]
+  let sessions: HostedSessionSnapshot[] = [{ ...staleHostedSessionA }]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -516,25 +505,17 @@ test("stale hosted session changes worker from session list", async () => {
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
         sessions,
+        event_cursor: "0",
       })
     if (url.pathname === "/api/hosted-sessions/hs_2" && request.method === "PATCH") {
       const body = (await request.json()) as { worker_id: string }
       patches.push({ session_id: "hs_2", worker_id: body.worker_id })
       sessions = sessions.map((session) =>
         session.session_id === "hs_2"
-          ? { ...session, worker_id: body.worker_id, worker_name: localWorker.name, worker_port: localWorker.port }
+          ? { ...session, worker: { id: body.worker_id, name: localWorker.name, port: localWorker.port, missing: false } }
           : session,
       )
-      const updated = sessions[0]
-      return json({
-        session_id: updated.session_id,
-        session_label: updated.session_label,
-        worker_id: updated.worker_id,
-        worker_name: updated.worker_name,
-        worker_port: updated.worker_port,
-        created_at: updated.created_at,
-        last_opened_at: updated.last_opened_at,
-      })
+      return json(sessions[0])
     }
     return undefined
   })
@@ -603,12 +584,11 @@ test("active non-running hosted session changes worker and reopens same session"
     port: 11200,
   }
   const patches: Array<{ session_id: string; worker_id: string }> = []
-  let sessions: HostedSessionSummary[] = [
+  let sessions: HostedSessionSnapshot[] = [
     {
       ...activeHostedSession,
       session_id: "hs_active",
-      worker_id: "test-cli",
-      turn_state: "done",
+      turn: { state: "done", reason: "", unread: false, needs_input: false },
     },
   ]
   const app = await mountHostedTerminalApp(async (url, request) => {
@@ -619,13 +599,14 @@ test("active non-running hosted session changes worker and reopens same session"
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
         sessions,
+        event_cursor: "0",
       })
     if (url.pathname === "/api/hosted-sessions/hs_active" && request.method === "PATCH") {
       const body = (await request.json()) as { worker_id: string }
       patches.push({ session_id: "hs_active", worker_id: body.worker_id })
       sessions = sessions.map((session) =>
         session.session_id === "hs_active"
-          ? { ...session, worker_id: body.worker_id, worker_name: localWorker.name, worker_port: localWorker.port }
+          ? { ...session, worker: { id: body.worker_id, name: localWorker.name, port: localWorker.port, missing: false } }
           : session,
       )
       return json(sessions[0])
@@ -668,7 +649,7 @@ test("active non-running hosted session changes worker and reopens same session"
 
 test("hosted session rename patches label from session list", async () => {
   const patches: Array<{ session_id: string; session_label: string }> = []
-  let sessions: HostedSessionSummary[] = [{ ...activeHostedSession }]
+  let sessions: HostedSessionSnapshot[] = [{ ...activeHostedSession }]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -677,6 +658,7 @@ test("hosted session rename patches label from session list", async () => {
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
       return json({
         sessions,
+        event_cursor: "0",
       })
     }
     if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "PATCH") {
@@ -685,15 +667,7 @@ test("hosted session rename patches label from session list", async () => {
       sessions = sessions.map((session) =>
         session.session_id === "hs_1" ? { ...session, session_label: body.session_label } : session,
       )
-      const updated = sessions[0]
-      return json({
-        session_id: updated.session_id,
-        session_label: updated.session_label,
-        worker_name: updated.worker_name,
-        worker_port: updated.worker_port,
-        created_at: updated.created_at,
-        last_opened_at: updated.last_opened_at,
-      })
+      return json(sessions[0])
     }
     return undefined
   })
@@ -761,20 +735,18 @@ test("hosted session duplicate creates and launches a fresh session id", async (
   }))
 
   let duplicateCalls = 0
-  let sessions: HostedSessionSummary[] = [
+  let sessions: HostedSessionSnapshot[] = [
     {
       ...activeHostedSession,
       workspace: "/tmp/work",
       model: "gpt-5.5",
       add_dirs: ["/tmp/shared"],
-      launcher_session_id: "019e7c18-0ee7-7ff2-bc82-9c410511ede3",
     },
   ]
-  const duplicated: HostedSessionSummary = {
+  const duplicated: HostedSessionSnapshot = {
+    ...activeHostedSession,
     session_id: "hs_dup",
     session_label: "test-cli 2",
-    worker_name: "test-cli",
-    worker_port: 1234,
     workspace: "/tmp/work",
     model: "gpt-5.5",
     add_dirs: ["/tmp/shared"],
@@ -790,6 +762,7 @@ test("hosted session duplicate creates and launches a fresh session id", async (
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
         sessions,
+        event_cursor: "0",
       })
     if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
       duplicateCalls += 1
@@ -906,15 +879,11 @@ test("stale hosted session launches reopen through CLI", async () => {
       return json({
         sessions: [
           {
-            session_id: "hs_1",
-            session_label: "solve problem A",
-            worker_name: "test-cli",
-            worker_port: 1234,
-            created_at: "2026-06-23T00:00:00Z",
-            last_opened_at: "2026-06-23T00:00:00Z",
+            ...activeHostedSession,
             status: "stale",
           },
         ],
+        event_cursor: "0",
       })
     return undefined
   })

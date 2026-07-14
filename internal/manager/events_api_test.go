@@ -137,8 +137,70 @@ func TestManagerEventsEndpointStopsOnCloseNotify(t *testing.T) {
 	}
 }
 
-func strconvFormatInt(id int64) string {
-	return strconv.FormatInt(id, 10)
+func TestManagerEventsEndpointEmitsConnectionScopedResyncForExpiredCursor(t *testing.T) {
+	m := New(Config{Config: config.Config{}})
+	m.events = newEventBus(2)
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "one"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "two"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "three"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "four"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "http://manager.local/api/events", nil).WithContext(ctx)
+	req.Header.Set("Last-Event-ID", "1")
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, "event: manager.resync-required") || !strings.Contains(body, `{"reason":"event_cursor_expired"}`) {
+		t.Fatalf("missing resync control event: %s", body)
+	}
+	for _, event := range m.events.Replay(0) {
+		if event.Type == EventManagerResyncRequired {
+			t.Fatalf("resync control event entered shared ring: %#v", event)
+		}
+	}
+}
+
+func TestManagerEventsEndpointReplaysNonExpiredOldestCursor(t *testing.T) {
+	m := New(Config{Config: config.Config{}})
+	m.events = newEventBus(2)
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "one"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "two"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "three"})
+	m.events.Publish(EventWorkerStarted, map[string]any{"worker": "four"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "http://manager.local/api/events", nil).WithContext(ctx)
+	req.Header.Set("Last-Event-ID", "2")
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, req)
+	body := res.Body.String()
+	if strings.Contains(body, "manager.resync-required") || !strings.Contains(body, `"worker":"three"`) || !strings.Contains(body, `"worker":"four"`) {
+		t.Fatalf("bad non-expired replay: %s", body)
+	}
+}
+
+func TestManagerEventsPreserveDecimalIDsAboveJavaScriptSafeInteger(t *testing.T) {
+	m := New(Config{Config: config.Config{}})
+	m.events.nextID = 9007199254740992
+	event := m.events.Publish(EventWorkerStarted, map[string]any{"worker": "app"})
+	if got, want := m.events.CursorString(), "9007199254740993"; got != want {
+		t.Fatalf("cursor %q, want %q", got, want)
+	}
+	res := httptest.NewRecorder()
+	if err := writeSSEEvent(res, event); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Body.String(), "id: 9007199254740993\n") {
+		t.Fatalf("SSE narrowed event ID: %s", res.Body.String())
+	}
+}
+
+func strconvFormatInt(id uint64) string {
+	return strconv.FormatUint(id, 10)
 }
 
 type streamingRecorder struct {

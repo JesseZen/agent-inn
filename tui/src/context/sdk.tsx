@@ -5,8 +5,6 @@ import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
 import type {
   BatchRun,
-  HostedSessionRecord,
-  HostedSessionSummary,
   CreateBatchRequest,
   MetricsRangeName,
   MetricsResponse,
@@ -28,6 +26,8 @@ import type {
   WorkerSummary,
 } from "../proxy/backend"
 import { decodeManagerUpstreams, type ManagerUpstream } from "../proxy/backend"
+import type { CreateHostedSessionRequest, HostedSessionListResponse, HostedSessionSnapshot, ManagerEvent, PatchHostedSessionRequest } from "../proxy/hosted-session-contract"
+import { subscribeManagerEventStream } from "../proxy/manager-event-stream"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
@@ -253,33 +253,33 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             body: JSON.stringify(patch),
           })
         },
-        async listHostedSessions() {
-          return request<{ sessions: HostedSessionSummary[] }>("/api/hosted-sessions").then((result) => result.sessions)
+        async getHostedSessionList() {
+          return request<HostedSessionListResponse>("/api/hosted-sessions")
         },
-        async createHostedSession(input: HostedSessionRecord) {
-          return request<HostedSessionRecord>("/api/hosted-sessions", {
+        async createHostedSession(input: CreateHostedSessionRequest) {
+          return request<HostedSessionSnapshot>("/api/hosted-sessions", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(input),
           })
         },
         async getHostedSession(sessionID: string) {
-          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`)
+          return request<HostedSessionSnapshot>(`/api/hosted-sessions/${sessionID}`)
         },
-        async patchHostedSession(sessionID: string, patch: Partial<Pick<HostedSessionRecord, "worker_id" | "session_label">>) {
-          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}`, {
+        async patchHostedSession(sessionID: string, patch: PatchHostedSessionRequest) {
+          return request<HostedSessionSnapshot>(`/api/hosted-sessions/${sessionID}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(patch),
           })
         },
         async duplicateHostedSession(sessionID: string) {
-          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}/duplicate`, {
+          return request<HostedSessionSnapshot>(`/api/hosted-sessions/${sessionID}/duplicate`, {
             method: "POST",
           })
         },
         async markHostedSessionUnread(sessionID: string) {
-          return request<HostedSessionRecord>(`/api/hosted-sessions/${sessionID}/mark-unread`, {
+          return request<HostedSessionSnapshot>(`/api/hosted-sessions/${sessionID}/mark-unread`, {
             method: "POST",
           })
         },
@@ -309,41 +309,18 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async saveConfig() {
           return request<{ status: ProxyConfigStatus }>("/api/config", { method: "PUT" })
         },
-        async subscribeManagerEvents(handler: (event: { type: string; payload: Record<string, unknown> }) => void) {
-          const ctrl = new AbortController()
-          const response = await (props.fetch ?? globalThis.fetch)(new URL("/api/events", props.url), {
-            signal: ctrl.signal,
-            headers: { Accept: "text/event-stream" },
+        async subscribeManagerEvents(
+          handler: (event: ManagerEvent) => void,
+          options: { lastEventID?: string; onEnd?: () => void } = {},
+        ) {
+          return subscribeManagerEventStream({
+            url: new URL("/api/events", props.url).toString(),
+            fetch: props.fetch ?? globalThis.fetch,
+            headers: props.headers,
+            lastEventID: options.lastEventID,
+            onEvent: handler,
+            onEnd: options.onEnd,
           })
-          if (!response.ok || !response.body) throw new Error(`failed to subscribe manager events: ${response.status}`)
-          ;(async () => {
-            const reader = response.body!.getReader()
-            const decoder = new TextDecoder()
-            let buffer = ""
-            let eventType = ""
-            let eventData = ""
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              buffer += decoder.decode(value, { stream: true })
-              const chunks = buffer.split("\n\n")
-              buffer = chunks.pop() ?? ""
-              for (const chunk of chunks) {
-                eventType = ""
-                eventData = ""
-                for (const line of chunk.split("\n")) {
-                  if (line.startsWith("event: ")) eventType = line.slice(7)
-                  if (line.startsWith("data: ")) eventData += line.slice(6)
-                }
-                if (!eventType) continue
-                handler({
-                  type: eventType,
-                  payload: eventData ? ((JSON.parse(eventData) as Record<string, unknown>) ?? {}) : {},
-                })
-              }
-            }
-          })().catch(() => {})
-          return () => ctrl.abort()
         },
       })
     }

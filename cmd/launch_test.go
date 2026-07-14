@@ -156,6 +156,26 @@ func hostedTestPopupBindingInstallCommands(t *testing.T, settings config.Setting
 	return commands
 }
 
+func hostedTestInteractionInstallCommands(t *testing.T, settings config.Settings, configDir string) [][]string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return [][]string{
+		manager.TmuxHostedInteractionOwnerCommandForSettings(settings),
+		manager.TmuxListHostedInteractionBindingCommandForSettings(settings, "root", manager.TmuxHostedInteractionMouseKey),
+		manager.TmuxListHostedInteractionBindingCommandForSettings(settings, "prefix", manager.TmuxHostedInteractionRenameKey),
+		manager.TmuxSetHostedInteractionOwnerCommandForSettings(settings, resolved),
+		manager.TmuxHostedInteractionMouseBindingCommandForSettings(settings, resolved, exe),
+		manager.TmuxHostedInteractionRenameBindingCommandForSettings(settings, resolved, exe),
+	}
+}
+
 func hostedTestHasTmuxSubcommand(commands [][]string, subcommand string) bool {
 	for _, command := range commands {
 		for _, arg := range command {
@@ -620,6 +640,7 @@ func TestRunLaunchHostedTerminalRunsTmuxSequence(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
@@ -861,6 +882,7 @@ func TestRunLaunchHostedTerminalCreatesFreshHostWhenTmuxSocketMissing(t *testing
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, cfg.Settings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, cfg.Settings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, cfg.Settings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(cfg.Settings))
 	want = append(want,
 		manager.TmuxSelectWindowCommandForSettings(cfg.Settings, "solve problem A"),
@@ -2257,6 +2279,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingWindow(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2324,6 +2347,7 @@ func TestRunLaunchHostedTerminalSwitchesExistingLegacyNamedWindow(t *testing.T) 
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2414,6 +2438,7 @@ func TestRunLaunchHostedTerminalNoAttachSkipsAttach(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2513,6 +2538,7 @@ func TestRunLaunchHostedTerminalReopensStaleCodexSessionWithEncodedProfile(t *te
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2701,6 +2727,7 @@ func TestRunLaunchHostedTerminalReopensUnstartedStaleCodexSessionWithEncodedProf
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2916,6 +2943,7 @@ upstreams:
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -2979,6 +3007,7 @@ func TestRunLaunchHostedTerminalKeepsMouseWhenEnabled(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn", "list-windows", "-t", "ainn-host", "-F", "#{window_id}\t#{window_name}"},
@@ -3042,6 +3071,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowOnFreshHost(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
@@ -3120,6 +3150,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowMovesNonZeroFirstWindowToIndex0(
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
@@ -3244,6 +3275,7 @@ func TestRunLaunchHostedTerminalReuseFirstWindowStillUsesNewWindowOnExistingHost
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},
@@ -3349,6 +3381,7 @@ func TestRunLaunchHostedTerminalMainTUIWindowStillUsesNewWindow(t *testing.T) {
 	}
 	want = append(want, hostedTestTurnStatusInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, hostedTestPopupBindingInstallCommands(t, tmuxSettings, configDir, defaultManagerURL, "")...)
+	want = append(want, hostedTestInteractionInstallCommands(t, tmuxSettings, configDir)...)
 	want = append(want, manager.TmuxThemeCommandForSettings(tmuxSettings))
 	want = append(want,
 		[]string{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:solve problem A"},

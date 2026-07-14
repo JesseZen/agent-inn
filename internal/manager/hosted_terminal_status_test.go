@@ -115,7 +115,16 @@ func TestTmuxKillWindowCommandForSettings(t *testing.T) {
 	}
 }
 
-func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
+func hostedTestStatusCommand(settings config.Settings, session HostedSessionRecord) []string {
+	snapshot := MapHostedSessionSnapshot(session, HostedSessionStatusActive, HostedSessionWorkerSnapshot{})
+	return TmuxHostedTurnStatusCommandForSnapshot(settings, session.TmuxWindowID, snapshot)
+}
+
+func hostedTestStatusCommandForState(settings config.Settings, windowID string, state string) []string {
+	return TmuxHostedTurnStatusCommandForSnapshot(settings, windowID, HostedSessionSnapshot{Turn: HostedSessionTurnSnapshot{State: state, Unread: true}})
+}
+
+func TestTmuxHostedTurnStatusCommandForSnapshot(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{
 			Tmux: config.TmuxSettings{
@@ -124,7 +133,7 @@ func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
 			},
 		},
 	}
-	got := TmuxHostedTurnStatusCommandForSettings(settings, "@12", HostedTurnStateFailed)
+	got := hostedTestStatusCommandForState(settings, "@12", HostedTurnStateFailed)
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
@@ -136,6 +145,51 @@ func TestTmuxHostedTurnStatusCommandForSettings(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
+}
+
+func TestTmuxHostedTurnStatusCommandForSnapshotRendersPriorityMatrix(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
+	base := HostedSessionSnapshot{
+		SessionID: "hs_1", SessionLabel: "work", Worker: HostedSessionWorkerSnapshot{}, AddDirs: []string{},
+		Status: HostedSessionStatusActive, Turn: HostedSessionTurnSnapshot{State: HostedTurnStateIdle},
+	}
+	cases := []struct {
+		name     string
+		marker   string
+		snapshot HostedSessionSnapshot
+		inactive string
+		current  string
+	}{
+		{"waiting todo", "?", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning, NeedsInput: true}, HostedUserMarkerTodo), "#[fg=colour208,bg=colour235,bold] #I:? #W #[default]", "#[fg=colour0,bg=colour208,bold] #I:? #W #[default]"},
+		{"running todo", "*", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning}, HostedUserMarkerTodo), "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"},
+		{"done unread todo", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone, Unread: true}, HostedUserMarkerTodo), "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]", "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"},
+		{"failed unread todo", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateFailed, Unread: true}, HostedUserMarkerTodo), "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]", "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"},
+		{"acknowledged todo", "~", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, HostedUserMarkerTodo), "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]", "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"},
+		{"done read", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, ""), "#[fg=colour244,bg=colour235] #I:+ #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"},
+		{"interrupted read", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateInterrupted}, ""), "#[fg=colour244,bg=colour235] #I:! #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"},
+		{"idle", ":", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateIdle}, ""), "#[fg=colour244,bg=colour235] #I:#W #[default]", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := TmuxHostedTurnStatusCommandForSnapshot(settings, "@12", tc.snapshot)
+			want := []string{
+				"tmux", "-L", "ainn-test", "set-window-option", "-t", "ainn-test-host:@12", "window-status-format", tc.inactive, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-format", tc.current,
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+			if strings.Contains(strings.Join(got, " "), "colour208") != (tc.marker == "?") {
+				t.Fatalf("colour208 must be waiting-only: %#v", got)
+			}
+		})
+	}
+}
+
+func snapshotWithTurn(base HostedSessionSnapshot, turn HostedSessionTurnSnapshot, marker string) HostedSessionSnapshot {
+	base.Turn = turn
+	base.UserMarker = marker
+	return base
 }
 
 func TestTmuxThemeCommandForSettingsPinsMainWindowAndIncludesHostedSessions(t *testing.T) {
@@ -199,7 +253,7 @@ func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInNonMainModes(t *test
 	}
 }
 
-func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *testing.T) {
+func TestTmuxHostedTurnStatusCommandForSnapshotDistinguishesUnreadAndReadDone(t *testing.T) {
 	settings := config.Settings{
 		Terminal: config.TerminalSettings{
 			Tmux: config.TmuxSettings{
@@ -216,7 +270,7 @@ func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *t
 	read := unread
 	read.TurnAcknowledgedGeneration = 2
 
-	gotUnread := TmuxHostedTurnStatusCommandForRecord(settings, unread)
+	gotUnread := hostedTestStatusCommand(settings, unread)
 	wantUnread := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
@@ -229,7 +283,7 @@ func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *t
 		t.Fatalf("unread got %#v, want %#v", gotUnread, wantUnread)
 	}
 
-	gotRead := TmuxHostedTurnStatusCommandForRecord(settings, read)
+	gotRead := hostedTestStatusCommand(settings, read)
 	wantRead := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
@@ -243,7 +297,7 @@ func TestTmuxHostedTurnStatusCommandForRecordDistinguishesUnreadAndReadDone(t *t
 	}
 }
 
-func TestTmuxHostedTurnStatusCommandForRecordRendersTodoBelowUnreadStates(t *testing.T) {
+func TestTmuxHostedTurnStatusCommandForSnapshotRendersTodoBelowUnreadStates(t *testing.T) {
 	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
 	cases := []struct {
 		name    string
@@ -284,11 +338,27 @@ func TestTmuxHostedTurnStatusCommandForRecordRendersTodoBelowUnreadStates(t *tes
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := TmuxHostedTurnStatusCommandForRecord(settings, tc.session)
+			got := hostedTestStatusCommand(settings, tc.session)
 			if got[7] != tc.want {
 				t.Fatalf("got %#v, want format %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTmuxHostedInteractionBindingsCarryRegistryTargetData(t *testing.T) {
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-host"}}}
+	mouse := TmuxHostedInteractionMouseBindingCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin")
+	if !strings.Contains(strings.Join(mouse, " "), "MouseDown3Status") || !strings.Contains(strings.Join(mouse, " "), "--client-name #{q:client_name}") {
+		t.Fatalf("unexpected mouse binding: %#v", mouse)
+	}
+	rename := TmuxHostedInteractionRenameBindingCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin")
+	if !strings.Contains(strings.Join(rename, " "), "prefix ,") || !strings.Contains(strings.Join(rename, " "), "rename-or-native") {
+		t.Fatalf("unexpected rename binding: %#v", rename)
+	}
+	prompt := TmuxHostedSessionRenamePromptCommandForSettings(settings, "/tmp/ainn config", "/tmp/ainn bin", "@12", `$(touch /tmp/pwned);"quoted"`)
+	if !strings.Contains(strings.Join(prompt, " "), "%%%") {
+		t.Fatalf("rename prompt must use tmux response substitution: %#v", prompt)
 	}
 }
 

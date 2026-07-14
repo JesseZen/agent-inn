@@ -176,6 +176,7 @@ export const proxyZhCN = {
   "proxy.module.categoryTools": "工具",
 
   "proxy.hosted.title": "托管终端",
+  "proxy.hosted.waitingForInput": "等待输入",
   "proxy.hosted.createTitle": "创建托管会话",
   "proxy.hosted.createFailed": "创建托管会话失败",
   "proxy.hosted.openFailed": "打开托管会话失败",

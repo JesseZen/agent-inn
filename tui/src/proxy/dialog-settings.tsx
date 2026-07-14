@@ -71,8 +71,7 @@ export function DialogSettings() {
     await sync.bootstrap({ fatal: false })
     toast.show({ message: t("proxy.settings.fieldSaved", { field: field.title }), variant: "success" })
     if (field.key === "terminal.tmux.host_start_mode" && value === "reuse-first-window") {
-      const hostedSessions = await sdk.client.listHostedSessions()
-      if (hostedSessions.length > 0) {
+      if (Object.keys(sync.data.hosted_sessions).length > 0) {
         setTimeout(() => {
           toast.show({
             message: t("proxy.settings.hostStartWarning"),

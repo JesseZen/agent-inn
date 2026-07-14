@@ -173,6 +173,7 @@ export const proxyRu = {
   "proxy.module.categoryFields": "Поля",
   "proxy.module.categoryTools": "Инструменты",
   "proxy.hosted.title": "Размещенный терминал",
+  "proxy.hosted.waitingForInput": "Ожидание ввода",
   "proxy.hosted.createTitle": "Создать размещенный сеанс",
   "proxy.hosted.createFailed": "Не удалось создать размещенный сеанс.",
   "proxy.hosted.openFailed": "Открыть размещенный сеанс не удалось",

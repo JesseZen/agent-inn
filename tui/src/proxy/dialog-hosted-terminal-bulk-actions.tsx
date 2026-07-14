@@ -1,4 +1,5 @@
 import { createMemo, createSignal } from "solid-js"
+import { TextAttributes } from "@opentui/core"
 import { useTuiConfig } from "../config"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
@@ -8,21 +9,23 @@ import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useBindings, useCommandShortcut } from "../keymap"
 import { Global } from "@agent-inn/core/global"
-import type { HostedSessionSummary } from "./backend"
+import type { HostedSessionSnapshot } from "./hosted-session-contract"
 import { DialogWorkerPicker } from "./dialog-worker-picker"
 import { rebindHostedSession } from "./hosted-session-rebind"
 import { launchProxySession, setupHostedTerminalSession } from "./launch"
 import { useWorkerFrecency } from "./worker-frecency-context"
 import { useLanguage } from "../context/language"
+import { useTheme } from "../context/theme"
+import { hostedSessionMarker, hostedSessionMarkerColor } from "./hosted-session-presentation"
 
 type BulkSessionOption =
   | { type: "open" }
   | { type: "change-worker" }
   | { type: "delete" }
-  | { type: "session"; session: HostedSessionSummary }
+  | { type: "session"; session: HostedSessionSnapshot }
 
 export function DialogHostedTerminalBulkActions(props: {
-  sessions: HostedSessionSummary[]
+  sessions: HostedSessionSnapshot[]
   mode: "dialog" | "popup"
   onComplete: () => Promise<void>
 }) {
@@ -32,14 +35,15 @@ export function DialogHostedTerminalBulkActions(props: {
   const tuiConfig = useTuiConfig()
   const workerFrecency = useWorkerFrecency()
   const { t } = useLanguage()
+  const { theme } = useTheme()
   const toggleShortcut = useCommandShortcut("session.bulk.toggle")
   const [selectedIDs, setSelectedIDs] = createSignal(new Set<string>())
-  const [highlightedSession, setHighlightedSession] = createSignal<HostedSessionSummary>()
+  const [highlightedSession, setHighlightedSession] = createSignal<HostedSessionSnapshot>()
   const selectedSessions = createMemo(() => props.sessions.filter((session) => selectedIDs().has(session.session_id)))
   const compatibleWorkers = createMemo(() => {
     const launchers = new Set(
       selectedSessions().map((session) => {
-        const worker = sync.data.workers.find((worker) => worker.id === (session.worker_id ?? session.worker_name))
+        const worker = sync.data.workers.find((worker) => worker.id === session.worker.id)
         return worker?.launcher ?? "codex"
       }),
     )
@@ -48,7 +52,7 @@ export function DialogHostedTerminalBulkActions(props: {
     return sync.data.workers.filter((worker) => (worker.launcher ?? "codex") === launcher)
   })
 
-  function toggleSession(session: HostedSessionSummary) {
+  function toggleSession(session: HostedSessionSnapshot) {
     setSelectedIDs((ids) => {
       const next = new Set(ids)
       if (next.has(session.session_id)) next.delete(session.session_id)
@@ -92,13 +96,24 @@ export function DialogHostedTerminalBulkActions(props: {
       category: t("proxy.hosted.categoryAction"),
     },
     ...props.sessions.map((session) => {
-      const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
+      const worker = session.worker.missing ? t("proxy.hosted.missingWorker", { id: session.worker.id }) : session.worker.name
+      const marker = hostedSessionMarker(session)
       return {
         title: session.session_label,
         value: { type: "session" as const, session },
-        description: `${worker} • ${session.status}${session.turn_state === "running" ? " • running" : ""}`,
+        description: `${worker} • ${session.status}${session.turn.needs_input ? ` • ${t("proxy.hosted.waitingForInput")}` : session.turn.state === "running" ? " • running" : ""}`,
         category: t("proxy.hosted.categorySessions"),
-        gutter: () => <text>{selectedIDs().has(session.session_id) ? "✓" : "○"}</text>,
+        gutter: () => (
+          <box flexDirection="row" gap={1}>
+            <text>{selectedIDs().has(session.session_id) ? "✓" : "○"}</text>
+            <text
+              fg={hostedSessionMarkerColor(theme, marker)}
+              attributes={marker.bold ? TextAttributes.BOLD : undefined}
+            >
+              {marker.symbol}
+            </text>
+          </box>
+        ),
       }
     }),
   ])
@@ -111,10 +126,10 @@ export function DialogHostedTerminalBulkActions(props: {
         const settings = await sdk.client.getSettings()
         const launch = props.mode === "popup" ? setupHostedTerminalSession : launchProxySession
         for (const session of sessions) {
-          const workerID = session.worker_id ?? session.worker_name
+          const workerID = session.worker.id
           const launched = await launch({
             executable: import.meta.env?.AINN_EXECUTABLE || undefined,
-            workerPort: session.worker_port,
+            workerPort: session.worker.port,
             profile: workerID,
             configDir: Global.Path.config,
             mode: "hosted-terminal",
@@ -136,7 +151,7 @@ export function DialogHostedTerminalBulkActions(props: {
   function chooseWorker() {
     const sessions = selectedSessions()
     if (sessions.length === 0) return
-    if (sessions.some((session) => session.turn_state === "running")) {
+    if (sessions.some((session) => session.turn.state === "running")) {
       void DialogAlert.show(dialog, t("proxy.hosted.changeWorkerFailed"), t("proxy.hosted.stopRunning"))
       return
     }

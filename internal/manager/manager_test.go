@@ -1515,7 +1515,7 @@ func TestManagerHostedSessionsUseSettingsStateDir(t *testing.T) {
 	})
 
 	res := httptest.NewRecorder()
-	body := strings.NewReader(`{"session_label":"solve problem A","worker_name":"cli","worker_port":11199}`)
+	body := strings.NewReader(`{"session_label":"solve problem A","worker_id":"cli"}`)
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/hosted-sessions", body))
 	if res.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
@@ -1529,6 +1529,10 @@ func TestManagerHostedSessionsUseSettingsStateDir(t *testing.T) {
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("hosted registry should not use config file dir %s: %v", oldPath, err)
 	}
+}
+
+func hostedSnapshotForManagerTest(m *Manager, record HostedSessionRecord, status HostedSessionStatus) HostedSessionSnapshot {
+	return MapHostedSessionSnapshot(record, status, hostedSessionWorkerSnapshot(record, m.config))
 }
 
 func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
@@ -1561,11 +1565,11 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	if res.Code != http.StatusCreated {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := HostedSessionRecord{
+	wantRecord := HostedSessionRecord{
 		SessionID:    got.SessionID,
 		SessionLabel: "solve problem A 2",
 		WorkerID:     "cli-openai",
@@ -1577,6 +1581,7 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 		CreatedAt:    got.CreatedAt,
 		LastOpenedAt: got.LastOpenedAt,
 	}
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusStale)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -1587,8 +1592,8 @@ func TestManagerAPIDuplicatesHostedSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected duplicated hosted session %q", got.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	if !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, wantRecord)
 	}
 }
 
@@ -1639,12 +1644,13 @@ func TestManagerAPIMarksHostedSessionUnread(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.TurnAcknowledgedGeneration = 0
+	wantRecord := created
+	wantRecord.TurnAcknowledgedGeneration = 0
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusActive)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -1655,13 +1661,13 @@ func TestManagerAPIMarksHostedSessionUnread(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected hosted session %q", created.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	if !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, wantRecord)
 	}
 	wantCalls := [][]string{
 		TmuxHasSessionCommandForSettings(settings),
 		TmuxListWindowDetailsCommandForSettings(settings),
-		TmuxHostedTurnStatusCommandForRecord(settings, want),
+		hostedTestStatusCommand(settings, wantRecord),
 	}
 	if !reflect.DeepEqual(gotCalls, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", gotCalls, wantCalls)
@@ -1748,12 +1754,13 @@ func TestManagerAPIMarksWindowlessHostedSessionUnreadWithoutTmux(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.TurnAcknowledgedGeneration = 0
+	wantRecord := created
+	wantRecord.TurnAcknowledgedGeneration = 0
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusStale)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -1806,12 +1813,13 @@ func TestManagerAPIMarksStaleHostedSessionUnreadWithoutTmuxUpdate(t *testing.T) 
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.TurnAcknowledgedGeneration = 0
+	wantRecord := created
+	wantRecord.TurnAcknowledgedGeneration = 0
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusStale)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -1819,8 +1827,8 @@ func TestManagerAPIMarksStaleHostedSessionUnreadWithoutTmuxUpdate(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v ok=%v\nwant %#v", persisted, ok, want)
+	if !ok || !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v ok=%v\nwant %#v", persisted, ok, wantRecord)
 	}
 	wantCalls := [][]string{
 		TmuxHasSessionCommandForSettings(settings),
@@ -1855,12 +1863,13 @@ func TestManagerAPIRenamesStaleHostedSession(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.SessionLabel = "solve problem B"
+	wantRecord := created
+	wantRecord.SessionLabel = "solve problem B"
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusStale)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -1871,8 +1880,8 @@ func TestManagerAPIRenamesStaleHostedSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected hosted session %q", created.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	if !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, wantRecord)
 	}
 }
 
@@ -1926,14 +1935,15 @@ func TestManagerAPIRenamesActiveHostedSessionWindow(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	wantSession := created
 	wantSession.SessionLabel = "solve problem B"
-	if !reflect.DeepEqual(got, wantSession) {
-		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, wantSession)
+	want := hostedSnapshotForManagerTest(m, wantSession, HostedSessionStatusActive)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
 	wantCalls := [][]string{
 		TmuxHasSessionCommandForSettings(settings),
@@ -2029,19 +2039,20 @@ func TestManagerAPIPatchesStaleHostedSessionWorker(t *testing.T) {
 	defer func() { hostedTMuxRunnerFactory = oldRunner }()
 
 	res := httptest.NewRecorder()
-	body := strings.NewReader(`{"worker_name":"cli-local"}`)
+	body := strings.NewReader(`{"worker_id":"cli-local"}`)
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.WorkerID = "cli-local"
-	want.WorkerName = "cli-local"
-	want.WorkerPort = 11200
+	wantRecord := created
+	wantRecord.WorkerID = "cli-local"
+	wantRecord.WorkerName = "cli-local"
+	wantRecord.WorkerPort = 11200
+	want := MapHostedSessionSnapshot(wantRecord, HostedSessionStatusStale, HostedSessionWorkerSnapshot{ID: "cli-local", Name: "cli-local", Port: 11200})
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -2052,8 +2063,8 @@ func TestManagerAPIPatchesStaleHostedSessionWorker(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected hosted session %q", created.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, want)
+	if !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, wantRecord)
 	}
 }
 
@@ -2079,12 +2090,17 @@ func TestManagerHostedSessionPatchUsesWorkerID(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var updated HostedSessionRecord
+	var updated HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.WorkerID != "local" || updated.WorkerName != "local" || updated.WorkerPort != 11200 {
-		t.Fatalf("bad updated session: %#v", updated)
+	wantRecord := created
+	wantRecord.WorkerID = "local"
+	wantRecord.WorkerName = "local"
+	wantRecord.WorkerPort = 11200
+	want := hostedSnapshotForManagerTest(m, wantRecord, HostedSessionStatusStale)
+	if !reflect.DeepEqual(updated, want) {
+		t.Fatalf("bad updated session: got %#v want %#v", updated, want)
 	}
 }
 
@@ -2116,18 +2132,16 @@ func TestManagerAPIHostedSessionSummariesReportMissingWorker(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var body struct {
-		Sessions []HostedSessionSummary `json:"sessions"`
-	}
+	var body HostedSessionListResponse
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	if len(body.Sessions) != 1 {
 		t.Fatalf("expected one hosted session, got %#v", body.Sessions)
 	}
-	want := &HostedSessionWorkerSummary{ID: "cli-openai", Name: "cli-openai", Missing: true}
-	if !reflect.DeepEqual(body.Sessions[0].Worker, want) {
-		t.Fatalf("bad hosted session worker summary:\nwant %#v\ngot  %#v", want, body.Sessions[0].Worker)
+	wantWorker := HostedSessionWorkerSnapshot{ID: "cli-openai", Name: "cli-openai", Port: 11199, Missing: true}
+	if !reflect.DeepEqual(body.Sessions[0].Worker, wantWorker) {
+		t.Fatalf("bad hosted session worker snapshot:\nwant %#v\ngot  %#v", wantWorker, body.Sessions[0].Worker)
 	}
 }
 
@@ -2181,14 +2195,15 @@ func TestManagerAPIHostedSessionWorkerPatchKillsActiveNonRunningWindow(t *testin
 	if res.Code != http.StatusOK {
 		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
 	}
-	var got HostedSessionRecord
+	var got HostedSessionSnapshot
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := created
-	want.WorkerID = "cli-local"
-	want.WorkerName = "cli-local"
-	want.WorkerPort = 11200
+	wantRecord := created
+	wantRecord.WorkerID = "cli-local"
+	wantRecord.WorkerName = "cli-local"
+	wantRecord.WorkerPort = 11200
+	want := MapHostedSessionSnapshot(wantRecord, HostedSessionStatusStale, HostedSessionWorkerSnapshot{ID: "cli-local", Name: "cli-local", Port: 11200})
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected response:\n got %#v\nwant %#v", got, want)
 	}
@@ -2199,8 +2214,8 @@ func TestManagerAPIHostedSessionWorkerPatchKillsActiveNonRunningWindow(t *testin
 	if !ok {
 		t.Fatalf("expected hosted session %q", created.SessionID)
 	}
-	if !reflect.DeepEqual(persisted, want) {
-		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, created)
+	if !reflect.DeepEqual(persisted, wantRecord) {
+		t.Fatalf("unexpected persisted session:\n got %#v\nwant %#v", persisted, wantRecord)
 	}
 	wantCalls := [][]string{
 		TmuxHasSessionCommandForSettings(settings),
@@ -2303,7 +2318,7 @@ func TestManagerAPIHostedSessionWorkerPatchRejectsLauncherChange(t *testing.T) {
 	defer func() { hostedTMuxRunnerFactory = oldRunner }()
 
 	res := httptest.NewRecorder()
-	body := strings.NewReader(`{"worker_name":"claude-main"}`)
+	body := strings.NewReader(`{"worker_id":"claude-main"}`)
 	m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/hosted-sessions/"+created.SessionID, body))
 	if res.Code != http.StatusConflict {
 		t.Fatalf("expected launcher conflict, got %d: %s", res.Code, res.Body.String())

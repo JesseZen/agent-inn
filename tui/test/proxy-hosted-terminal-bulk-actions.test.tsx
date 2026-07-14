@@ -9,7 +9,7 @@ import {
   staleHostedSessionB,
   wait,
 } from "./proxy-hosted-terminal.fixture"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 import * as launchModule from "../src/proxy/launch"
 import type { ProxyLaunchOptions } from "../src/proxy/launch"
 
@@ -53,15 +53,18 @@ test("bulk session actions open every selected hosted session", async () => {
     return true
   })
   spyOn(launchModule, "setupHostedTerminalSession").mockResolvedValue(true)
-  const runningSession = { ...activeHostedSession, turn_state: "running" as const }
+  const runningSession = { ...activeHostedSession, turn: { ...activeHostedSession.turn, state: "running" as const } }
   const otherWorker = { ...defaultWorker, id: "other-cli", name: "other-cli", port: 4321 }
-  const otherSession = { ...staleHostedSessionA, worker_id: otherWorker.id, worker_name: otherWorker.name, worker_port: otherWorker.port }
+  const otherSession = {
+    ...staleHostedSessionA,
+    worker: { id: otherWorker.id, name: otherWorker.name, port: otherWorker.port, missing: false },
+  }
   let listCalls = 0
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker, otherWorker] })
     if (url.pathname === "/api/hosted-sessions") {
       listCalls += 1
-      return json({ sessions: [runningSession, otherSession] })
+      return json({ sessions: [runningSession, otherSession], event_cursor: "0" })
     }
     return undefined
   })
@@ -106,7 +109,9 @@ test("popup bulk session actions set up every selected hosted session", async ()
   })
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession, staleHostedSessionA] })
+    if (url.pathname === "/api/hosted-sessions") {
+      return json({ sessions: [activeHostedSession, staleHostedSessionA], event_cursor: "0" })
+    }
     return undefined
   })
 
@@ -149,7 +154,9 @@ test("bulk session actions stop opening after a launch failure", async () => {
   spyOn(launchModule, "setupHostedTerminalSession").mockResolvedValue(true)
   const app = await mountHostedTerminalApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession, staleHostedSessionA, staleHostedSessionB] })
+    if (url.pathname === "/api/hosted-sessions") {
+      return json({ sessions: [activeHostedSession, staleHostedSessionA, staleHostedSessionB], event_cursor: "0" })
+    }
     return undefined
   })
 
@@ -188,10 +195,10 @@ test("bulk session actions stop opening after a launch failure", async () => {
 
 test("bulk session actions delete every selected hosted session", async () => {
   const deleteRequests: string[] = []
-  let sessions: HostedSessionSummary[] = [activeHostedSession, staleHostedSessionA, staleHostedSessionB]
+  let sessions: HostedSessionSnapshot[] = [activeHostedSession, staleHostedSessionA, staleHostedSessionB]
   const app = await mountHostedTerminalApp((url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions, event_cursor: "0" })
     if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "DELETE") {
       const sessionID = url.pathname.split("/").at(-1) ?? ""
       deleteRequests.push(sessionID)
@@ -229,16 +236,18 @@ test("bulk session actions rebind every selected session to one compatible worke
   installLaunchMock()
   const localWorker = { ...defaultWorker, id: "local-cli", name: "local-cli", port: 11200 }
   const patches: Array<{ session_id: string; worker_id: string }> = []
-  let sessions: HostedSessionSummary[] = [staleHostedSessionA, staleHostedSessionB]
+  let sessions: HostedSessionSnapshot[] = [staleHostedSessionA, staleHostedSessionB]
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker, localWorker] })
-    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions, event_cursor: "0" })
     if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "PATCH") {
       const sessionID = url.pathname.split("/").at(-1) ?? ""
       const body = (await request.json()) as { worker_id: string }
       patches.push({ session_id: sessionID, worker_id: body.worker_id })
       sessions = sessions.map((session) =>
-        session.session_id === sessionID ? { ...session, worker_id: body.worker_id, worker_name: localWorker.name, worker_port: localWorker.port } : session,
+        session.session_id === sessionID
+          ? { ...session, worker: { id: body.worker_id, name: localWorker.name, port: localWorker.port, missing: false } }
+          : session,
       )
       return json(sessions.find((session) => session.session_id === sessionID))
     }
@@ -260,7 +269,7 @@ test("bulk session actions rebind every selected session to one compatible worke
     app.api().keymap.dispatchCommand("dialog.select.submit")
     await wait(() => patches.length === 2)
 
-    expect({ patches, sessionWorkerIDs: sessions.map((session) => session.worker_id) }).toEqual({
+    expect({ patches, sessionWorkerIDs: sessions.map((session) => session.worker.id) }).toEqual({
       patches: [
         { session_id: "hs_2", worker_id: "local-cli" },
         { session_id: "hs_3", worker_id: "local-cli" },
@@ -274,11 +283,14 @@ test("bulk session actions rebind every selected session to one compatible worke
 
 test("bulk session actions reject changing a running session worker", async () => {
   installLaunchMock()
-  const runningSession = { ...activeHostedSession, turn_state: "running" as const }
+  const runningSession = {
+    ...activeHostedSession,
+    turn: { state: "running" as const, reason: "", unread: false, needs_input: false },
+  }
   const patches: Array<{ session_id: string; worker_id: string }> = []
   const app = await mountHostedTerminalApp(async (url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions: [runningSession] })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions: [runningSession], event_cursor: "0" })
     if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "PATCH") {
       const body = (await request.json()) as { worker_id: string }
       patches.push({ session_id: "hs_1", worker_id: body.worker_id })

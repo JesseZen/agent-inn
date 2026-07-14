@@ -17,6 +17,15 @@ const hostedTurnWatcherSidecarIdleTimeout = 5 * time.Minute
 
 var hostedTurnWatcherSidecarPollInterval = 500 * time.Millisecond
 
+type hostedTurnWatcherSidecarManager interface {
+	Close()
+	StartHostedTurnWatcherWithPollGuard(interval time.Duration, beforePoll func() bool) func()
+}
+
+var hostedTurnWatcherSidecarManagerFactory = func(cfg config.Config, configPath string) hostedTurnWatcherSidecarManager {
+	return manager.New(manager.Config{Config: cfg, ConfigPath: configPath})
+}
+
 func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags := flag.NewFlagSet("hosted-session watch-all", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -25,6 +34,14 @@ func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer)
 		return 2
 	}
 
+	rootRunning, err := rootInstanceRunning(*configDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to inspect root instance: %v\n", err)
+		return 1
+	}
+	if rootRunning {
+		return 0
+	}
 	lockPath, err := hostedTurnWatcherSidecarLockPath(*configDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to start hosted turn watcher: %v\n", err)
@@ -39,6 +56,14 @@ func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer)
 		return 1
 	}
 	defer release()
+	rootRunning, err = rootInstanceRunning(*configDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "failed to inspect root instance: %v\n", err)
+		return 1
+	}
+	if rootRunning {
+		return 0
+	}
 
 	configPath := filepath.Join(*configDir, config.ConfigFileName)
 	cfg, err := config.LoadFile(configPath)
@@ -46,9 +71,17 @@ func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintf(stderr, "failed to load config: %v\n", err)
 		return 1
 	}
-	mgr := manager.New(manager.Config{Config: cfg, ConfigPath: configPath})
+	mgr := hostedTurnWatcherSidecarManagerFactory(cfg, configPath)
 	defer mgr.Close()
-	stopWatcher := mgr.StartHostedTurnWatcher(hostedTurnWatcherSidecarPollInterval)
+	pollGuardErrors := make(chan error, 1)
+	stopWatcher := mgr.StartHostedTurnWatcherWithPollGuard(hostedTurnWatcherSidecarPollInterval, func() bool {
+		rootRunning, err := rootInstanceRunning(*configDir)
+		if err != nil {
+			pollGuardErrors <- err
+			return false
+		}
+		return !rootRunning
+	})
 	defer stopWatcher()
 
 	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
@@ -57,6 +90,14 @@ func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer)
 	ticker := time.NewTicker(hostedTurnWatcherSidecarPollInterval)
 	defer ticker.Stop()
 	for {
+		rootRunning, err := rootInstanceRunning(*configDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to inspect root instance: %v\n", err)
+			return 1
+		}
+		if rootRunning {
+			return 0
+		}
 		watches, err := registry.WatchedTurns()
 		if err != nil {
 			fmt.Fprintf(stderr, "failed to inspect hosted turns: %v\n", err)
@@ -77,8 +118,29 @@ func runHostedSessionWatchAll(args []string, stdout io.Writer, stderr io.Writer)
 			fmt.Fprintf(stderr, "failed to inspect tmux host session: %v\n", err)
 			return 1
 		}
-		<-ticker.C
+		select {
+		case err := <-pollGuardErrors:
+			fmt.Fprintf(stderr, "failed to inspect root instance: %v\n", err)
+			return 1
+		case <-ticker.C:
+		}
 	}
+}
+
+func rootInstanceRunning(configDir string) (bool, error) {
+	path, err := rootLockPath(configDir)
+	if err != nil {
+		return false, err
+	}
+	release, err := rootLockerFactory(path).Acquire()
+	if errors.Is(err, errAlreadyLocked) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	release()
+	return false, nil
 }
 
 func hostedTurnWatcherSidecarLockPath(configDir string) (string, error) {

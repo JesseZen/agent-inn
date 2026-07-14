@@ -194,7 +194,7 @@ func TestRunHostedSessionMarkUpdatesRegistryAndTmux(t *testing.T) {
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
-	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForSettings(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
+	wantCalls := [][]string{hostedCmdTestStatusForState(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
 	}
@@ -257,7 +257,7 @@ func TestRunHostedSessionMarkTerminalStateAcknowledgesCurrentWindow(t *testing.T
 	}
 	wantCalls := [][]string{
 		manager.TmuxActiveWindowDetailsCommandForSettings(cfg.Settings),
-		manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession),
+		hostedCmdTestStatus(cfg.Settings, wantSession),
 	}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
@@ -374,7 +374,7 @@ func TestRunHostedSessionMarkRecordsCodexTurnWatch(t *testing.T) {
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
-	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForSettings(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
+	wantCalls := [][]string{hostedCmdTestStatusForState(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
 	}
@@ -433,7 +433,7 @@ func TestRunHostedSessionMarkRecordsLauncherWatchWithoutCodexTurnMetadata(t *tes
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
-	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForSettings(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
+	wantCalls := [][]string{hostedCmdTestStatusForState(cfg.Settings, "@12", manager.HostedTurnStateRunning)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
 	}
@@ -592,7 +592,7 @@ func TestRunHostedSessionAcknowledgeUpdatesRegistryAndTmux(t *testing.T) {
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
-	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
+	wantCalls := [][]string{hostedCmdTestStatus(cfg.Settings, wantSession)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
 	}
@@ -647,7 +647,7 @@ func TestRunHostedSessionToggleTodoUpdatesRegistryAndTmux(t *testing.T) {
 	if !ok || !reflect.DeepEqual(updated, wantSession) {
 		t.Fatalf("got %#v ok=%v, want %#v", updated, ok, wantSession)
 	}
-	wantCalls := [][]string{manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)}
+	wantCalls := [][]string{hostedCmdTestStatus(cfg.Settings, wantSession)}
 	if !reflect.DeepEqual(got, wantCalls) {
 		t.Fatalf("got tmux calls %#v, want %#v", got, wantCalls)
 	}
@@ -666,6 +666,104 @@ func TestRunHostedSessionWatchAllExitsWhenSidecarAlreadyRunning(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("got stderr %q, want empty", stderr.String())
+	}
+}
+
+func TestRunHostedSessionWatchAllDoesNotStartWhenRootOwnsConfig(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	rootPath, err := rootLockPath(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousLockerFactory := rootLockerFactory
+	rootLockerFactory = func(path string) rootLocker {
+		if path == rootPath {
+			return lockedLocker{}
+		}
+		return noopLocker{}
+	}
+	defer func() { rootLockerFactory = previousLockerFactory }()
+	managerCreated := false
+	previousManagerFactory := hostedTurnWatcherSidecarManagerFactory
+	hostedTurnWatcherSidecarManagerFactory = func(config.Config, string) hostedTurnWatcherSidecarManager {
+		managerCreated = true
+		return &fakeRootManager{}
+	}
+	defer func() { hostedTurnWatcherSidecarManagerFactory = previousManagerFactory }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "watch-all", "--config-dir", configDir}, io.Discard, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q, want quiet yield", code, stderr.String())
+	}
+	if managerCreated {
+		t.Fatal("sidecar manager started while root owned the config")
+	}
+}
+
+func TestRunHostedSessionWatchAllYieldsWhenRootAppearsBeforePoll(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "config")
+	writeRootConfig(t, configDir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeNewWindow)
+	rootPath, err := rootLockPath(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcherPath, err := hostedTurnWatcherSidecarLockPath(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootChecks := 0
+	sequence := []string{}
+	previousLockerFactory := rootLockerFactory
+	rootLockerFactory = func(path string) rootLocker {
+		switch path {
+		case rootPath:
+			rootChecks++
+			if rootChecks == 3 {
+				return lockedLocker{}
+			}
+			return noopLocker{}
+		case watcherPath:
+			return sequenceLocker{sequence: &sequence, acquire: "watcher lock acquire", release: "watcher lock release"}
+		default:
+			t.Fatalf("unexpected lock path %q", path)
+			return nil
+		}
+	}
+	defer func() { rootLockerFactory = previousLockerFactory }()
+	fakeManager := &fakeRootManager{stopWatcher: func() { sequence = append(sequence, "watcher stop") }}
+	previousManagerFactory := hostedTurnWatcherSidecarManagerFactory
+	hostedTurnWatcherSidecarManagerFactory = func(config.Config, string) hostedTurnWatcherSidecarManager { return fakeManager }
+	defer func() { hostedTurnWatcherSidecarManagerFactory = previousManagerFactory }()
+
+	var stderr bytes.Buffer
+	code := Run([]string{"hosted-session", "watch-all", "--config-dir", configDir}, io.Discard, &stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q, want quiet yield", code, stderr.String())
+	}
+	want := []string{"watcher lock acquire", "watcher stop", "watcher lock release"}
+	if rootChecks != 3 || !reflect.DeepEqual(sequence, want) {
+		t.Fatalf("rootChecks=%d sequence=%#v, want 3 and %#v", rootChecks, sequence, want)
+	}
+}
+
+func TestHostedTurnWatcherSidecarLockPathUsesCanonicalConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "config-link")
+	if err := os.Symlink(configDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	canonicalPath, err := hostedTurnWatcherSidecarLockPath(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasPath, err := hostedTurnWatcherSidecarLockPath(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonicalPath != aliasPath {
+		t.Fatalf("canonical path %q differs from alias %q", canonicalPath, aliasPath)
 	}
 }
 
@@ -746,7 +844,7 @@ func TestHostedSessionLatestTurnStatusCommandUsesLatestTodoAfterConcurrentToggle
 	if err != nil || !ok {
 		t.Fatalf("latest command got ok=%v err=%v", ok, err)
 	}
-	want := manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)
+	want := hostedCmdTestStatus(cfg.Settings, wantSession)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got tmux command %#v, want %#v", got, want)
 	}
@@ -795,7 +893,7 @@ func TestHostedSessionLatestTurnStatusCommandUsesLatestReadAfterConcurrentAcknow
 	if err != nil || !ok {
 		t.Fatalf("latest command got ok=%v err=%v", ok, err)
 	}
-	want := manager.TmuxHostedTurnStatusCommandForRecord(cfg.Settings, wantSession)
+	want := hostedCmdTestStatus(cfg.Settings, wantSession)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got tmux command %#v, want %#v", got, want)
 	}
@@ -3494,6 +3592,8 @@ type fakeRootManager struct {
 	startUpstreamProberCalled    bool
 	startHostedTurnWatcherCalled bool
 	closeCalled                  bool
+	stopWatcher                  func()
+	watcherStopped               chan struct{}
 }
 
 func (m *fakeRootManager) ServeHTTP(http.ResponseWriter, *http.Request) {}
@@ -3519,7 +3619,25 @@ func (m *fakeRootManager) StartUpstreamProber(_ time.Duration) func() {
 
 func (m *fakeRootManager) StartHostedTurnWatcher(_ time.Duration) func() {
 	m.startHostedTurnWatcherCalled = true
+	if m.stopWatcher != nil {
+		return m.stopWatcher
+	}
 	return func() {}
+}
+
+func (m *fakeRootManager) StartHostedTurnWatcherWithPollGuard(_ time.Duration, _ func() bool) func() {
+	return m.StartHostedTurnWatcher(0)
+}
+
+type sequenceLocker struct {
+	sequence *[]string
+	acquire  string
+	release  string
+}
+
+func (l sequenceLocker) Acquire() (func(), error) {
+	*l.sequence = append(*l.sequence, l.acquire)
+	return func() { *l.sequence = append(*l.sequence, l.release) }, nil
 }
 
 type fakeRootServer struct {

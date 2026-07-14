@@ -1,17 +1,15 @@
 import { expect, mock, test } from "bun:test"
 import { activeHostedSession, defaultWorker, json, mountHostedTerminalApp, wait } from "./proxy-hosted-terminal.fixture"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 
 const readDoneHostedSession = {
   ...activeHostedSession,
-  turn_state: "done",
-  turn_generation: 3,
-  turn_acknowledged_generation: 3,
-} satisfies HostedSessionSummary
+  turn: { state: "done" as const, reason: "", unread: false, needs_input: false },
+} satisfies HostedSessionSnapshot
 
 test("hosted terminal picker marks a read completed session unread", async () => {
   const markUnreadRequests: string[] = []
-  let currentHostedSessions: HostedSessionSummary[] = [{ ...readDoneHostedSession }]
+  let currentHostedSessions: HostedSessionSnapshot[] = [{ ...readDoneHostedSession }]
   const app = await mountHostedTerminalApp((url, request) => {
     if (url.pathname === "/api/workers")
       return json({
@@ -20,11 +18,12 @@ test("hosted terminal picker marks a read completed session unread", async () =>
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
         sessions: currentHostedSessions,
+        event_cursor: "0",
       })
     if (url.pathname === "/api/hosted-sessions/hs_1/mark-unread" && request.method === "POST") {
       markUnreadRequests.push("hs_1")
       currentHostedSessions = currentHostedSessions.map((session) =>
-        session.session_id === "hs_1" ? { ...session, turn_acknowledged_generation: 0 } : session,
+        session.session_id === "hs_1" ? { ...session, turn: { ...session.turn, unread: true } } : session,
       )
       return json(currentHostedSessions[0])
     }
@@ -50,7 +49,10 @@ test("hosted terminal picker marks a read completed session unread", async () =>
       return markUnreadRequests.length === 1
     })
 
-    expect(markUnreadRequests).toEqual(["hs_1"])
+    expect({
+      requests: markUnreadRequests,
+      unreadMarker: app.setup.captureCharFrame().includes("+"),
+    }).toEqual({ requests: ["hs_1"], unreadMarker: true })
 
     await app.cleanup()
   } finally {

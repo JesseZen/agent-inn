@@ -3,6 +3,7 @@ import { testRender } from "@opentui/solid"
 import { createComponent, onMount } from "solid-js"
 import { SDKProvider, useSDK } from "../src/context/sdk"
 import type { PoolProbeConfig, UpstreamPool, WorkerDetail } from "../src/proxy/backend"
+import type { HostedSessionListResponse, HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
 const pool: UpstreamPool = {
@@ -131,4 +132,57 @@ test("pool client sends exact patch, switch, and probe requests", async () => {
       content_type: null,
     },
   ])
+})
+
+test("hosted snapshot client preserves the list cursor and whole snapshot", async () => {
+  const snapshot: HostedSessionSnapshot = {
+    session_id: "hs_1",
+    session_label: "solve problem A",
+    worker: { id: "cli", name: "CLI", port: 11199, missing: false },
+    workspace: "/tmp/work",
+    model: "gpt-5.5",
+    add_dirs: [],
+    status: "active",
+    user_marker: "todo",
+    turn: { state: "running", reason: "", unread: false, needs_input: true },
+    created_at: "2026-07-13T01:02:03Z",
+    last_opened_at: "2026-07-13T01:02:03Z",
+  }
+  const response: HostedSessionListResponse = { sessions: [snapshot], event_cursor: "9007199254740993" }
+  const events = createEventSource()
+  const fetch = createFetch(async (url) => {
+    if (url.pathname === "/api/hosted-sessions") return json(response)
+    return undefined
+  })
+  let result: HostedSessionListResponse | undefined
+  let done: Promise<void> | undefined
+
+  function Probe() {
+    const client = useSDK().client
+    onMount(() => {
+      done = client.getHostedSessionList().then((value) => {
+        result = value
+      })
+    })
+    return null
+  }
+
+  const app = await testRender(() =>
+    createComponent(SDKProvider, {
+      url: "http://test",
+      directory,
+      events: events.source,
+      fetch: fetch.fetch,
+      get children() {
+        return createComponent(Probe, {})
+      },
+    }),
+  )
+  try {
+    await done
+  } finally {
+    app.renderer.destroy()
+  }
+
+  expect(result).toEqual(response)
 })

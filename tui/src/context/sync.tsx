@@ -33,6 +33,8 @@ import { batch, onCleanup, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { createSyncEventHandler, search, type SyncStore } from "./sync-events"
+import type { ManagerEvent } from "../proxy/hosted-session-contract"
+import { createHostedSessionSync } from "../proxy/hosted-session-sync"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -94,7 +96,8 @@ export const {
       upstreamPools: [],
       upstreamProbes: {},
       metrics_generation: 0,
-      hosted_session_turn_states: {},
+      hosted_sessions: {},
+      hosted_session_cursor: "0",
       manager_config: {},
       config_status: undefined,
       error: undefined,
@@ -293,83 +296,82 @@ export const {
         })
     }
 
-    onMount(() => {
-      if (args.hostedTerminalPopup) {
-        void bootstrap({ fatal: false }).catch(() => undefined)
+    function handleManagerEvent(event: ManagerEvent) {
+      if (event.type === "upstream.probed") {
+        const probe = event.payload as UpstreamProbeResult & PoolReadiness & Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool?: string }
+        if (!probe.pool) {
+          setStore("upstreamProbes", probe.upstream, reconcile(probe))
+          return
+        }
+        setStore("upstreams", reconcile(mergePoolReadiness(store.upstreams, probe as PoolReadiness)))
+        setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
+          if (pool.id !== probe.pool) return pool
+          const readiness = [...pool.readiness]
+          const index = readiness.findIndex((item) => item.upstream === probe.upstream)
+          if (index < 0) readiness.push(probe)
+          else readiness[index] = probe
+          return { ...pool, readiness, probe_state: probe.probe_state, next_probe_at: probe.next_probe_at }
+        })))
         return
-      } else {
-        void bootstrap()
       }
-      let unsubscribe = () => {}
-      onCleanup(() => unsubscribe())
-      void sdk.client
-        .subscribeManagerEvents((event) => {
-          if (event.type === "hosted.session.turn-state.changed") {
-            const payload = event.payload as { session_id: string; turn_state: string }
-            setStore("hosted_session_turn_states", payload.session_id, payload.turn_state)
-            return
+      if (event.type === "upstream.pool.state.changed") {
+        const state = event.payload as Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool: string }
+        setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
+          if (pool.id !== state.pool) return pool
+          return { ...pool, probe_state: state.probe_state, next_probe_at: state.next_probe_at }
+        })))
+        return
+      }
+      if (event.type === "upstream.circuit.changed") {
+        void sdk.client.getUpstreams().then((upstreams) => setStore("upstreams", reconcile(upstreams)))
+        return
+      }
+      if (event.type === "metrics.updated") {
+        setStore("metrics_generation", (generation) => generation + 1)
+        return
+      }
+      const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
+      if (event.type === "worker.health.changed") {
+        const workerName = event.payload.worker
+        const workerStatus = event.payload.status
+        workerHealthError = typeof workerName === "string" && typeof workerStatus === "string" && managerError
+          ? { worker: workerName, status: workerStatus, error: managerError }
+          : undefined
+      }
+      void refreshManagerData()
+        .then((manager) => {
+          const current = workerHealthError
+          if (!current) return
+          if (manager.workers.some((worker) => worker.name === current.worker && worker.status === current.status)) {
+            setStore("error", current.error)
+          } else {
+            workerHealthError = undefined
           }
-          if (event.type === "upstream.probed") {
-            const probe = event.payload as UpstreamProbeResult & PoolReadiness & Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool?: string }
-            if (!probe.pool) {
-              setStore("upstreamProbes", probe.upstream, reconcile(probe))
-              return
-            }
-            setStore("upstreams", reconcile(mergePoolReadiness(store.upstreams, probe as PoolReadiness)))
-            setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
-              if (pool.id !== probe.pool) return pool
-              const readiness = [...pool.readiness]
-              const index = readiness.findIndex((item) => item.upstream === probe.upstream)
-              if (index < 0) readiness.push(probe)
-              else readiness[index] = probe
-              return { ...pool, readiness, probe_state: probe.probe_state, next_probe_at: probe.next_probe_at }
-            })))
-			return
-		  }
-		  if (event.type === "upstream.pool.state.changed") {
-			const state = event.payload as Pick<UpstreamPool, "probe_state" | "next_probe_at"> & { pool: string }
-			setStore("upstreamPools", reconcile(store.upstreamPools.map((pool) => {
-			  if (pool.id !== state.pool) return pool
-			  return { ...pool, probe_state: state.probe_state, next_probe_at: state.next_probe_at }
-			})))
-			return
-		  }
-		  if (event.type === "upstream.circuit.changed") {
-            void sdk.client.getUpstreams().then((upstreams) => setStore("upstreams", reconcile(upstreams)))
-            return
-          }
-          if (event.type === "metrics.updated") {
-            setStore("metrics_generation", (generation) => generation + 1)
-            return
-          }
-          const managerError = typeof event.payload.error === "string" ? event.payload.error : undefined
-          if (event.type === "worker.health.changed") {
-            const workerName = event.payload.worker
-            const workerStatus = event.payload.status
-            workerHealthError = typeof workerName === "string" && typeof workerStatus === "string" && managerError
-              ? { worker: workerName, status: workerStatus, error: managerError }
-              : undefined
-          }
-          void refreshManagerData()
-            .then((manager) => {
-              const current = workerHealthError
-              if (!current) return
-              if (manager.workers.some((worker) => worker.name === current.worker && worker.status === current.status)) {
-                setStore("error", current.error)
-              } else {
-                workerHealthError = undefined
-              }
-            })
-            .catch((error) => {
-              setStore("error", error instanceof Error ? error.message : String(error))
-            })
         })
-        .then((off) => {
-          unsubscribe = off
+        .catch((error) => {
+          setStore("error", error instanceof Error ? error.message : String(error))
         })
-        .catch(() => {})
-    })
+    }
 
+    const hostedSync = createHostedSessionSync({
+      list: () => sdk.client.getHostedSessionList(),
+      subscribe: (handler, options) => sdk.client.subscribeManagerEvents(handler, options),
+      commit: (sessions, cursor) => batch(() => {
+        setStore("hosted_sessions", reconcile(sessions))
+        setStore("hosted_session_cursor", cursor)
+      }),
+      onManagerEvent: handleManagerEvent,
+      onError: (error) => setStore("error", error instanceof Error ? error.message : String(error)),
+      initialCursor: store.hosted_session_cursor,
+    })
+    onMount(() => {
+      if (args.hostedTerminalPopup) void bootstrap({ fatal: false }).catch(() => undefined)
+      else void bootstrap()
+      onCleanup(() => hostedSync.stop())
+      void hostedSync.start().catch((error) => {
+        setStore("error", error instanceof Error ? error.message : String(error))
+      })
+    })
     const result = {
       data: store,
       set: setStore,
@@ -390,6 +392,7 @@ export const {
         return "loading" as const
       },
       bootstrap,
+      hosted: { refresh: () => hostedSync.refresh() },
       session: {
         get(sessionID: string) {
           const match = search(store.session, sessionID, (s) => s.id)

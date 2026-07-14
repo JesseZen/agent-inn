@@ -173,6 +173,7 @@ export const proxyKo = {
   "proxy.module.categoryFields": "필드",
   "proxy.module.categoryTools": "도구",
   "proxy.hosted.title": "호스팅 터미널",
+  "proxy.hosted.waitingForInput": "입력 대기 중",
   "proxy.hosted.createTitle": "호스팅 세션 생성",
   "proxy.hosted.createFailed": "호스팅 세션 생성 실패",
   "proxy.hosted.openFailed": "호스팅 세션 열기 실패",

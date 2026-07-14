@@ -1,8 +1,9 @@
 import { launchProxySession, setupHostedTerminalSession } from "./launch"
-import type { HostedSessionRecord, HostedSessionSummary, ProxySettingsResponse, WorkerSummary } from "./backend"
+import type { HostedSessionSnapshot, PatchHostedSessionRequest } from "./hosted-session-contract"
+import type { ProxySettingsResponse, WorkerSummary } from "./backend"
 
 type HostedSessionClient = {
-  patchHostedSession(sessionID: string, patch: { worker_id: string }): Promise<HostedSessionRecord>
+  patchHostedSession(sessionID: string, patch: PatchHostedSessionRequest): Promise<HostedSessionSnapshot>
   getSettings(): Promise<ProxySettingsResponse>
 }
 
@@ -10,14 +11,14 @@ type HostedSessionLaunchMode = "open" | "setup-only"
 
 export async function rebindHostedSession(input: {
   client: HostedSessionClient
-  session: HostedSessionSummary
+  session: HostedSessionSnapshot
   worker: WorkerSummary
   configDir: string
   executable?: string
   launchMode: HostedSessionLaunchMode
 }) {
   const updated = await input.client.patchHostedSession(input.session.session_id, { worker_id: input.worker.id })
-  if (input.session.status !== "active" || input.session.turn_state === "running") return { launched: false }
+  if (input.session.status !== "active" || input.session.turn.state === "running") return { launched: false, session: updated }
 
   const settings = await input.client.getSettings()
   const launch = input.launchMode === "setup-only" ? setupHostedTerminalSession : launchProxySession
@@ -32,5 +33,5 @@ export async function rebindHostedSession(input: {
     tmuxSocketName: settings.settings.terminal.tmux.socket_name,
     tmuxHostSession: settings.settings.terminal.tmux.host_session,
   })
-  return { launched }
+  return { launched, session: updated }
 }

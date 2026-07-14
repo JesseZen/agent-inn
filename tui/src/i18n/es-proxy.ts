@@ -173,6 +173,7 @@ export const proxyEs = {
   "proxy.module.categoryFields": "Campos",
   "proxy.module.categoryTools": "Herramientas",
   "proxy.hosted.title": "Terminal alojada",
+  "proxy.hosted.waitingForInput": "Esperando entrada",
   "proxy.hosted.createTitle": "Crear sesión alojada",
   "proxy.hosted.createFailed": "Error al crear sesión alojada",
   "proxy.hosted.openFailed": "Error al abrir la sesión alojada",

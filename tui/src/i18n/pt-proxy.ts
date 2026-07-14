@@ -173,6 +173,7 @@ export const proxyPt = {
   "proxy.module.categoryFields": "Campos",
   "proxy.module.categoryTools": "Ferramentas",
   "proxy.hosted.title": "Terminal hospedado",
+  "proxy.hosted.waitingForInput": "Aguardando entrada",
   "proxy.hosted.createTitle": "Criar sessão hospedada",
   "proxy.hosted.createFailed": "Falha ao criar sessão hospedada",
   "proxy.hosted.openFailed": "Falha na sessão hospedada aberta",

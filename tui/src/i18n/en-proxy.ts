@@ -176,6 +176,7 @@ export const proxyEn = {
   "proxy.module.categoryTools": "Tools",
 
   "proxy.hosted.title": "Hosted Terminal",
+  "proxy.hosted.waitingForInput": "Waiting for input",
   "proxy.hosted.createTitle": "Create Hosted Session",
   "proxy.hosted.createFailed": "Create hosted session failed",
   "proxy.hosted.openFailed": "Open hosted session failed",

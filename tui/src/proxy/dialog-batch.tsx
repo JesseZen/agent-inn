@@ -1,4 +1,5 @@
 import { createMemo, createSignal, onMount } from "solid-js"
+import { TextAttributes } from "@opentui/core"
 import { Global } from "@agent-inn/core/global"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
@@ -9,9 +10,11 @@ import { useProject } from "../context/project"
 import { useSDK } from "../context/sdk"
 import { useSync } from "../context/sync"
 import { useToast } from "../ui/toast"
-import type { BatchRun, BatchVariant, HostedSessionSummary, WorkerSummary } from "./backend"
+import type { BatchRun, BatchVariant, WorkerSummary } from "./backend"
 import { launchProxySession, type HostedTerminalAttachMode } from "./launch"
 import { useLanguage } from "../context/language"
+import { useTheme } from "../context/theme"
+import { hostedSessionMarker, hostedSessionMarkerColor } from "./hosted-session-presentation"
 
 const minBatchVariantCount = 1
 const maxBatchVariantCount = 8
@@ -164,20 +167,28 @@ export function DialogBatchRun(props: { batch: BatchRun; launchSession?: BatchSe
   const dialog = useDialog()
   const sync = useSync()
   const { t } = useLanguage()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>([])
-  const sessionStates = createMemo(() => new Map(sessions().map((session) => [session.session_id, session.turn_state ?? "idle"])))
-
-  onMount(async () => {
-    setSessions(await sdk.client.listHostedSessions())
-  })
-
+  const { theme } = useTheme()
   const options = createMemo<DialogSelectOption<BatchVariant>[]>(() =>
     props.batch.variants.map((variant) => {
-      const state = sync.data.hosted_session_turn_states[variant.hosted_session_id] ?? sessionStates().get(variant.hosted_session_id) ?? "interrupted"
+      const session = sync.data.hosted_sessions[variant.hosted_session_id]
+      const state = session?.turn.state ?? "interrupted"
+      const marker = session ? hostedSessionMarker(session) : undefined
       return {
         title: variant.session_label,
         value: variant,
-        description: state === "idle" ? t("common.ready") : state,
+        description: session?.turn.needs_input ? t("proxy.hosted.waitingForInput") : state === "idle" ? t("common.ready") : state,
+        ...(marker
+          ? {
+              gutter: () => (
+                <text
+                  fg={hostedSessionMarkerColor(theme, marker)}
+                  attributes={marker.bold ? TextAttributes.BOLD : undefined}
+                >
+                  {marker.symbol}
+                </text>
+              ),
+            }
+          : {}),
       }
     }),
   )

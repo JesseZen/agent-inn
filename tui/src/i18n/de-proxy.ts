@@ -173,6 +173,7 @@ export const proxyDe = {
   "proxy.module.categoryFields": "Felder",
   "proxy.module.categoryTools": "Werkzeuge",
   "proxy.hosted.title": "Gehostetes Terminal",
+  "proxy.hosted.waitingForInput": "Wartet auf Eingabe",
   "proxy.hosted.createTitle": "Erstellen Sie eine gehostete Sitzung",
   "proxy.hosted.createFailed": "Beim Erstellen der gehosteten Sitzung ist ein Fehler aufgetreten",
   "proxy.hosted.openFailed": "Das Öffnen der gehosteten Sitzung ist fehlgeschlagen",

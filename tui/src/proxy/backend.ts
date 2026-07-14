@@ -226,36 +226,6 @@ export type ProxySettingsResponse = {
   status: ProxyConfigStatus
 }
 
-export type HostedTurnState = "idle" | "running" | "done" | "failed" | "interrupted"
-
-export type HostedSessionRecord = {
-  session_id: string
-  session_label: string
-  worker_id?: string
-  worker_name: string
-  worker_port: number
-  worker?: {
-    id: string
-    name: string
-    missing?: boolean
-  }
-  workspace?: string
-  model?: string
-  add_dirs?: string[]
-  tmux_window_id?: string
-  launcher_session_id?: string
-  turn_state?: HostedTurnState
-  turn_state_reason?: string
-  turn_generation?: number
-  turn_acknowledged_generation?: number
-  created_at: string
-  last_opened_at: string
-}
-
-export type HostedSessionSummary = HostedSessionRecord & {
-  status: "active" | "stale"
-}
-
 export type BatchVariant = {
   id: string
   index: number

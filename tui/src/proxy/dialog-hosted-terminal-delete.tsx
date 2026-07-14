@@ -1,10 +1,10 @@
-import { createMemo, createSignal, onMount } from "solid-js"
+import { createMemo, createSignal } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useSDK } from "../context/sdk"
 import { useDialog, type DialogContext } from "../ui/dialog"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogAlert } from "../ui/dialog-alert"
-import type { HostedSessionSummary } from "./backend"
+import type { HostedSessionSnapshot } from "./hosted-session-contract"
 import { useLanguage } from "../context/language"
 import type { Translate } from "../i18n/en"
 
@@ -15,16 +15,16 @@ type HostedTerminalDeleteOption =
     }
   | {
       type: "session"
-      session: HostedSessionSummary
+      session: HostedSessionSnapshot
     }
 
 export async function deleteHostedTerminalSession(input: {
   sdk: SDKContext
   dialog: DialogContext
-  session: HostedSessionSummary
-  refreshSessions: () => Promise<void>
+  session: HostedSessionSnapshot
+  refreshSessions?: () => Promise<void>
   t: Translate
-  onDeleted?: (session: HostedSessionSummary) => Promise<void> | void
+  onDeleted?: (session: HostedSessionSnapshot) => Promise<void> | void
 }) {
   const { sdk, dialog, session, refreshSessions, onDeleted } = input
   const confirmed = await DialogConfirm.show(
@@ -37,31 +37,20 @@ export async function deleteHostedTerminalSession(input: {
   if (!confirmed) return
   try {
     await sdk.client.deleteHostedSession(session.session_id)
-    if (onDeleted) {
-      await onDeleted(session)
-      return
-    }
-    await refreshSessions()
+    await onDeleted?.(session)
+    await refreshSessions?.()
   } catch (err) {
     await DialogAlert.show(dialog, input.t("proxy.hosted.deleteFailed"), String(err instanceof Error ? err.message : err))
   }
 }
 
 export function DialogHostedTerminalDelete(
-  props: { initialSessions?: HostedSessionSummary[]; onSessionsChanged?: (sessions: HostedSessionSummary[]) => void } = {},
+  props: { initialSessions?: HostedSessionSnapshot[]; onSessionsChanged?: (sessions: HostedSessionSnapshot[]) => void } = {},
 ) {
   const sdk = useSDK()
   const dialog = useDialog()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
+  const [sessions, setSessions] = createSignal<HostedSessionSnapshot[]>(props.initialSessions ?? [])
   const { t } = useLanguage()
-
-  async function refreshSessions() {
-    setSessions(await sdk.client.listHostedSessions())
-  }
-
-  onMount(() => {
-    void refreshSessions()
-  })
 
   const staleSessions = createMemo(() => sessions().filter((session) => session.status === "stale"))
   const options = createMemo<DialogSelectOption<HostedTerminalDeleteOption>[]>(() => [
@@ -78,7 +67,7 @@ export function DialogHostedTerminalDelete(
     ...sessions()
       .filter((session) => session.status === "active" || session.status === "stale")
       .map((session) => {
-        const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
+        const worker = session.worker.missing ? t("proxy.hosted.missingWorker", { id: session.worker.id }) : session.worker.name
         return {
           title: session.session_label,
           value: { type: "session" as const, session },
@@ -120,7 +109,6 @@ export function DialogHostedTerminalDelete(
           sdk,
           dialog,
           session: option.value.session,
-          refreshSessions,
           t,
           onDeleted: (session) => {
             const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)

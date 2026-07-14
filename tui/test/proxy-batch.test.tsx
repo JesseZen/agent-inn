@@ -7,6 +7,7 @@ import { SDKProvider, useSDK } from "../src/context/sdk"
 import { resolveSlashCommand } from "../src/keymap"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 import * as launchModule from "../src/proxy/launch"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 
 const launchCalls: unknown[] = []
 
@@ -374,29 +375,35 @@ test("batch detail shows hosted session states", async () => {
       },
     ],
   }
-  const app = await mountProxyApp({ batches: [batch] })
-  app.hostedSessions.push(
+  const hostedSessions: HostedSessionSnapshot[] = [
     {
       session_id: "session_1",
       session_label: "fix scroll batch_1 #1",
-      worker_name: "cli-openrouter",
-      worker_port: 11199,
+      worker: { id: "cli-openrouter", name: "cli-openrouter", port: 11199, missing: false },
+      workspace: `${directory}/.worktrees/fix-scroll-1`,
+      model: "",
+      add_dirs: [],
       status: "active",
-      turn_state: "idle",
+      user_marker: "",
+      turn: { state: "idle", reason: "", unread: false, needs_input: false },
       created_at: "2026-07-09T00:00:00Z",
       last_opened_at: "2026-07-09T00:00:00Z",
     },
     {
       session_id: "session_2",
       session_label: "fix scroll batch_1 #2",
-      worker_name: "cli-openrouter",
-      worker_port: 11199,
+      worker: { id: "cli-openrouter", name: "cli-openrouter", port: 11199, missing: false },
+      workspace: `${directory}/.worktrees/fix-scroll-2`,
+      model: "",
+      add_dirs: [],
       status: "active",
-      turn_state: "running",
+      user_marker: "todo",
+      turn: { state: "running", reason: "", unread: false, needs_input: false },
       created_at: "2026-07-09T00:00:00Z",
       last_opened_at: "2026-07-09T00:00:00Z",
     },
-  )
+  ]
+  const app = await mountProxyApp({ batches: [batch], hostedSessions })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -443,17 +450,20 @@ test("batch detail applies hosted session state events without polling", async (
       },
     ],
   }
-  const app = await mountProxyApp({ batches: [batch] })
-  app.hostedSessions.push({
+  const idle: HostedSessionSnapshot = {
     session_id: "session_1",
     session_label: "fix scroll batch_1 #1",
-    worker_name: "cli-openrouter",
-    worker_port: 11199,
+    worker: { id: "cli-openrouter", name: "cli-openrouter", port: 11199, missing: false },
+    workspace: `${directory}/.worktrees/fix-scroll-1`,
+    model: "",
+    add_dirs: [],
     status: "active",
-    turn_state: "idle",
+    user_marker: "todo",
+    turn: { state: "idle", reason: "", unread: false, needs_input: false },
     created_at: "2026-07-09T00:00:00Z",
     last_opened_at: "2026-07-09T00:00:00Z",
-  })
+  }
+  const app = await mountProxyApp({ batches: [batch], hostedSessions: [idle] })
 
   try {
     app.api.keymap.dispatchCommand("proxy.batch")
@@ -469,14 +479,18 @@ test("batch detail applies hosted session state events without polling", async (
       return app.frame().includes("ready")
     })
 
-    app.emitManagerEvent("hosted.session.turn-state.changed", {
-      session_id: "session_1",
-      turn_state: "running",
-    })
+    const waiting: HostedSessionSnapshot = {
+      ...idle,
+      turn: { state: "running", reason: "", unread: false, needs_input: true },
+    }
+    app.emitManagerEvent("hosted.session.snapshot.changed", { snapshot: waiting }, "2")
+    app.emitManagerEvent("hosted.session.snapshot.changed", {
+      snapshot: { ...idle, turn: { state: "running", reason: "", unread: false, needs_input: false } },
+    }, "1")
 
     await wait(async () => {
       await app.render()
-      return app.frame().includes("running")
+      return app.frame().includes("Waiting for input") && app.frame().includes("?")
     })
 
     await Bun.sleep(600)

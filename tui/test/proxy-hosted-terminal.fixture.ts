@@ -9,6 +9,7 @@ import { registerProxyCommands } from "../src/proxy/commands"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "./fixture/fixture"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 
 export async function wait(fn: () => boolean | Promise<boolean>, timeout = 2000) {
   const start = Date.now()
@@ -33,35 +34,44 @@ export const defaultWorker = {
 export const activeHostedSession = {
   session_id: "hs_1",
   session_label: "solve problem A",
-  worker_id: "test-cli",
-  worker_name: "test-cli",
-  worker_port: 1234,
+  worker: { id: "test-cli", name: "test-cli", port: 1234, missing: false },
+  workspace: "",
+  model: "",
+  add_dirs: [],
+  user_marker: "",
+  turn: { state: "idle" as const, reason: "", unread: false, needs_input: false },
   created_at: "2026-06-23T00:00:00Z",
   last_opened_at: "2026-06-23T00:00:00Z",
   status: "active",
-} as const
+} satisfies HostedSessionSnapshot
 
 export const staleHostedSessionA = {
   session_id: "hs_2",
   session_label: "stale problem A",
-  worker_id: "test-cli",
-  worker_name: "test-cli",
-  worker_port: 1234,
+  worker: { id: "test-cli", name: "test-cli", port: 1234, missing: false },
+  workspace: "",
+  model: "",
+  add_dirs: [],
+  user_marker: "",
+  turn: { state: "idle" as const, reason: "", unread: false, needs_input: false },
   created_at: "2026-06-23T00:00:00Z",
   last_opened_at: "2026-06-23T00:00:00Z",
   status: "stale",
-} as const
+} satisfies HostedSessionSnapshot
 
 export const staleHostedSessionB = {
   session_id: "hs_3",
   session_label: "stale problem B",
-  worker_id: "test-cli",
-  worker_name: "test-cli",
-  worker_port: 1234,
+  worker: { id: "test-cli", name: "test-cli", port: 1234, missing: false },
+  workspace: "",
+  model: "",
+  add_dirs: [],
+  user_marker: "",
+  turn: { state: "idle" as const, reason: "", unread: false, needs_input: false },
   created_at: "2026-06-23T00:00:00Z",
   last_opened_at: "2026-06-23T00:00:00Z",
   status: "stale",
-} as const
+} satisfies HostedSessionSnapshot
 
 export async function mountHostedTerminalApp(override?: FetchHandler) {
   return mountHostedTerminalAppWithArgs({}, override)

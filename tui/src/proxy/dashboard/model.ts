@@ -1,5 +1,6 @@
 import { displaySlice, promptOffsetWidth } from "../../prompt/display"
-import type { HostedSessionSummary, RedactedUpstream, UpstreamPool, WorkerSummary } from "../backend"
+import type { HostedSessionSnapshot } from "../hosted-session-contract"
+import type { RedactedUpstream, UpstreamPool, WorkerSummary } from "../backend"
 
 const DASHBOARD_TEXT_OVERHEAD = 6
 const DASHBOARD_META_GAP = 1
@@ -9,7 +10,7 @@ export type DashboardNode =
   | { id: string; kind: "pool"; label: string; data: UpstreamPool }
   | { id: string; kind: "upstream"; label: string; data: RedactedUpstream }
   | { id: string; kind: "worker"; label: string; data: WorkerSummary }
-  | { id: string; kind: "session"; label: string; data: HostedSessionSummary }
+  | { id: string; kind: "session"; label: string; data: HostedSessionSnapshot }
 
 export type DashboardWorkerBranch = {
   worker: Extract<DashboardNode, { kind: "worker" }>
@@ -63,14 +64,14 @@ export type DashboardModel = {
 export function buildDashboardModel(
   workers: WorkerSummary[],
   upstreams: RedactedUpstream[],
-  sessions: HostedSessionSummary[],
+  sessions: HostedSessionSnapshot[],
   pools: UpstreamPool[] = [],
 ): DashboardModel {
   const upstreamByID = new Map(upstreams.map((upstream) => [upstream.id, upstream]))
   const workerIDs = new Set(workers.map((item) => item.id))
-  const sessionsByWorkerID = new Map<string, HostedSessionSummary[]>()
+  const sessionsByWorkerID = new Map<string, HostedSessionSnapshot[]>()
   for (const item of sessions) {
-    const workerID = item.worker_id ?? item.worker_name
+    const workerID = item.worker.id
     const workerSessions = sessionsByWorkerID.get(workerID) ?? []
     workerSessions.push(item)
     sessionsByWorkerID.set(workerID, workerSessions)
@@ -206,7 +207,7 @@ export function buildDashboardModel(
       data: upstream,
     }))
   const unboundSessions = sessions
-    .filter((item) => !workerIDs.has(item.worker_id ?? item.worker_name))
+    .filter((item) => !workerIDs.has(item.worker.id))
     .sort((left, right) => left.session_label.localeCompare(right.session_label))
     .map((item) => ({
       id: `session:${item.session_id}`,

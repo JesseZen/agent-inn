@@ -17,13 +17,18 @@ func (m *Manager) handleEvents(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
 
-	afterID, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
-	lastID := afterID
-	for _, event := range m.events.Replay(afterID) {
+	afterID, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
+	replay, sub, expired, cursor := m.events.ReplayAndSubscribe(afterID)
+	defer sub.Close()
+	if expired {
+		if err := writeSSEEvent(rw, Event{ID: cursor, Type: EventManagerResyncRequired, Payload: map[string]any{"reason": "event_cursor_expired"}}); err != nil {
+			return
+		}
+	}
+	for _, event := range replay {
 		if err := writeSSEEvent(rw, event); err != nil {
 			return
 		}
-		lastID = event.ID
 	}
 
 	flusher, ok := rw.(http.Flusher)
@@ -31,9 +36,6 @@ func (m *Manager) handleEvents(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flusher.Flush()
-
-	sub := m.events.Subscribe(lastID)
-	defer sub.Close()
 
 	var closeNotify <-chan bool
 	if closeNotifier, ok := rw.(http.CloseNotifier); ok {

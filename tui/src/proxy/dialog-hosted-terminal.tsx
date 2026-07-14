@@ -1,4 +1,6 @@
-import { createMemo, createSignal, onMount } from "solid-js"
+import { createMemo } from "solid-js"
+import { reconcile } from "solid-js/store"
+import { TextAttributes } from "@opentui/core"
 import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from "../ui/dialog-select"
 import { useSDK } from "../context/sdk"
 import { useDialog } from "../ui/dialog"
@@ -11,10 +13,12 @@ import { useSync } from "../context/sync"
 import { useProject } from "../context/project"
 import { deleteHostedTerminalSession, DialogHostedTerminalDelete } from "./dialog-hosted-terminal-delete"
 import { DialogHostedTerminalBulkActions } from "./dialog-hosted-terminal-bulk-actions"
-import type { HostedSessionRecord, HostedSessionSummary } from "./backend"
+import type { HostedSessionSnapshot } from "./hosted-session-contract"
 import { Global } from "@agent-inn/core/global"
 import { useWorkerFrecency } from "./worker-frecency-context"
 import { useLanguage } from "../context/language"
+import { useTheme } from "../context/theme"
+import { hostedSessionMarker, hostedSessionMarkerColor } from "./hosted-session-presentation"
 
 type HostedTerminalSurface = "dialog" | "popup"
 
@@ -33,24 +37,21 @@ type HostedTerminalOption =
     }
   | {
       type: "session"
-      session: HostedSessionSummary
+      session: HostedSessionSnapshot
     }
 
-function sessionWorkerID(session: HostedSessionRecord) {
-  return session.worker_id ?? session.worker_name
-}
-
-export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSummary[]; mode?: HostedTerminalSurface; onClose?: () => void } = {}) {
+export function DialogHostedTerminal(props: { mode?: HostedTerminalSurface; onClose?: () => void } = {}) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
   const project = useProject()
   const workerFrecency = useWorkerFrecency()
   const { t } = useLanguage()
-  const [sessions, setSessions] = createSignal<HostedSessionSummary[]>(props.initialSessions ?? [])
+  const { theme } = useTheme()
   const mode = props.mode ?? "dialog"
   const executable = import.meta.env?.AINN_EXECUTABLE || undefined
   const workerSections = createMemo(() => workerFrecency.sections(sync.data.workers))
+  const sessions = createMemo(() => Object.values(sync.data.hosted_sessions))
 
   async function openHostedTerminal(opts: ProxyLaunchOptions) {
     if (mode === "popup") return setupHostedTerminalSession(opts)
@@ -58,12 +59,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
   }
 
   async function refreshSessions() {
-    setSessions(await sdk.client.listHostedSessions())
+    await sync.hosted.refresh()
   }
-
-  onMount(() => {
-    void refreshSessions()
-  })
 
   const options = createMemo<DialogSelectOption<HostedTerminalOption>[]>(() => [
     ...(mode === "popup"
@@ -89,12 +86,21 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       category: t("proxy.hosted.categoryAction"),
     },
     ...sessions().map((session) => {
-      const worker = session.worker?.missing ? t("proxy.hosted.missingWorker", { id: session.worker_id ?? session.worker_name }) : session.worker?.name ?? session.worker_name
+      const worker = session.worker.missing ? t("proxy.hosted.missingWorker", { id: session.worker.id }) : session.worker.name
+      const marker = hostedSessionMarker(session)
       return {
         title: session.session_label,
         value: { type: "session" as const, session },
-        description: `${worker} • ${session.status}`,
+        description: `${worker} • ${session.status}${session.turn.needs_input ? ` • ${t("proxy.hosted.waitingForInput")}` : ""}`,
         category: t("proxy.hosted.existing"),
+        gutter: () => (
+          <text
+            fg={hostedSessionMarkerColor(theme, marker)}
+            attributes={marker.bold ? TextAttributes.BOLD : undefined}
+          >
+            {marker.symbol}
+          </text>
+        ),
       }
     }),
     {
@@ -170,8 +176,8 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ))
   }
 
-  function changeSessionWorker(session: HostedSessionSummary) {
-    const currentWorkerID = sessionWorkerID(session)
+  function changeSessionWorker(session: HostedSessionSnapshot) {
+    const currentWorkerID = session.worker.id
     const currentWorker = sync.data.workers.find((worker) => worker.id === currentWorkerID)
     const currentLauncher = currentWorker?.launcher ?? "codex"
     const workers = sync.data.workers.filter((worker) => (worker.launcher ?? "codex") === currentLauncher)
@@ -201,7 +207,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     ))
   }
 
-  async function renameSession(session: HostedSessionSummary) {
+  async function renameSession(session: HostedSessionSnapshot) {
     const label = await DialogPrompt.show(dialog, t("proxy.hosted.renameTitle"), {
       placeholder: t("proxy.hosted.sessionLabel"),
       value: session.session_label,
@@ -209,26 +215,22 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
     })
     if (label === null) return
     try {
-      await sdk.client.patchHostedSession(session.session_id, { session_label: label })
-      const nextSessions = await sdk.client.listHostedSessions()
-      if (mode === "popup") {
-        setSessions(nextSessions)
-        return
-      }
-      dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
+      const updated = await sdk.client.patchHostedSession(session.session_id, { session_label: label })
+      sync.set("hosted_sessions", updated.session_id, updated)
+      await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, t("proxy.hosted.renameFailed"), String(err instanceof Error ? err.message : err))
     }
   }
 
-  async function duplicateSession(session: HostedSessionSummary) {
+  async function duplicateSession(session: HostedSessionSnapshot) {
     try {
       const duplicated = await sdk.client.duplicateHostedSession(session.session_id)
-      const duplicatedWorkerID = sessionWorkerID(duplicated)
+      const duplicatedWorkerID = duplicated.worker.id
       const settings = await sdk.client.getSettings()
       const launched = await openHostedTerminal({
         executable,
-        workerPort: duplicated.worker_port,
+        workerPort: duplicated.worker.port,
         profile: duplicatedWorkerID,
         configDir: Global.Path.config,
         mode: "hosted-terminal",
@@ -238,15 +240,17 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         tmuxHostSession: settings.settings.terminal.tmux.host_session,
       })
       if (launched) workerFrecency.record(duplicatedWorkerID)
+      sync.set("hosted_sessions", duplicated.session_id, duplicated)
       await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, t("proxy.hosted.duplicateFailed"), String(err instanceof Error ? err.message : err))
     }
   }
 
-  async function markSessionUnread(session: HostedSessionSummary) {
+  async function markSessionUnread(session: HostedSessionSnapshot) {
     try {
-      await sdk.client.markHostedSessionUnread(session.session_id)
+      const updated = await sdk.client.markHostedSessionUnread(session.session_id)
+      sync.set("hosted_sessions", updated.session_id, updated)
       await refreshSessions()
     } catch (err) {
       await DialogAlert.show(dialog, t("proxy.hosted.markUnreadFailed"), String(err instanceof Error ? err.message : err))
@@ -260,7 +264,7 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
       hidden: (option) => {
         if (option?.value.type !== "session") return true
         const session = option.value.session
-        return session.turn_state === "running"
+        return session.turn.state === "running"
       },
       onTrigger: (option) => {
         if (option.value.type !== "session") return
@@ -292,11 +296,11 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
         if (option?.value.type !== "session") return true
         const session = option.value.session
         const terminal =
-          session.turn_state === "done" ||
-          session.turn_state === "failed" ||
-          session.turn_state === "interrupted"
-        if (!terminal || !session.turn_generation) return true
-        return (session.turn_acknowledged_generation ?? 0) < session.turn_generation
+          session.turn.state === "done" ||
+          session.turn.state === "failed" ||
+          session.turn.state === "interrupted"
+        if (!terminal) return true
+        return session.turn.unread
       },
       onTrigger: (option) => {
         if (option.value.type !== "session") return
@@ -316,12 +320,9 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           refreshSessions,
           t,
           onDeleted: (session) => {
-            const nextSessions = sessions().filter((item) => item.session_id !== session.session_id)
-            if (mode === "popup") {
-              setSessions(nextSessions)
-              return
-            }
-            dialog.replace(() => <DialogHostedTerminal initialSessions={nextSessions} mode={mode} />)
+            const next = { ...sync.data.hosted_sessions }
+            delete next[session.session_id]
+            sync.set("hosted_sessions", reconcile(next))
           },
         })
       },
@@ -349,7 +350,9 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           dialog.push(() => (
             <DialogHostedTerminalDelete
               initialSessions={sessions()}
-              onSessionsChanged={(nextSessions) => setSessions(nextSessions)}
+              onSessionsChanged={(nextSessions) => {
+                sync.set("hosted_sessions", reconcile(Object.fromEntries(nextSessions.map((session) => [session.session_id, session]))))
+              }}
             />
           ))
           return
@@ -359,12 +362,12 @@ export function DialogHostedTerminal(props: { initialSessions?: HostedSessionSum
           return
         }
         const session = option.value.session
-        const currentWorkerID = sessionWorkerID(session)
+        const currentWorkerID = session.worker.id
         void sdk.client.getSettings().then(async (settings) => {
           try {
             const launched = await openHostedTerminal({
               executable,
-              workerPort: session.worker_port,
+              workerPort: session.worker.port,
               profile: currentWorkerID,
               configDir: Global.Path.config,
               mode: "hosted-terminal",

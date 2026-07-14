@@ -2,22 +2,29 @@ package manager
 
 import (
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 )
 
 type Event struct {
-	ID      int64          `json:"id"`
+	ID      uint64         `json:"id"`
 	Type    EventType      `json:"type"`
 	At      time.Time      `json:"at"`
 	Payload map[string]any `json:"payload,omitempty"`
+}
+
+func (b *eventBus) CursorString() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strconv.FormatUint(b.nextID, 10)
 }
 
 const defaultEventBusCapacity = 1024
 
 type eventBus struct {
 	mu          sync.Mutex
-	nextID      int64
+	nextID      uint64
 	capacity    int
 	ring        []Event
 	closed      bool
@@ -67,7 +74,7 @@ func (b *eventBus) Publish(eventType EventType, payload map[string]any) Event {
 	return event
 }
 
-func (b *eventBus) Replay(afterID int64) []Event {
+func (b *eventBus) Replay(afterID uint64) []Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -80,7 +87,7 @@ func (b *eventBus) Replay(afterID int64) []Event {
 	return out
 }
 
-func (b *eventBus) Subscribe(afterID int64) *eventSubscription {
+func (b *eventBus) Subscribe(afterID uint64) *eventSubscription {
 	buffer := b.capacity
 	if buffer < 64 {
 		buffer = 64
@@ -107,6 +114,42 @@ func (b *eventBus) Subscribe(afterID int64) *eventSubscription {
 	b.mu.Unlock()
 
 	return sub
+}
+
+func (b *eventBus) ReplayAndSubscribe(afterID uint64) ([]Event, *eventSubscription, bool, uint64) {
+	buffer := b.capacity
+	if buffer < 64 {
+		buffer = 64
+	}
+	sub := &eventSubscription{C: make(chan Event, buffer), bus: b}
+
+	b.mu.Lock()
+	if b.closed {
+		sub.bus = nil
+		close(sub.C)
+		cursor := b.nextID
+		b.mu.Unlock()
+		return nil, sub, false, cursor
+	}
+	expired := false
+	if afterID != 0 && len(b.ring) > 0 {
+		oldest := b.ring[0].ID
+		expired = oldest > 1 && afterID < oldest-1
+	}
+	replayAfter := afterID
+	if expired {
+		replayAfter = b.nextID
+	}
+	replay := []Event{}
+	for _, event := range b.ring {
+		if event.ID > replayAfter {
+			replay = append(replay, cloneEvent(event))
+		}
+	}
+	b.subscribers[sub] = struct{}{}
+	cursor := b.nextID
+	b.mu.Unlock()
+	return replay, sub, expired, cursor
 }
 
 func (s *eventSubscription) Close() {
@@ -165,6 +208,9 @@ func cloneValue(value any) any {
 
 func cloneReflectValue(value reflect.Value) reflect.Value {
 	if !value.IsValid() {
+		return value
+	}
+	if value.Type() == reflect.TypeOf(time.Time{}) {
 		return value
 	}
 

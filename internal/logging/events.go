@@ -52,4 +52,5 @@ const (
 	EventTmuxServerExit       = "tmux.server.exit"
 	EventTmuxClientExit       = "tmux.client.exit"
 	EventHostedTurnPoll       = "hosted_turn.poll"
+	EventHostedTurnOwnership  = "hosted_turn.ownership"
 )

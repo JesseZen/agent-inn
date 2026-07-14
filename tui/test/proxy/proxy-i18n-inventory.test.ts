@@ -177,6 +177,7 @@ const expectedProxyEn = {
   "proxy.module.categoryFields": "Fields",
   "proxy.module.categoryTools": "Tools",
   "proxy.hosted.title": "Hosted Terminal",
+  "proxy.hosted.waitingForInput": "Waiting for input",
   "proxy.hosted.createTitle": "Create Hosted Session",
   "proxy.hosted.createFailed": "Create hosted session failed",
   "proxy.hosted.openFailed": "Open hosted session failed",
@@ -260,6 +261,7 @@ const expectedProxyEn = {
   "proxy.batch.selectVariant": "Select variant...",
   "proxy.batch.deleteTitle": "Delete batch",
   "proxy.batch.deleteConfirm": "Remove all variants, hosted sessions, and worktrees?",
+  "proxy.batch.createFailed": "Create batch failed",
   "proxy.batch.deleteFailed": "Delete batch failed",
   "proxy.batch.category": "Batches",
   "proxy.batch.categoryAction": "Action",
@@ -303,7 +305,7 @@ function placeholderMap(values: Record<string, string>) {
 }
 
 test("Proxy dictionaries match the frozen static inventory", () => {
-  expect(Object.keys(proxyEn)).toHaveLength(289)
+  expect(Object.keys(proxyEn)).toHaveLength(291)
   expect(Object.keys(proxyEn).sort()).toEqual(Object.keys(expectedProxyEn).sort())
   expect(proxyEn).toEqual(expectedProxyEn)
   expect(Object.keys(proxyZhCN).sort()).toEqual(Object.keys(expectedProxyEn).sort())

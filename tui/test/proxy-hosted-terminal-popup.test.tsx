@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { Global } from "@agent-inn/core/global"
 import { TextareaRenderable } from "@opentui/core"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 import { activeHostedSession, defaultWorker, directory, json, mountHostedTerminalPopupApp, wait } from "./proxy-hosted-terminal.fixture"
 
 afterEach(() => {
@@ -55,6 +55,7 @@ test("popup mode renders hosted terminal picker without home route", async () =>
     if (url.pathname === "/api/hosted-sessions")
       return json({
         sessions: [activeHostedSession],
+        event_cursor: "0",
       })
     return undefined
   })
@@ -75,7 +76,7 @@ test("popup mode renders hosted terminal picker without home route", async () =>
 test("popup mode renders the hosted terminal root directly in the right rail", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession], event_cursor: "0" })
     return undefined
   })
 
@@ -99,7 +100,7 @@ test("popup mode renders the hosted terminal root directly in the right rail", a
 test("popup mode root escape exits the right rail", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession], event_cursor: "0" })
     return undefined
   })
 
@@ -120,7 +121,7 @@ test("popup mode root escape exits the right rail", async () => {
 test("popup mode mouse close exits the right rail", async () => {
   const app = await mountHostedTerminalPopupApp((url) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [activeHostedSession], event_cursor: "0" })
     return undefined
   })
 
@@ -149,7 +150,7 @@ test("popup mode nested escape returns to the visible right-rail root", async ()
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
     if (url.pathname === "/api/hosted-sessions") {
       listCalls += 1
-      return json({ sessions: [activeHostedSession] })
+      return json({ sessions: [activeHostedSession], event_cursor: "0" })
     }
     return undefined
   })
@@ -191,12 +192,12 @@ test("popup mode nested escape returns to the visible right-rail root", async ()
 test("popup mode direct-root rename persists the refreshed list without replacing the right rail", async () => {
   const patches: Array<{ session_id: string; session_label: string }> = []
   let listCalls = 0
-  let sessions: HostedSessionSummary[] = [{ ...activeHostedSession }]
+  let sessions: HostedSessionSnapshot[] = [{ ...activeHostedSession }]
   const app = await mountHostedTerminalPopupApp((url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
       listCalls += 1
-      return json({ sessions })
+      return json({ sessions, event_cursor: "0" })
     }
     if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "PATCH") {
       patches.push({ session_id: "hs_1", session_label: "solve problem B" })
@@ -266,7 +267,7 @@ test("popup mode direct-root delete persists the remaining list without replacin
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET") {
       listCalls += 1
-      return json({ sessions })
+      return json({ sessions, event_cursor: "0" })
     }
     if (url.pathname === "/api/hosted-sessions/hs_1" && request.method === "DELETE") {
       deleteRequests.push("hs_1")
@@ -294,8 +295,10 @@ test("popup mode direct-root delete persists the remaining list without replacin
     const confirmColumn = confirmRow >= 0 ? confirmLines[confirmRow].indexOf("Confirm") : -1
     if (confirmRow < 0 || confirmColumn < 0) throw new Error("expected visible delete confirmation control")
     await app.setup.mockMouse.click(confirmColumn, confirmRow)
-    await wait(() => deleteRequests.length === 1)
-    await app.setup.renderOnce()
+    await wait(async () => {
+      await app.setup.renderOnce()
+      return deleteRequests.length === 1 && listCalls === 2 && !app.setup.captureCharFrame().includes("solve problem A")
+    })
 
     const frame = app.setup.captureCharFrame()
     const lines = frame.split("\n")
@@ -311,7 +314,7 @@ test("popup mode direct-root delete persists the remaining list without replacin
       hasDeletedSession: false,
       headerRow: 0,
       rendererDestroyed: false,
-      listCalls: 1,
+      listCalls: 2,
       remainingLabelVisible: true,
     })
   } finally {
@@ -329,6 +332,7 @@ test("popup mode does not start plugin host or render command palette", async ()
     if (url.pathname === "/api/hosted-sessions")
       return json({
         sessions: [activeHostedSession],
+        event_cursor: "0",
       })
     return undefined
   })
@@ -380,7 +384,7 @@ test("popup mode opens existing hosted session with setup only and stays open", 
   const popupSession = {
     ...activeHostedSession,
     session_id: "hs_popup",
-    worker_name: "test",
+    worker: { ...activeHostedSession.worker, name: "test" },
     session_label: "popup task",
   }
 
@@ -409,6 +413,7 @@ test("popup mode opens existing hosted session with setup only and stays open", 
       listCalls += 1
       return json({
         sessions: [popupSession],
+        event_cursor: "0",
       })
     }
     return undefined
@@ -450,7 +455,7 @@ test("popup mode uses configured executable for hosted setup", async () => {
   const popupSession = {
     ...activeHostedSession,
     session_id: "hs_popup_exec",
-    worker_name: "test",
+    worker: { ...activeHostedSession.worker, name: "test" },
     session_label: "popup exec task",
   }
 
@@ -478,6 +483,7 @@ test("popup mode uses configured executable for hosted setup", async () => {
     if (url.pathname === "/api/hosted-sessions")
       return json({
         sessions: [popupSession],
+        event_cursor: "0",
       })
     return undefined
   })
@@ -543,6 +549,7 @@ test("popup mode duplicates hosted session with setup only and stays open", asyn
       listCalls += 1
       return json({
         sessions: [activeHostedSession],
+        event_cursor: "0",
       })
     }
     if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
@@ -607,7 +614,7 @@ test("popup mode locks root shortcuts while a hosted-session child dialog is ope
   let duplicateCalls = 0
   const app = await mountHostedTerminalPopupApp((url, request) => {
     if (url.pathname === "/api/workers") return json({ workers: [defaultWorker] })
-    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions: [activeHostedSession] })
+    if (url.pathname === "/api/hosted-sessions" && request.method === "GET") return json({ sessions: [activeHostedSession], event_cursor: "0" })
     if (url.pathname === "/api/hosted-sessions/hs_1/duplicate" && request.method === "POST") {
       duplicateCalls += 1
       return json({
@@ -697,6 +704,7 @@ test("popup mode creates hosted session with setup only and returns to root", as
       listCalls += 1
       return json({
         sessions: [],
+        event_cursor: "0",
       })
     }
     return undefined
@@ -773,6 +781,7 @@ test("popup mode mouse refresh refetches sessions without launching", async () =
       listCalls += 1
       return json({
         sessions: [activeHostedSession],
+        event_cursor: "0",
       })
     }
     return undefined

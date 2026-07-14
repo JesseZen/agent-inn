@@ -31,7 +31,10 @@ const (
 	tuiStopWaitDelay                 = 5 * time.Second
 	rootStackInitialBytes            = 64 * 1024
 	rootStackMaximumBytes            = 8 * 1024 * 1024
+	hostedWatcherHandoffPollInterval = 25 * time.Millisecond
 )
+
+var hostedWatcherHandoffTimeout = 2 * time.Second
 
 type rootShutdown struct {
 	Signal os.Signal
@@ -151,6 +154,29 @@ func runRootRuntime(opts RootOptions, shutdowns <-chan rootShutdown) error {
 	defer stopHealthMonitor()
 	stopUpstreamProber := mgr.StartUpstreamProber(0)
 	defer stopUpstreamProber()
+	watcherLockPath, err := hostedTurnWatcherSidecarLockPath(opts.ConfigDir)
+	if err != nil {
+		rootLogger.Error(logging.EventHostedTurnOwnership, "category", "lock_path", "path", opts.ConfigDir)
+		return fmt.Errorf("resolve hosted watcher lock: %w", err)
+	}
+	deadline := time.Now().Add(hostedWatcherHandoffTimeout)
+	var releaseHostedWatcher func()
+	for {
+		releaseHostedWatcher, err = rootLockerFactory(watcherLockPath).Acquire()
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, errAlreadyLocked) || !time.Now().Before(deadline) {
+			rootLogger.Error(logging.EventHostedTurnOwnership, "category", "handoff_timeout", "path", watcherLockPath, "timeout_ms", hostedWatcherHandoffTimeout.Milliseconds())
+			return fmt.Errorf("acquire hosted watcher lock within %s: %w", hostedWatcherHandoffTimeout, err)
+		}
+		wait := time.Until(deadline)
+		if wait > hostedWatcherHandoffPollInterval {
+			wait = hostedWatcherHandoffPollInterval
+		}
+		time.Sleep(wait)
+	}
+	defer releaseHostedWatcher()
 	stopHostedTurnWatcher := mgr.StartHostedTurnWatcher(0)
 	defer stopHostedTurnWatcher()
 	addr := constants.LocalhostAddr + ":" + strconv.Itoa(opts.ManagerPort)

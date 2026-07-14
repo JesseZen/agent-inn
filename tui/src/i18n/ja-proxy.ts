@@ -173,6 +173,7 @@ export const proxyJa = {
   "proxy.module.categoryFields": "フィールド",
   "proxy.module.categoryTools": "ツール",
   "proxy.hosted.title": "ホスト端末",
+  "proxy.hosted.waitingForInput": "入力待ち",
   "proxy.hosted.createTitle": "ホスト型セッションの作成",
   "proxy.hosted.createFailed": "ホストされたセッションの作成に失敗しました",
   "proxy.hosted.openFailed": "ホストされたセッションを開くことができませんでした",

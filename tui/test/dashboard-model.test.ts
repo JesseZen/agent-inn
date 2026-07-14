@@ -9,7 +9,9 @@ import {
   scrollDashboardRowIntoView,
 } from "../src/proxy/dashboard/navigation"
 import { dashboardDropLabel, dashboardDropPair, isValidDashboardDrop } from "../src/proxy/dashboard/drag"
-import type { HostedSessionSummary, RedactedUpstream, UpstreamPool, WorkerSummary } from "../src/proxy/backend"
+import type { RedactedUpstream, UpstreamPool, WorkerSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
+import { hostedSessionMarker } from "../src/proxy/hosted-session-presentation"
 
 const openai: RedactedUpstream = {
   id: "upstream-openai",
@@ -27,17 +29,44 @@ const worker: WorkerSummary = {
   snapshot_generation: 1,
   log_level: "simple",
 }
-const session: HostedSessionSummary = {
+const session: HostedSessionSnapshot = {
   session_id: "hs_1",
   session_label: "Build release",
-  worker_id: worker.id,
-  worker_name: worker.name,
-  worker_port: worker.port,
-  turn_state: "running",
+  worker: { id: worker.id, name: worker.name, port: worker.port, missing: false },
+  workspace: "",
+  model: "",
+  add_dirs: [],
+  user_marker: "",
+  turn: { state: "running", reason: "", unread: false, needs_input: false },
   created_at: "2026-07-11T00:00:00Z",
   last_opened_at: "2026-07-11T00:00:00Z",
   status: "active",
 }
+
+test("hosted session marker preserves waiting unread and todo priority", () => {
+  const marker = (turn: HostedSessionSnapshot["turn"], user_marker: HostedSessionSnapshot["user_marker"] = "") =>
+    hostedSessionMarker({ ...session, turn, user_marker })
+
+  expect([
+    marker({ state: "running", reason: "", unread: false, needs_input: true }, "todo"),
+    marker({ state: "running", reason: "", unread: false, needs_input: false }, "todo"),
+    marker({ state: "done", reason: "", unread: true, needs_input: false }, "todo"),
+    marker({ state: "failed", reason: "", unread: true, needs_input: false }, "todo"),
+    marker({ state: "done", reason: "", unread: false, needs_input: false }, "todo"),
+    marker({ state: "done", reason: "", unread: false, needs_input: false }),
+    marker({ state: "interrupted", reason: "", unread: false, needs_input: false }),
+    marker({ state: "idle", reason: "", unread: false, needs_input: false }),
+  ]).toEqual([
+    { symbol: "?", tone: "warning", bold: true },
+    { symbol: "*", tone: "primary", bold: true },
+    { symbol: "+", tone: "success", bold: true },
+    { symbol: "!", tone: "error", bold: true },
+    { symbol: "~", tone: "warning", bold: false },
+    { symbol: "+", tone: "muted", bold: false },
+    { symbol: "!", tone: "muted", bold: false },
+    { symbol: ":", tone: "muted", bold: false },
+  ])
+})
 
 test("buildDashboardModel preserves stable hierarchy and computes complete summary", () => {
   expect(buildDashboardModel([worker], [openai], [session])).toEqual({
@@ -267,13 +296,12 @@ test("buildDashboardModel keeps missing relationships visible and counts each un
     upstream: missingUpstream,
     status: "failed",
   }
-  const unboundSession: HostedSessionSummary = {
+  const unboundSession: HostedSessionSnapshot = {
     ...session,
     session_id: "hs_orphan",
     session_label: "Lost session",
-    worker_id: "worker-removed",
-    worker_name: "Removed worker",
-    turn_state: "idle",
+    worker: { id: "worker-removed", name: "Removed worker", port: worker.port, missing: true },
+    turn: { state: "idle", reason: "", unread: false, needs_input: false },
     status: "stale",
   }
 
@@ -361,18 +389,18 @@ test("dashboardInitialState expands active and warning domains but leaves quiet 
 })
 
 test("dashboardVisibleRows derives hierarchy, filtered paths, previews, and unbound children", () => {
-  const sessions = Array.from({ length: 5 }, (_, index): HostedSessionSummary => ({
+  const sessions = Array.from({ length: 5 }, (_, index): HostedSessionSnapshot => ({
     ...session,
     session_id: `hs_${index + 1}`,
     session_label: index === 4 ? "ZZ release target" : `Task ${index + 1}`,
-    turn_state: "idle",
+    turn: { state: "idle", reason: "", unread: false, needs_input: false },
   }))
   const orphanUpstream = { ...openai, id: "upstream-unused", name: "Unused" }
   const orphanSession = {
     ...session,
     session_id: "hs_orphan",
     session_label: "Detached",
-    worker_id: "gone",
+    worker: { id: "gone", name: "gone", port: worker.port, missing: true },
   }
   const model = buildDashboardModel([worker], [openai, orphanUpstream], [...sessions, orphanSession])
   const state = {
@@ -595,11 +623,11 @@ test("scrollDashboardRowIntoView moves only far enough to reveal the selected ro
 })
 
 test("dashboard drag semantics preserve worker, upstream, and session constraints", () => {
-  const readySession = { ...session, turn_state: "idle" as const }
+  const readySession = { ...session, turn: { state: "idle" as const, reason: "", unread: false, needs_input: false } }
   const runningSession = {
     ...session,
     session_id: "hs_running",
-    turn_state: "running" as const,
+    turn: { state: "running" as const, reason: "", unread: false, needs_input: false },
   }
   const model = buildDashboardModel([worker], [openai], [readySession, runningSession])
   const upstreamNode = model.domains[0].kind === "upstream" ? model.domains[0].upstream : undefined

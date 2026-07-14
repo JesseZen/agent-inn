@@ -266,10 +266,18 @@ grep -E 'tmux\.(server|client)\.(start|signal|exit)' "$HOME/.ainn/logs/tmux-$SOC
 
 #### `hosted_turn.poll`
 - **触发**：Hosted terminal turn watcher 轮询 Codex transcript 时发生错误
-- **字段**：`error`
+- **字段**：`category`（`transcript_read`、`transcript_parse`、`registry_write`、`tmux_projection`、`snapshot_reconciliation` 或 `poll`），安全时有 `path`、`position`、`session_id`
 - **LEVEL**：WARN
 - **grep**：`grep hosted_turn.poll ~/.ainn/logs/ainn.log`
 - **用途**：排查绿色/蓝色 tab 状态没有按 transcript 纠偏的问题；常见原因是 transcript JSONL 损坏、文件权限异常或 tmux 状态更新失败
+- **隐私**：不写入底层错误文本、request call ID、问题/答案、JSONL 内容或 tmux 输出；`path` 和 `session_id` 只用于定位归属
+
+#### `hosted_turn.ownership`
+- **触发**：root 在安全重启或 sidecar handoff 中解析/获取 hosted watcher 独占锁失败
+- **字段**：`category`（`lock_path` 或 `handoff_timeout`），`path`，超时场景有 `timeout_ms`
+- **LEVEL**：ERROR
+- **grep**：`grep hosted_turn.ownership ~/.ainn/logs/ainn.log`
+- **用途**：确认 watcher ownership 是否在 root 重启前完成交接；不记录底层锁错误文本
 
 ---
 

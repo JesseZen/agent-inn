@@ -21,6 +21,7 @@ import type {
   ConsoleState,
 } from "@agent-inn/sdk/v2"
 import type { ProxyConfig, ProxyConfigStatus, RedactedUpstream, UpstreamPool, UpstreamProbeResult, WorkerSummary } from "./sdk"
+import type { HostedSessionSnapshot } from "../proxy/hosted-session-contract"
 import { produce, reconcile, type SetStoreFunction } from "solid-js/store"
 import { batch } from "solid-js"
 
@@ -73,7 +74,8 @@ export type SyncStore = {
   upstreamPools: UpstreamPool[]
   upstreamProbes: Record<string, UpstreamProbeResult>
   metrics_generation: number
-  hosted_session_turn_states: Record<string, string>
+  hosted_sessions: Record<string, HostedSessionSnapshot>
+  hosted_session_cursor: string
   manager_config: ProxyConfig
   config_status: ProxyConfigStatus | undefined
   error?: string

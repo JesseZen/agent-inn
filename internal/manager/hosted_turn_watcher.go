@@ -1,43 +1,17 @@
 package manager
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/jesse/agent-inn/internal/config"
-	"github.com/jesse/agent-inn/internal/constants"
-	"github.com/jesse/agent-inn/internal/logging"
 )
 
-const (
-	hostedTurnWatcherInterval    = 500 * time.Millisecond
-	hostedTurnTranscriptMaxLine  = 10 * 1024 * 1024
-	hostedTurnInterruptedReason  = constants.HostedTurnReasonUserInterrupt
-	hostedTurnCodexFailureReason = constants.HostedTurnReasonCodexTaskFailed
-	// Permanent Glob misses (e.g. claude UUIDs under ~/.codex/sessions) must not
-	// rescan thousands of transcript files every 500ms. Retry after this TTL.
-	hostedTurnTranscriptMissTTL  = 30 * time.Second
-	codexTranscriptSessionsDir   = "~/.codex/sessions"
-	codexTranscriptEventMsg      = "event_msg"
-	codexTranscriptTaskStarted   = "task_started"
-	codexTranscriptTaskComplete  = "task_complete"
-	codexTranscriptTurnAborted   = "turn_aborted"
-	codexTranscriptTurnCompleted = "turn.completed"
-	codexTranscriptTurnFailed    = "turn.failed"
-	codexTranscriptInterrupted   = "interrupted"
-	codexTranscriptGoalUpdated   = "thread_goal_updated"
-	codexTranscriptGoalActive    = "active"
-	codexTranscriptGoalPaused    = "paused"
-	codexTranscriptGoalComplete  = "complete"
-)
+const hostedTurnWatcherInterval = 500 * time.Millisecond
+const hostedTurnTranscriptMissTTL = 30 * time.Second
+const codexTranscriptSessionsDir = "~/.codex/sessions"
 
 type hostedTurnWatcher struct {
 	settings           config.Settings
@@ -50,6 +24,7 @@ type hostedTurnWatcher struct {
 	now                func() time.Time
 	globTranscripts    func(pattern string) ([]string, error)
 	onTurnStateChanged func(HostedSessionRecord)
+	startupReconciled  bool
 }
 
 type hostedTurnRegistryCursor struct {
@@ -65,102 +40,85 @@ type hostedTurnWatchPlan struct {
 	GoalCandidates []HostedTurnWatch
 }
 
-type hostedTurnTranscriptCursor struct {
-	Offset  int64
-	Size    int64
-	ModTime time.Time
-}
-
-type hostedTurnTranscriptResult struct {
-	TurnID           string
-	State            string
-	Reason           string
-	GoalThreadID     string
-	GoalStatus       string
-	TranscriptOffset int64
-}
-
 func (m *Manager) StartHostedTurnWatcher(interval time.Duration) func() {
+	return m.startHostedTurnWatcher(interval, nil)
+}
+
+func (m *Manager) StartHostedTurnWatcherWithPollGuard(interval time.Duration, beforePoll func() bool) func() {
+	return m.startHostedTurnWatcher(interval, beforePoll)
+}
+
+func (m *Manager) startHostedTurnWatcher(interval time.Duration, beforePoll func() bool) func() {
 	if interval <= 0 {
 		interval = hostedTurnWatcherInterval
 	}
-	done := make(chan struct{})
 	watcher := newHostedTurnWatcher(m.config.Settings, m.hostedSessions, hostedTMuxRunnerFactory())
-	watcher.onTurnStateChanged = func(session HostedSessionRecord) {
-		m.publishEvent(EventHostedSessionTurnStateChanged, map[string]any{
-			"session_id": session.SessionID,
-			"turn_state": session.TurnState,
-		})
+	poll := func() error {
+		pollErr := watcher.pollWithStartupReconciliation()
+		reconcileErr := m.reconcileHostedSessionSnapshots()
+		if reconcileErr != nil {
+			reconcileErr = hostedTurnPollFailureWith(hostedTurnReconciliationCategory, m.hostedSessions.path, 0, "", reconcileErr)
+		}
+		return errors.Join(pollErr, reconcileErr)
 	}
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := watcher.pollOnce(); err != nil {
-					m.logger.Warn(logging.EventHostedTurnPoll, "error", err.Error())
-				}
-			case <-done:
-				return
+	return startHostedTurnWatcherLoop(interval, beforePoll, poll, func(err error) {
+		logHostedTurnPollErrors(m.logger, err)
+	})
+}
+
+func (w *hostedTurnWatcher) pollWithStartupReconciliation() error {
+	if !w.startupReconciled {
+		sessions, err := w.registry.List()
+		if err != nil {
+			return err
+		}
+		windows, err := hostedWindowDetailsFromRunnerForSettings(w.settings, w.runner)
+		if err != nil {
+			return err
+		}
+		for _, session := range sessions {
+			windowID, active := HostedSessionActiveWindowID(windows, session)
+			if !active {
+				continue
+			}
+			session.TmuxWindowID = windowID
+			if err := w.runTmuxStatus(session, session.TurnTranscriptPath, session.TurnTranscriptOffset); err != nil {
+				return err
 			}
 		}
-	}()
-	return func() { close(done) }
+		w.startupReconciled = true
+	}
+	return w.pollOnce()
 }
 
 func newHostedTurnWatcher(settings config.Settings, registry *HostedSessionRegistry, runner hostedTMuxRunner) *hostedTurnWatcher {
 	return &hostedTurnWatcher{
-		settings:          settings,
-		registry:          registry,
-		runner:            runner,
-		files:             map[string]hostedTurnTranscriptCursor{},
-		launcherPaths:     map[string]string{},
-		launcherMissUntil: map[string]time.Time{},
-		now:               time.Now,
-		globTranscripts:   filepath.Glob,
+		settings:           settings,
+		registry:           registry,
+		runner:             runner,
+		files:              map[string]hostedTurnTranscriptCursor{},
+		launcherPaths:      map[string]string{},
+		launcherMissUntil:  map[string]time.Time{},
+		now:                time.Now,
+		globTranscripts:    filepath.Glob,
 		onTurnStateChanged: func(HostedSessionRecord) {},
 	}
 }
 
 func (w *hostedTurnWatcher) currentTime() time.Time {
-	if w.now != nil {
-		return w.now()
-	}
-	return time.Now()
-}
-
-func (w *hostedTurnWatcher) globTranscriptMatches(pattern string) ([]string, error) {
-	if w.globTranscripts != nil {
-		return w.globTranscripts(pattern)
-	}
-	return filepath.Glob(pattern)
+	return w.now()
 }
 
 func (w *hostedTurnWatcher) rememberLauncherMiss(launcherSessionID string) {
-	if launcherSessionID == "" {
-		return
-	}
-	if w.launcherMissUntil == nil {
-		w.launcherMissUntil = map[string]time.Time{}
-	}
 	w.launcherMissUntil[launcherSessionID] = w.currentTime().Add(hostedTurnTranscriptMissTTL)
 }
 
 func (w *hostedTurnWatcher) launcherMissActive(launcherSessionID string) bool {
-	if launcherSessionID == "" || len(w.launcherMissUntil) == 0 {
-		return false
-	}
 	until, ok := w.launcherMissUntil[launcherSessionID]
 	return ok && w.currentTime().Before(until)
 }
 
-// expireLauncherMisses drops elapsed miss TTLs. Returns true when at least one
-// miss expired so watchPlans can rebuild and Glob again.
 func (w *hostedTurnWatcher) expireLauncherMisses() bool {
-	if len(w.launcherMissUntil) == 0 {
-		return false
-	}
 	now := w.currentTime()
 	expired := false
 	for launcherSessionID, until := range w.launcherMissUntil {
@@ -179,9 +137,28 @@ func (w *hostedTurnWatcher) pollOnce() error {
 		return err
 	}
 	for _, plan := range plans {
-		results, err := w.pollTranscript(plan.TranscriptPath)
+		committedOffsets := map[string]int64{}
+		for _, watches := range plan.TurnsByID {
+			for _, watch := range watches {
+				committedOffsets[watch.SessionID] = watch.TurnTranscriptOffset
+			}
+		}
+		if _, found := w.files[plan.TranscriptPath]; !found {
+			w.files[plan.TranscriptPath] = hostedTurnTranscriptCursor{}
+		}
+		results, lines, nextCursor, changed, err := w.pollTranscript(plan.TranscriptPath)
 		if err != nil {
-			return err
+			category := hostedTurnTranscriptReadCategory
+			position := w.files[plan.TranscriptPath].Offset
+			var parseFailure hostedTurnTranscriptParseFailure
+			if errors.As(err, &parseFailure) {
+				category = hostedTurnTranscriptParseCategory
+				position = parseFailure.Offset
+			}
+			return hostedTurnPollFailureWith(category, plan.TranscriptPath, position, "", err)
+		}
+		if !changed {
+			continue
 		}
 		completed := []HostedSessionRecord{}
 		for _, result := range results {
@@ -229,25 +206,27 @@ func (w *hostedTurnWatcher) pollOnce() error {
 							continue
 						}
 					} else {
-						session, err = w.registry.MarkTurnStateWithWatch(completedSession.SessionID, HostedTurnStateRunning, "", "", plan.TranscriptPath, result.TurnID, HostedTurnWatchKindCodex)
+						session, err = w.registry.MarkTurnStateWithWatchAtOffset(completedSession.SessionID, HostedTurnStateRunning, "", "", plan.TranscriptPath, result.TurnID, HostedTurnWatchKindCodex, result.TranscriptOffset)
 						if err != nil {
 							return err
 						}
 					}
 					plan.TurnsByID[result.TurnID] = append(plan.TurnsByID[result.TurnID], HostedTurnWatch{
-						SessionID:         session.SessionID,
-						TurnGeneration:    session.TurnGeneration,
-						TranscriptPath:    session.TurnTranscriptPath,
-						TurnID:            session.TurnID,
-						LauncherSessionID: session.LauncherSessionID,
-						TmuxWindowID:      session.TmuxWindowID,
-						TurnState:         session.TurnState,
-						SessionSnapshot:   session,
+						SessionID:            session.SessionID,
+						TurnGeneration:       session.TurnGeneration,
+						TranscriptPath:       session.TurnTranscriptPath,
+						TurnTranscriptOffset: session.TurnTranscriptOffset,
+						TurnID:               session.TurnID,
+						TurnWatchKind:        session.TurnWatchKind,
+						LauncherSessionID:    session.LauncherSessionID,
+						TmuxWindowID:         session.TmuxWindowID,
+						TurnState:            session.TurnState,
+						SessionSnapshot:      session,
 					})
 					if session.TmuxWindowID == "" {
 						continue
 					}
-					if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
+					if err := w.runTmuxStatus(session, plan.TranscriptPath, result.TranscriptOffset); err != nil {
 						return err
 					}
 				}
@@ -260,34 +239,42 @@ func (w *hostedTurnWatcher) pollOnce() error {
 						continue
 					}
 					plan.TurnsByID[result.TurnID] = append(plan.TurnsByID[result.TurnID], HostedTurnWatch{
-						SessionID:         session.SessionID,
-						TurnGeneration:    session.TurnGeneration,
-						TranscriptPath:    session.TurnTranscriptPath,
-						TurnID:            session.TurnID,
-						LauncherSessionID: session.LauncherSessionID,
-						TmuxWindowID:      session.TmuxWindowID,
-						TurnState:         session.TurnState,
-						SessionSnapshot:   session,
+						SessionID:            session.SessionID,
+						TurnGeneration:       session.TurnGeneration,
+						TranscriptPath:       session.TurnTranscriptPath,
+						TurnTranscriptOffset: session.TurnTranscriptOffset,
+						TurnID:               session.TurnID,
+						TurnWatchKind:        session.TurnWatchKind,
+						LauncherSessionID:    session.LauncherSessionID,
+						TmuxWindowID:         session.TmuxWindowID,
+						TurnState:            session.TurnState,
+						SessionSnapshot:      session,
 					})
 					w.onTurnStateChanged(session)
 					if session.TmuxWindowID == "" {
 						continue
 					}
-					if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
+					if err := w.runTmuxStatus(session, plan.TranscriptPath, result.TranscriptOffset); err != nil {
 						return err
 					}
 				}
 				completed = nil
 				continue
 			}
-			for _, watch := range plan.TurnsByID[result.TurnID] {
+			watches := plan.TurnsByID[result.TurnID]
+			for index := range watches {
+				watch := watches[index]
 				session, ok, err := w.registry.CompleteWatchedTurn(watch.SessionID, watch.TurnGeneration, result.State, result.Reason, plan.TranscriptPath, result.TurnID, result.TranscriptOffset)
 				if err != nil {
 					return err
 				}
 				if !ok {
+					watches[index].TurnState = result.State
 					continue
 				}
+				watches[index].TurnState = session.TurnState
+				watches[index].TurnTranscriptOffset = session.TurnTranscriptOffset
+				watches[index].SessionSnapshot = session
 				w.onTurnStateChanged(session)
 				if session.TmuxWindowID == "" {
 					completed = append(completed, session)
@@ -313,319 +300,74 @@ func (w *hostedTurnWatcher) pollOnce() error {
 					}
 				}
 				completed = append(completed, session)
-				if _, err := w.runner.Run(TmuxHostedTurnStatusCommandForRecord(w.settings, session)); err != nil {
+				if err := w.runTmuxStatus(session, plan.TranscriptPath, result.TranscriptOffset); err != nil {
 					return err
 				}
 			}
+			plan.TurnsByID[result.TurnID] = watches
 		}
+		runningWatches := []HostedTurnWatch{}
+		for _, watches := range plan.TurnsByID {
+			for _, watch := range watches {
+				if watch.TurnState == HostedTurnStateRunning {
+					runningWatches = append(runningWatches, watch)
+				}
+			}
+		}
+		if len(runningWatches) == 1 {
+			watch := runningWatches[0]
+			inputLines := lines
+			committedOffset, committed := committedOffsets[watch.SessionID]
+			if committed && committedOffset > w.files[plan.TranscriptPath].Offset {
+				if watch.TmuxWindowID != "" {
+					if err := w.runTmuxStatus(watch.SessionSnapshot, plan.TranscriptPath, committedOffset); err != nil {
+						return err
+					}
+				}
+			}
+			if watch.SessionSnapshot.TurnInputRequestID == "" && watch.TurnTranscriptOffset > 0 {
+				firstInputLine := len(lines)
+				for index, line := range lines {
+					if line.Offset > watch.TurnTranscriptOffset {
+						firstInputLine = index
+						break
+					}
+				}
+				inputLines = lines[firstInputLine:]
+			}
+			reduction, err := reduceHostedTurnTranscript(watch.TurnWatchKind, watch.SessionSnapshot.TurnInputRequestID, inputLines)
+			if err != nil {
+				position := watch.TurnTranscriptOffset
+				var parseFailure hostedTurnTranscriptParseFailure
+				if errors.As(err, &parseFailure) {
+					position = parseFailure.Offset
+				}
+				return hostedTurnPollFailureWith(hostedTurnTranscriptParseCategory, plan.TranscriptPath, position, watch.SessionID, err)
+			}
+			if reduction.InputObserved {
+				session, applied, err := w.registry.CommitWatchedTurnInput(watch.SessionID, watch.TurnGeneration, plan.TranscriptPath, watch.TurnID, reduction.FinalOffset, reduction.InputRequestID)
+				if err != nil {
+					return hostedTurnPollFailureWith(hostedTurnRegistryWriteCategory, plan.TranscriptPath, reduction.FinalOffset, watch.SessionID, err)
+				}
+				committedReplay := false
+				if !applied {
+					committed, found, err := w.registry.Get(watch.SessionID)
+					if err != nil {
+						return err
+					}
+					if found && committed.TurnGeneration == watch.TurnGeneration && committed.TurnTranscriptPath == plan.TranscriptPath && committed.TurnID == watch.TurnID && committed.TurnTranscriptOffset >= reduction.FinalOffset {
+						session = committed
+						committedReplay = true
+					}
+				}
+				if (reduction.InputChanged || committedReplay) && session.SessionID != "" && session.TmuxWindowID != "" {
+					if err := w.runTmuxStatus(session, plan.TranscriptPath, reduction.FinalOffset); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		w.files[plan.TranscriptPath] = nextCursor
 	}
 	return nil
-}
-
-func (w *hostedTurnWatcher) watchPlans() ([]hostedTurnWatchPlan, error) {
-	missesExpired := w.expireLauncherMisses()
-	stat, err := os.Stat(w.registry.path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	if err == nil && !missesExpired && stat.Size() == w.registryCursor.Size && stat.ModTime().Equal(w.registryCursor.ModTime) {
-		return w.registryCursor.Plans, nil
-	}
-
-	watches, err := w.registry.WatchedTurns()
-	if err != nil {
-		return nil, err
-	}
-	goalCandidates, err := w.registry.GoalCandidates()
-	if err != nil {
-		return nil, err
-	}
-	watches = append(watches, goalCandidates...)
-	plansByPath := map[string]int{}
-	plans := []hostedTurnWatchPlan{}
-	unresolvedLauncherWatch := false
-	for _, watch := range watches {
-		if watch.TranscriptPath != "" && watch.TurnTranscriptOffset > 0 {
-			if _, found := w.files[watch.TranscriptPath]; !found {
-				w.files[watch.TranscriptPath] = hostedTurnTranscriptCursor{Offset: watch.TurnTranscriptOffset}
-			}
-		}
-		if watch.TranscriptPath == "" {
-			transcriptPath := w.launcherPaths[watch.LauncherSessionID]
-			if transcriptPath != "" {
-				if _, err := os.Stat(transcriptPath); os.IsNotExist(err) {
-					delete(w.launcherPaths, watch.LauncherSessionID)
-					transcriptPath = ""
-				} else if err != nil {
-					return nil, err
-				}
-			}
-			if transcriptPath == "" {
-				if watch.GoalCandidate && w.launcherMissActive(watch.LauncherSessionID) {
-					// Permanent/noisy misses (e.g. claude UUIDs) skip expensive rescans.
-					continue
-				}
-				pattern := filepath.Join(expandHomePath(codexTranscriptSessionsDir), "*", "*", "*", "*"+watch.LauncherSessionID+".jsonl")
-				matches, err := w.globTranscriptMatches(pattern)
-				if err != nil {
-					return nil, err
-				}
-				if len(matches) == 0 {
-					if watch.GoalCandidate {
-						// Goal candidates without a codex transcript can stay unresolved forever.
-						// Cache the miss so watchPlans remains cacheable and cheap.
-						w.rememberLauncherMiss(watch.LauncherSessionID)
-						continue
-					}
-					// Active codex launcher watches must re-Glob until the transcript appears.
-					unresolvedLauncherWatch = true
-					continue
-				}
-				delete(w.launcherMissUntil, watch.LauncherSessionID)
-				sort.Strings(matches)
-				transcriptPath = matches[len(matches)-1]
-				w.launcherPaths[watch.LauncherSessionID] = transcriptPath
-			}
-			if watch.GoalCandidate {
-				index, ok := plansByPath[transcriptPath]
-				if !ok {
-					index = len(plans)
-					plansByPath[transcriptPath] = index
-					plans = append(plans, hostedTurnWatchPlan{
-						TranscriptPath: transcriptPath,
-						TurnsByID:      map[string][]HostedTurnWatch{},
-					})
-				}
-				watch.TranscriptPath = transcriptPath
-				plans[index].GoalCandidates = append(plans[index].GoalCandidates, watch)
-				continue
-			}
-
-			file, err := os.Open(transcriptPath)
-			if os.IsNotExist(err) {
-				unresolvedLauncherWatch = true
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			stat, err := file.Stat()
-			if err != nil {
-				_ = file.Close()
-				return nil, err
-			}
-			cursor, hasCursor := w.files[transcriptPath]
-			if cursor.Offset > stat.Size() {
-				cursor.Offset = 0
-			}
-			if !hasCursor && watch.TurnGeneration > 1 {
-				w.files[transcriptPath] = hostedTurnTranscriptCursor{Offset: stat.Size(), Size: stat.Size(), ModTime: stat.ModTime()}
-				_ = file.Close()
-				unresolvedLauncherWatch = true
-				continue
-			}
-			if _, err := file.Seek(cursor.Offset, io.SeekStart); err != nil {
-				_ = file.Close()
-				return nil, err
-			}
-			latestTurnID := ""
-			nextOffset := cursor.Offset
-			reader := bufio.NewReader(file)
-			scanErr := error(nil)
-			for {
-				line, err := reader.ReadString('\n')
-				if len(line) > 0 {
-					nextOffset += int64(len(line))
-					if len(line) > hostedTurnTranscriptMaxLine {
-						scanErr = fmt.Errorf("line exceeds %d bytes", hostedTurnTranscriptMaxLine)
-						break
-					}
-					var event struct {
-						Type    string `json:"type"`
-						Payload struct {
-							Type   string `json:"type"`
-							TurnID string `json:"turn_id"`
-						} `json:"payload"`
-					}
-					if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &event); err != nil {
-						scanErr = err
-						break
-					}
-					if event.Type == codexTranscriptEventMsg && event.Payload.Type == codexTranscriptTaskStarted && event.Payload.TurnID != "" {
-						latestTurnID = event.Payload.TurnID
-					}
-				}
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				if err != nil {
-					scanErr = err
-					break
-				}
-			}
-			if err := file.Close(); err != nil && scanErr == nil {
-				scanErr = err
-			}
-			if scanErr != nil {
-				return nil, scanErr
-			}
-			if latestTurnID == "" {
-				w.files[transcriptPath] = hostedTurnTranscriptCursor{Offset: nextOffset, Size: stat.Size(), ModTime: stat.ModTime()}
-				unresolvedLauncherWatch = true
-				continue
-			}
-			watch.TranscriptPath = transcriptPath
-			watch.TurnID = latestTurnID
-		}
-		index, ok := plansByPath[watch.TranscriptPath]
-		if !ok {
-			index = len(plans)
-			plansByPath[watch.TranscriptPath] = index
-			plans = append(plans, hostedTurnWatchPlan{
-				TranscriptPath: watch.TranscriptPath,
-				TurnsByID:      map[string][]HostedTurnWatch{},
-			})
-		}
-		plans[index].TurnsByID[watch.TurnID] = append(plans[index].TurnsByID[watch.TurnID], watch)
-		if watch.TurnWatchKind == HostedTurnWatchKindCodexGoal && isHostedTurnTerminalState(watch.TurnState) {
-			plans[index].PendingGoals = append(plans[index].PendingGoals, watch)
-		}
-	}
-	stat, err = os.Stat(w.registry.path)
-	if err != nil {
-		return nil, err
-	}
-	if !unresolvedLauncherWatch {
-		w.registryCursor = hostedTurnRegistryCursor{
-			Size:    stat.Size(),
-			ModTime: stat.ModTime(),
-			Plans:   plans,
-		}
-	}
-	return plans, nil
-}
-
-func (w *hostedTurnWatcher) pollTranscript(transcriptPath string) ([]hostedTurnTranscriptResult, error) {
-	cursor := w.files[transcriptPath]
-	stat, err := os.Stat(transcriptPath)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if stat.Size() == cursor.Size && stat.ModTime().Equal(cursor.ModTime) {
-		return nil, nil
-	}
-	if cursor.Offset > stat.Size() {
-		cursor.Offset = 0
-	}
-
-	file, err := os.Open(transcriptPath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	if _, err := file.Seek(cursor.Offset, io.SeekStart); err != nil {
-		return nil, err
-	}
-
-	results := []hostedTurnTranscriptResult{}
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadString('\n')
-		if len(line) > 0 {
-			cursor.Offset += int64(len(line))
-			if len(line) > hostedTurnTranscriptMaxLine {
-				return nil, fmt.Errorf("line exceeds %d bytes", hostedTurnTranscriptMaxLine)
-			}
-			result, ok, parseErr := parseHostedTurnTranscriptLine(line)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			if ok {
-				result.TranscriptOffset = cursor.Offset
-				results = append(results, result)
-			}
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-	cursor.Size = stat.Size()
-	cursor.ModTime = stat.ModTime()
-	w.files[transcriptPath] = cursor
-	return results, nil
-}
-
-func parseHostedTurnTranscriptLine(line string) (hostedTurnTranscriptResult, bool, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return hostedTurnTranscriptResult{}, false, nil
-	}
-	var event struct {
-		Type    string `json:"type"`
-		TurnID  string `json:"turn_id"`
-		Status  string `json:"status"`
-		Payload struct {
-			Type             string          `json:"type"`
-			ThreadID         string          `json:"threadId"`
-			TurnID           string          `json:"turn_id"`
-			LastAgentMessage json.RawMessage `json:"last_agent_message"`
-			Goal             struct {
-				Status string `json:"status"`
-			} `json:"goal"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
-		return hostedTurnTranscriptResult{}, false, err
-	}
-	switch event.Type {
-	case codexTranscriptEventMsg:
-		if event.Payload.Type == codexTranscriptGoalUpdated && event.Payload.ThreadID != "" {
-			switch event.Payload.Goal.Status {
-			case codexTranscriptGoalActive, codexTranscriptGoalPaused, codexTranscriptGoalComplete:
-				return hostedTurnTranscriptResult{GoalThreadID: event.Payload.ThreadID, GoalStatus: event.Payload.Goal.Status}, true, nil
-			}
-		}
-		if event.Payload.TurnID == "" {
-			return hostedTurnTranscriptResult{}, false, nil
-		}
-		if event.Payload.Type == codexTranscriptTaskStarted {
-			return hostedTurnTranscriptResult{TurnID: event.Payload.TurnID, State: HostedTurnStateRunning}, true, nil
-		}
-		if event.Payload.Type == codexTranscriptTurnAborted {
-			return hostedTurnTranscriptResult{TurnID: event.Payload.TurnID, State: HostedTurnStateInterrupted, Reason: hostedTurnInterruptedReason}, true, nil
-		}
-		if event.Payload.Type != codexTranscriptTaskComplete {
-			return hostedTurnTranscriptResult{}, false, nil
-		}
-		result := hostedTurnTranscriptResult{TurnID: event.Payload.TurnID, State: HostedTurnStateDone}
-		lastAgentMessage := strings.TrimSpace(string(event.Payload.LastAgentMessage))
-		if lastAgentMessage == "" || lastAgentMessage == "null" {
-			result.State = HostedTurnStateFailed
-			result.Reason = hostedTurnCodexFailureReason
-		}
-		return result, true, nil
-	case codexTranscriptTurnCompleted:
-		if event.TurnID == "" {
-			return hostedTurnTranscriptResult{}, false, nil
-		}
-		result := hostedTurnTranscriptResult{TurnID: event.TurnID, State: HostedTurnStateDone}
-		if event.Status == codexTranscriptInterrupted {
-			result.State = HostedTurnStateInterrupted
-			result.Reason = hostedTurnInterruptedReason
-		}
-		return result, true, nil
-	case codexTranscriptTurnFailed:
-		if event.TurnID == "" {
-			return hostedTurnTranscriptResult{}, false, nil
-		}
-		return hostedTurnTranscriptResult{TurnID: event.TurnID, State: HostedTurnStateFailed, Reason: hostedTurnCodexFailureReason}, true, nil
-	default:
-		return hostedTurnTranscriptResult{}, false, nil
-	}
 }

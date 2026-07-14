@@ -285,19 +285,23 @@ test("proxy settings terminal opener uses a select list", async () => {
 })
 
 test("proxy settings host start mode save shows note when hosted sessions already exist", async () => {
-  const app = await mountProxyApp()
-
-  try {
-    app.hostedSessions.splice(0, app.hostedSessions.length, {
+  const app = await mountProxyApp({
+    hostedSessions: [{
       session_id: "hs_1",
       session_label: "solve problem A",
-      worker_name: "cli-openrouter",
-      worker_port: 11199,
+      worker: { id: "cli-openrouter", name: "cli-openrouter", port: 11199, missing: false },
+      workspace: "",
+      model: "",
+      add_dirs: [],
+      user_marker: "",
+      turn: { state: "idle", reason: "", unread: false, needs_input: false },
       created_at: "2026-07-03T00:00:00Z",
       last_opened_at: "2026-07-03T00:00:00Z",
       status: "active",
-    })
+    }],
+  })
 
+  try {
     app.api.keymap.dispatchCommand("proxy.settings")
     await wait(async () => {
       await app.render()

@@ -35,6 +35,17 @@ func TestHostedSessionCreateDefaultsWorkerIDFromWorkerName(t *testing.T) {
 	}
 }
 
+func TestHostedSessionRegistryListCreatesMissingParent(t *testing.T) {
+	registry := NewHostedSessionRegistry(filepath.Join(t.TempDir(), "nested", "sessions.json"))
+	records, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(records, []HostedSessionRecord{}) {
+		t.Fatalf("got %#v, want empty records", records)
+	}
+}
+
 func TestHostedSessionRegistrySummariesUsesTmuxState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

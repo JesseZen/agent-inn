@@ -1,26 +1,29 @@
 import { expect, test } from "bun:test"
 import { InputRenderable, ScrollBoxRenderable, type Renderable } from "@opentui/core"
 import { resolveSlashCommand } from "../src/keymap"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 import { mountProxyApp, wait } from "./proxy-commands.fixture"
+import { DEFAULT_THEMES, resolveTheme } from "../src/theme"
 
-const activeSession: HostedSessionSummary = {
+const activeSession: HostedSessionSnapshot = {
   session_id: "hs_active",
   session_label: "Active build",
-  worker_id: "app",
-  worker_name: "app",
-  worker_port: 6767,
-  turn_state: "running",
+  worker: { id: "app", name: "app", port: 6767, missing: false },
+  workspace: "",
+  model: "",
+  add_dirs: [],
+  user_marker: "",
+  turn: { state: "running", reason: "", unread: false, needs_input: false },
   created_at: "2026-07-11T00:00:00Z",
   last_opened_at: "2026-07-11T00:00:00Z",
   status: "active",
 }
 
-const staleSession: HostedSessionSummary = {
+const staleSession: HostedSessionSnapshot = {
   ...activeSession,
   session_id: "hs_stale",
   session_label: "Stale review",
-  turn_state: "idle",
+  turn: { state: "idle", reason: "", unread: false, needs_input: false },
   status: "stale",
 }
 
@@ -133,6 +136,63 @@ test("dashboard renders summary and relationship-first hierarchy", async () => {
       hierarchy: true,
       warnings: true,
       oldLegend: false,
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("dashboard renders hosted marker priority without consuming todo", async () => {
+  const sessions: HostedSessionSnapshot[] = [
+    {
+      ...activeSession,
+      session_id: "hs_waiting",
+      session_label: "Waiting todo",
+      user_marker: "todo",
+      turn: { state: "running", reason: "", unread: false, needs_input: true },
+    },
+    {
+      ...activeSession,
+      session_id: "hs_running",
+      session_label: "Running todo",
+      user_marker: "todo",
+    },
+    {
+      ...activeSession,
+      session_id: "hs_unread",
+      session_label: "Unread todo",
+      user_marker: "todo",
+      turn: { state: "done", reason: "", unread: true, needs_input: false },
+    },
+    {
+      ...activeSession,
+      session_id: "hs_todo",
+      session_label: "Acknowledged todo",
+      worker: { id: "cli-openrouter", name: "cli-openrouter", port: 11199, missing: false },
+      user_marker: "todo",
+      turn: { state: "done", reason: "", unread: false, needs_input: false },
+    },
+  ]
+  const app = await mountProxyApp({ hostedSessions: sessions })
+  try {
+    app.api.keymap.dispatchCommand("proxy.dashboard")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Acknowledged todo")
+    })
+    const frame = app.frame()
+    expect({
+      waiting: frame.split("\n").find((line) => line.includes("Waiting todo"))?.includes("?"),
+      running: frame.split("\n").find((line) => line.includes("Running todo"))?.includes("*"),
+      unread: frame.split("\n").find((line) => line.includes("Unread todo"))?.includes("+"),
+      todo: frame.split("\n").find((line) => line.includes("Acknowledged todo"))?.includes("~"),
+      waitingColor: lineForeground(app, "?"),
+    }).toEqual({
+      waiting: true,
+      running: true,
+      unread: true,
+      todo: true,
+      waitingColor: resolveTheme(DEFAULT_THEMES.ainn, "dark").warning,
     })
   } finally {
     await app.cleanup()
@@ -255,9 +315,7 @@ test("dashboard keeps sibling workers aligned when only one has sessions", async
         ...activeSession,
         session_id: "hs-10dolloars",
         session_label: "0p02 1",
-        worker_id: "worker-10dolloars",
-        worker_name: "10dolloars",
-        worker_port: 50137,
+        worker: { id: "worker-10dolloars", name: "10dolloars", port: 50137, missing: false },
       },
     ],
   })
@@ -669,7 +727,7 @@ test("dashboard filtering expands only the matching relationship path", async ()
 })
 
 test("dashboard expands the session preview from the more row", async () => {
-  const sessions = Array.from({ length: 5 }, (_, index): HostedSessionSummary => ({
+  const sessions = Array.from({ length: 5 }, (_, index): HostedSessionSnapshot => ({
     ...staleSession,
     session_id: `hs_preview_${index}`,
     session_label: `Preview ${index}`,

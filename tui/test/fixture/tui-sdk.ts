@@ -73,15 +73,19 @@ export function createFetch(override?: FetchHandler) {
       })
     if (url.pathname === "/project/current") return json({ id: "proj_test" })
     if (url.pathname === "/api/workers") return json({ workers: [] })
-    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [] })
+    if (url.pathname === "/api/hosted-sessions") return json({ sessions: [], event_cursor: "0" })
     if (url.pathname.startsWith("/api/hosted-sessions/")) {
       const sessionID = url.pathname.split("/").at(-1) ?? ""
       if (request.method === "DELETE") return json({ session_id: sessionID })
       return json({
         session_id: sessionID,
         session_label: "worker 1",
-        worker_name: "worker",
-        worker_port: 1234,
+        worker: { id: "worker", name: "worker", port: 1234, missing: false },
+        workspace: "",
+        model: "",
+        add_dirs: [],
+        user_marker: "",
+        turn: { state: "idle", reason: "", unread: false, needs_input: false },
         created_at: new Date().toISOString(),
         last_opened_at: new Date().toISOString(),
         status: "active",

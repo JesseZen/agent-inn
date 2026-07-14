@@ -173,6 +173,7 @@ export const proxyVi = {
   "proxy.module.categoryFields": "Trường",
   "proxy.module.categoryTools": "Công cụ",
   "proxy.hosted.title": "Thiết bị đầu cuối được lưu trữ",
+  "proxy.hosted.waitingForInput": "Đang chờ nhập liệu",
   "proxy.hosted.createTitle": "Tạo phiên được lưu trữ",
   "proxy.hosted.createFailed": "Tạo phiên được lưu trữ không thành công",
   "proxy.hosted.openFailed": "Phiên được lưu trữ mở không thành công",

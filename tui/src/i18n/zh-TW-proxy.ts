@@ -173,6 +173,7 @@ export const proxyZhTW = {
   "proxy.module.categoryFields": "領域",
   "proxy.module.categoryTools": "工具",
   "proxy.hosted.title": "託管終端",
+  "proxy.hosted.waitingForInput": "等待輸入",
   "proxy.hosted.createTitle": "建立託管會話",
   "proxy.hosted.createFailed": "建立託管會話失敗",
   "proxy.hosted.openFailed": "開啟託管會話失敗",

@@ -6,7 +6,7 @@ export type DashboardDropPair = {
 }
 
 export function isValidDashboardDrop(source: DashboardNode, target: DashboardNode): boolean {
-  if (source.kind === "session") return target.kind === "worker" && source.data.turn_state !== "running"
+  if (source.kind === "session") return target.kind === "worker" && source.data.turn.state !== "running"
   return (source.kind === "worker" && target.kind === "upstream") ||
     (source.kind === "upstream" && target.kind === "worker")
 }

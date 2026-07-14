@@ -91,13 +91,50 @@ func TmuxRenameWindowCommandForSettings(settings config.Settings, windowID strin
 	return append(tmuxPrefixForSettings(settings), "rename-window", "-t", target, name)
 }
 
-func TmuxHostedTurnStatusCommandForSettings(settings config.Settings, windowID string, state string) []string {
-	return tmuxHostedTurnStatusCommand(settings, windowID, state, true, "")
+func TmuxHostedTurnStatusCommandForSnapshot(settings config.Settings, windowID string, snapshot HostedSessionSnapshot) []string {
+	target := tmuxHostSessionForSettings(settings) + ":" + windowID
+	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
+	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
+	switch {
+	case snapshot.Turn.State == HostedTurnStateRunning && snapshot.Turn.NeedsInput:
+		format = "#[fg=colour208,bg=colour235,bold] #I:? #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour208,bold] #I:? #W #[default]"
+	case snapshot.Turn.State == HostedTurnStateRunning:
+		format = "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"
+	case snapshot.Turn.Unread && snapshot.Turn.State == HostedTurnStateDone:
+		format = "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"
+	case snapshot.Turn.Unread && (snapshot.Turn.State == HostedTurnStateFailed || snapshot.Turn.State == HostedTurnStateInterrupted):
+		format = "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]"
+		currentFormat = "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"
+	case snapshot.UserMarker == HostedUserMarkerTodo:
+		format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
+	case snapshot.Turn.State == HostedTurnStateDone:
+		format = "#[fg=colour244,bg=colour235] #I:+ #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"
+	case snapshot.Turn.State == HostedTurnStateFailed || snapshot.Turn.State == HostedTurnStateInterrupted:
+		format = "#[fg=colour244,bg=colour235] #I:! #W #[default]"
+		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"
+	}
+	return append(tmuxPrefixForSettings(settings),
+		"set-window-option", "-t", target, "window-status-format", format, ";",
+		"set-window-option", "-t", target, "window-status-current-format", currentFormat,
+	)
 }
 
-func TmuxHostedTurnStatusCommandForRecord(settings config.Settings, session HostedSessionRecord) []string {
-	unread := !isHostedTurnTerminalState(session.TurnState) || session.TurnGeneration > session.TurnAcknowledgedGeneration
-	return tmuxHostedTurnStatusCommand(settings, session.TmuxWindowID, session.TurnState, unread, session.UserMarker)
+func (w *hostedTurnWatcher) tmuxStatusCommand(session HostedSessionRecord) []string {
+	snapshot := MapHostedSessionSnapshot(session, HostedSessionStatusActive, HostedSessionWorkerSnapshot{})
+	return TmuxHostedTurnStatusCommandForSnapshot(w.settings, session.TmuxWindowID, snapshot)
+}
+
+func (w *hostedTurnWatcher) runTmuxStatus(session HostedSessionRecord, path string, position int64) error {
+	if _, err := w.runner.Run(w.tmuxStatusCommand(session)); err != nil {
+		w.startupReconciled = false
+		return hostedTurnPollFailureWith(hostedTurnProjectionCategory, path, position, session.SessionID, err)
+	}
+	return nil
 }
 
 func TmuxAcknowledgeTurnHookCommandForSettings(settings config.Settings, configDir string, executable string) []string {
@@ -245,48 +282,6 @@ func TmuxListAcknowledgeTurnMouseBindingCommandForSettings(settings config.Setti
 
 func TmuxListToggleTodoMouseBindingCommandForSettings(settings config.Settings) []string {
 	return append(tmuxPrefixForSettings(settings), "list-keys", "-T", "root")
-}
-
-func tmuxHostedTurnStatusCommand(settings config.Settings, windowID string, state string, unread bool, userMarker string) []string {
-	target := tmuxHostSessionForSettings(settings) + ":" + windowID
-	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
-	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
-	switch state {
-	case HostedTurnStateRunning:
-		format = "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"
-	case HostedTurnStateDone:
-		format = "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"
-		if !unread {
-			format = "#[fg=colour244,bg=colour235] #I:+ #W #[default]"
-			currentFormat = "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"
-		}
-	case HostedTurnStateFailed, HostedTurnStateInterrupted:
-		format = "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]"
-		currentFormat = "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"
-		if !unread {
-			format = "#[fg=colour244,bg=colour235] #I:! #W #[default]"
-			currentFormat = "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"
-		}
-	}
-	if userMarker == HostedUserMarkerTodo {
-		switch state {
-		case HostedTurnStateRunning:
-		case HostedTurnStateDone, HostedTurnStateFailed, HostedTurnStateInterrupted:
-			if !unread {
-				format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
-				currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
-			}
-		default:
-			format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
-			currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
-		}
-	}
-	return append(tmuxPrefixForSettings(settings),
-		"set-window-option", "-t", target, "window-status-format", format, ";",
-		"set-window-option", "-t", target, "window-status-current-format", currentFormat,
-	)
 }
 
 func tmuxShellQuote(value string) string {

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os/exec"
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/manager"
@@ -42,27 +41,4 @@ func finishHostedTerminalLaunch(settings config.Settings, configDir string, runn
 		return 1
 	}
 	return 0
-}
-
-func startHostedTurnWatcherSidecar(configDir string) error {
-	rootLock, err := rootLockPath(configDir)
-	if err != nil {
-		return err
-	}
-	release, err := rootLockerFactory(rootLock).Acquire()
-	if err == nil {
-		release()
-	} else if err == errAlreadyLocked {
-		return nil
-	} else {
-		return err
-	}
-
-	cmd := exec.Command(hostedSessionExecutable(), "hosted-session", "watch-all", "--config-dir", configDir)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
 }

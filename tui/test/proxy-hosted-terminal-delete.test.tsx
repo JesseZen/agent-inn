@@ -9,9 +9,9 @@ import {
   staleHostedSessionB,
   wait,
 } from "./proxy-hosted-terminal.fixture"
-import type { HostedSessionSummary } from "../src/proxy/backend"
+import type { HostedSessionSnapshot } from "../src/proxy/hosted-session-contract"
 
-async function setupHostedTerminal(initialHostedSessions: HostedSessionSummary[] = [activeHostedSession]) {
+async function setupHostedTerminal(initialHostedSessions: HostedSessionSnapshot[] = [activeHostedSession]) {
   const deleteRequests: string[] = []
   let currentHostedSessions = initialHostedSessions.map((session) => ({ ...session }))
   const app = await mountHostedTerminalApp((url, request) => {
@@ -22,6 +22,7 @@ async function setupHostedTerminal(initialHostedSessions: HostedSessionSummary[]
     if (url.pathname === "/api/hosted-sessions" && request.method === "GET")
       return json({
         sessions: currentHostedSessions,
+        event_cursor: "0",
       })
     if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "DELETE") {
       const sessionID = url.pathname.split("/").at(-1) ?? ""
@@ -191,6 +192,7 @@ test("hosted terminal picker keeps remaining sessions visible while delete refre
       }
       return json({
         sessions: currentHostedSessions,
+        event_cursor: "0",
       })
     }
     if (url.pathname.startsWith("/api/hosted-sessions/") && request.method === "DELETE") {
@@ -241,12 +243,12 @@ test("hosted terminal picker keeps remaining sessions visible while delete refre
     })
 
     for (const resolve of pendingRefreshes.splice(0)) {
-      resolve(json({ sessions: currentHostedSessions }))
+      resolve(json({ sessions: currentHostedSessions, event_cursor: "0" }))
     }
     await app.cleanup()
   } finally {
     for (const resolve of pendingRefreshes.splice(0)) {
-      resolve(json({ sessions: currentHostedSessions }))
+      resolve(json({ sessions: currentHostedSessions, event_cursor: "0" }))
     }
     if (!app.setup.renderer.isDestroyed) app.setup.renderer.destroy()
     mock.restore()
@@ -294,9 +296,7 @@ test("hosted terminal delete page displays missing worker", async () => {
     {
       ...staleHostedSessionA,
       session_label: "solve problem A",
-      worker_id: "orphan-worker",
-      worker_name: "legacy orphan",
-      worker: { id: "orphan-worker", name: "legacy orphan", missing: true },
+      worker: { id: "orphan-worker", name: "legacy orphan", port: 1234, missing: true },
     },
   ])
 

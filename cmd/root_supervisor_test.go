@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -49,6 +50,61 @@ func TestSuperviseRootRestartsAfterRestartExit(t *testing.T) {
 	}
 	if runs != 2 || refreshes != 1 {
 		t.Fatalf("runs=%d refreshes=%d, want runs=2 refreshes=1", runs, refreshes)
+	}
+}
+
+func TestSuperviseRootPreservesExclusiveWatcherHandoffAcrossRestart(t *testing.T) {
+	previousRun := rootSupervisedRunner
+	previousRefresh := rootSupervisorRefreshEnvironment
+	defer func() {
+		rootSupervisedRunner = previousRun
+		rootSupervisorRefreshEnvironment = previousRefresh
+	}()
+
+	rootLockHeld := true
+	watcherOwned := false
+	runs := 0
+	sequence := []string{}
+	rootSupervisedRunner = func(RootOptions) (logging.RootRunExit, error) {
+		runs++
+		if !rootLockHeld || watcherOwned {
+			t.Fatalf("run %d started rootLockHeld=%v watcherOwned=%v", runs, rootLockHeld, watcherOwned)
+		}
+		watcherOwned = true
+		sequence = append(sequence, fmt.Sprintf("child %d watcher acquire", runs), fmt.Sprintf("child %d startup reconcile", runs))
+		sequence = append(sequence, fmt.Sprintf("child %d watcher stop", runs))
+		watcherOwned = false
+		sequence = append(sequence, fmt.Sprintf("child %d watcher release", runs))
+		if runs == 1 {
+			return logging.RootRunExit{ExitCode: rootRestartExitCode}, nil
+		}
+		return logging.RootRunExit{ExitCode: 0}, nil
+	}
+	rootSupervisorRefreshEnvironment = func() error {
+		if !rootLockHeld || watcherOwned {
+			t.Fatalf("refresh rootLockHeld=%v watcherOwned=%v", rootLockHeld, watcherOwned)
+		}
+		sequence = append(sequence, "sidecar observes root lock", "supervisor refresh")
+		return nil
+	}
+
+	if err := superviseRoot(RootOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"child 1 watcher acquire",
+		"child 1 startup reconcile",
+		"child 1 watcher stop",
+		"child 1 watcher release",
+		"sidecar observes root lock",
+		"supervisor refresh",
+		"child 2 watcher acquire",
+		"child 2 startup reconcile",
+		"child 2 watcher stop",
+		"child 2 watcher release",
+	}
+	if !rootLockHeld || watcherOwned || !reflect.DeepEqual(sequence, want) {
+		t.Fatalf("rootLockHeld=%v watcherOwned=%v sequence=%#v, want %#v", rootLockHeld, watcherOwned, sequence, want)
 	}
 }
 

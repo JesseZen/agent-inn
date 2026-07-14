@@ -3,6 +3,7 @@ import { TextareaRenderable } from "@opentui/core"
 import { mountProxyApp, openWorkerDetail, runCommand, wait, type ProxyApp } from "./../proxy-commands.fixture"
 import { useLanguage, type Locale } from "../../src/context/language"
 import { DialogUpstreamEditor } from "../../src/proxy/dialog-upstream"
+import { DialogHostedTerminal } from "../../src/proxy/dialog-hosted-terminal"
 
 function lineValueForeground(app: ProxyApp, label: string, value: string) {
   const line = app.setup.captureSpans().lines.find((item) =>
@@ -149,6 +150,51 @@ test("mounted upstream actions react to locale and draft name changes", async ()
   }
 })
 
+test("hosted waiting detail reacts to locale changes without replacing its snapshot", async () => {
+  const localeSetters: Array<(locale: Locale) => void> = []
+
+  function HostedWaitingProbe() {
+    const language = useLanguage()
+    localeSetters[0] = language.setLocale
+    return <DialogHostedTerminal />
+  }
+
+  const waiting = {
+    session_id: "hs_waiting",
+    session_label: "Waiting build",
+    worker: { id: "app", name: "app", port: 6767, missing: false },
+    workspace: "",
+    model: "",
+    add_dirs: [],
+    status: "active" as const,
+    user_marker: "todo" as const,
+    turn: { state: "running" as const, reason: "", unread: false, needs_input: true },
+    created_at: "2026-07-11T00:00:00Z",
+    last_opened_at: "2026-07-11T00:00:00Z",
+  }
+  const app = await mountProxyApp({ hostedSessions: [waiting] })
+  try {
+    app.api.ui.dialog.replace(() => <HostedWaitingProbe />)
+    await app.render()
+    await waitForFrame(app, "Waiting for input")
+
+    const setLocale = localeSetters[0]
+    if (!setLocale) throw new Error("expected mounted language context")
+    setLocale("zh-CN")
+    await app.render()
+    await waitForFrame(app, "等待输入")
+
+    expect({
+      waiting: app.frame().includes("等待输入"),
+      marker: app.frame().includes("?"),
+      english: app.frame().includes("Waiting for input"),
+      snapshot: app.hostedSessions,
+    }).toEqual({ waiting: true, marker: true, english: false, snapshot: [waiting] })
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("Chinese Proxy dialogs cover each mounted action family", async () => {
   const app = await mountProxyApp({
     stateFiles: { "kv.json": JSON.stringify({ locale: "zh-CN" }) },
@@ -156,10 +202,12 @@ test("Chinese Proxy dialogs cover each mounted action family", async () => {
       {
         session_id: "hs_active",
         session_label: "Active build",
-        worker_id: "app",
-        worker_name: "app",
-        worker_port: 6767,
-        turn_state: "idle",
+        worker: { id: "app", name: "app", port: 6767, missing: false },
+        workspace: "",
+        model: "",
+        add_dirs: [],
+        user_marker: "",
+        turn: { state: "idle", reason: "", unread: false, needs_input: false },
         created_at: "2026-07-11T00:00:00Z",
         last_opened_at: "2026-07-11T00:00:00Z",
         status: "active",
@@ -235,10 +283,25 @@ test("translated dashboard warnings keep their semantic warning color", async ()
       {
         session_id: "hs_unbound",
         session_label: "Unbound build",
-        worker_id: "missing",
-        worker_name: "missing",
-        worker_port: 6999,
-        turn_state: "idle",
+        worker: { id: "missing", name: "missing", port: 6999, missing: true },
+        workspace: "",
+        model: "",
+        add_dirs: [],
+        user_marker: "",
+        turn: { state: "idle", reason: "", unread: false, needs_input: false },
+        created_at: "2026-07-11T00:00:00Z",
+        last_opened_at: "2026-07-11T00:00:00Z",
+        status: "active",
+      },
+      {
+        session_id: "hs_unbound_2",
+        session_label: "Unbound review",
+        worker: { id: "missing-2", name: "missing-2", port: 7000, missing: true },
+        workspace: "",
+        model: "",
+        add_dirs: [],
+        user_marker: "",
+        turn: { state: "idle", reason: "", unread: false, needs_input: false },
         created_at: "2026-07-11T00:00:00Z",
         last_opened_at: "2026-07-11T00:00:00Z",
         status: "active",
@@ -247,9 +310,9 @@ test("translated dashboard warnings keep their semantic warning color", async ()
   })
   try {
     await runCommand(app, "proxy.dashboard")
-    await wait(() => app.frame().includes("未绑定 1"))
+    await waitForFrame(app, "未绑定 3")
 
-    expect(lineValueForeground(app, "未绑定", "1")).not.toEqual(lineValueForeground(app, "工作进程", "2"))
+    expect(lineValueForeground(app, "未绑定", "3")).not.toEqual(lineValueForeground(app, "工作进程", "2"))
   } finally {
     await app.cleanup()
   }

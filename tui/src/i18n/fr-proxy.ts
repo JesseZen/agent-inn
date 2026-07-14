@@ -173,6 +173,7 @@ export const proxyFr = {
   "proxy.module.categoryFields": "Champs",
   "proxy.module.categoryTools": "Outils",
   "proxy.hosted.title": "Terminal hébergé",
+  "proxy.hosted.waitingForInput": "En attente d'une saisie",
   "proxy.hosted.createTitle": "Créer une session hébergée",
   "proxy.hosted.createFailed": "Échec de la création d'une session hébergée",
   "proxy.hosted.openFailed": "Échec de l'ouverture de la session hébergée",
