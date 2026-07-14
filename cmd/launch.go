@@ -142,9 +142,6 @@ func runLaunch(args []string, stdout io.Writer, stderr io.Writer) int {
 			launcher = workerCfg.Launcher
 			*profile = workerID
 			apiFormat = cfg.Upstreams[workerCfg.Upstream].APIFormat
-			if *model == "" {
-				*model = cfg.Upstreams[workerCfg.Upstream].ProtocolProbe.Model
-			}
 			if launcher == "grok" && *model == "" {
 				*model = manager.DefaultGrokModel
 			}

@@ -218,17 +218,19 @@ New upstreams receive immutable IDs such as `up_5`; `name` is the editable displ
 worker URL. AINN uses a shared isolated home under the configured state
 directory (`grok-home`), sets `XAI_API_KEY=ainn`, and sets
 `GROK_MODELS_BASE_URL` to the selected worker's `/v1` endpoint so Grok's model
-picker and requests use the worker catalog/proxy. The launch default model is
-`protocol_probe.model` when set, otherwise `grok-4.5`. Upstream model rewriting
-remains available through the `model_override` request module. Grok Build login
-and user configuration remain outside AINN. Basic launch, hosted terminal,
-rename, delete, and worker changes are supported; Grok-specific turn status and
-resume tracking are not.
+picker and requests use the worker catalog/proxy. When no explicit `--model` is
+given, Grok launch falls back to `grok-4.5` as a CLI bootstrap default.
+`protocol_probe.model` is only for upstream protocol probing, not launch model
+selection. Upstream model rewriting remains available through the
+`model_override` request module. Grok Build login and user configuration remain
+outside AINN. Basic launch, hosted terminal, rename, delete, and worker changes
+are supported; Grok-specific turn status and resume tracking are not.
 
 `launcher: opencode` starts OpenCode with an inline `ainn` provider whose URL
 points at the selected worker and whose API key is the placeholder `ainn`.
 AINN selects the OpenCode Responses or Chat Completions adapter from the
-upstream `api_format`; `protocol_probe.model` supplies the default model.
+upstream `api_format`. Launch does not invent a default model from
+`protocol_probe`; pass `--model` when OpenCode needs an explicit model ID.
 OpenCode user configuration remains available and is not modified. Basic
 launch and hosted terminal operations are supported; OpenCode-specific turn
 status and resume tracking are not.
@@ -236,10 +238,10 @@ status and resume tracking are not.
 `launcher: pi` starts Pi with an isolated agent directory under the configured
 state directory. AINN writes Pi providers for the configured Responses, Chat
 Completions, or Anthropic worker protocol, points them at the worker URL, and
-passes the placeholder API key `ainn`. `protocol_probe.model` supplies the
-model ID. Pi user configuration remains untouched. Basic launch and hosted
-terminal operations are supported; Pi-specific turn status and resume tracking
-are not.
+passes the placeholder API key `ainn`. Launch does not invent a default model
+from `protocol_probe`; pass `--model` when Pi needs an explicit model ID. Pi
+user configuration remains untouched. Basic launch and hosted terminal
+operations are supported; Pi-specific turn status and resume tracking are not.
 
 `upstream_pool` is optional. A pool keeps its members in priority order: the Manager opens a member's circuit after qualified upstream failures, hot-switches the pool's workers to the next healthy member, and automatically returns to the preferred member after recovery. `stream_timeouts` can set the first SSE byte and SSE idle limits for an upstream. `protocol_probe.model` enables a low-output streaming request that verifies the upstream's configured API protocol; without it, AINN uses the lightweight base URL probe.
 
