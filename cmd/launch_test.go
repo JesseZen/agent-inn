@@ -249,6 +249,38 @@ func TestLaunchRunnerBuffersTmuxControlOutput(t *testing.T) {
 	}
 }
 
+func TestLaunchRunnerReturnsFailedAttachReason(t *testing.T) {
+	installFakeTmuxOnPath(t)
+	t.Setenv("FAKE_TMUX_ATTACH_STDOUT", "[server exited unexpectedly]\n")
+	t.Setenv("FAKE_TMUX_FAIL_COMMAND", "attach-session")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	output, err := launchRunnerFactory(&stdout, &stderr).Run([]string{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"})
+	got := struct {
+		Output string
+		Stdout string
+		Stderr string
+		Error  string
+	}{Output: output, Stdout: stdout.String(), Stderr: stderr.String()}
+	if err != nil {
+		got.Error = err.Error()
+	}
+	want := struct {
+		Output string
+		Stdout string
+		Stderr string
+		Error  string
+	}{
+		Output: "[server exited unexpectedly]\n",
+		Stdout: "[server exited unexpectedly]\n",
+		Error:  "exit status 1",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed attach reason mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestFinishHostedTerminalLaunchLogsUnexpectedTmuxClientExit(t *testing.T) {
 	configDir := t.TempDir()
 	settings := config.Settings{

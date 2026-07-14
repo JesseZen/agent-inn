@@ -125,6 +125,10 @@ func TestClassifyTmuxClientExit(t *testing.T) {
 			err:    errors.New("exit status 1"),
 			want:   tmuxClientExit{Reason: tmuxClientExitReasonClientError, ExitCode: 1, Error: "exit status 1"},
 		},
+		{
+			name: "successful attach return",
+			want: tmuxClientExit{Reason: tmuxClientExitReasonDetached},
+		},
 	}
 
 	for _, tt := range tests {

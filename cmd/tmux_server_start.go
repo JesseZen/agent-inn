@@ -20,7 +20,7 @@ import (
 const (
 	tmuxLifecycleLogPrefix    = "tmux-"
 	tmuxLifecycleLogSuffix    = ".log"
-	tmuxServerResponseTimeout = 10 * time.Second
+	tmuxServerResponseTimeout = 20 * time.Second
 )
 
 type tmuxClientExitReason string
@@ -149,6 +149,8 @@ func classifyTmuxClientExit(output string, err error) tmuxClientExit {
 		exit.Reason = tmuxClientExitReasonDetached
 	case strings.Contains(output, "exited"):
 		exit.Reason = tmuxClientExitReasonEmpty
+	case err == nil:
+		exit.Reason = tmuxClientExitReasonDetached
 	default:
 		exit.Reason = tmuxClientExitReasonClientError
 	}

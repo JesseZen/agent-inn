@@ -277,7 +277,7 @@ func TestSuperviseTmuxServerRecordsCrashSignal(t *testing.T) {
 	}
 }
 
-func TestSuperviseTmuxServerRecordsAINNForwardedSignal(t *testing.T) {
+func TestSuperviseTmuxServerRecordsExternalForwardedSignal(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -324,7 +324,7 @@ func TestSuperviseTmuxServerRecordsAINNForwardedSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signalPattern := regexp.MustCompile(`tmux\.server\.signal pid=(\d+) signal=terminated initiator=ainn`)
+	signalPattern := regexp.MustCompile(`tmux\.server\.signal pid=(\d+) signal=terminated initiator=external_or_unknown`)
 	match := signalPattern.FindStringSubmatch(string(data))
 	if match == nil {
 		t.Fatalf("tmux.server.signal missing from %s:\n%s", logPath, data)
@@ -348,7 +348,7 @@ func TestSuperviseTmuxServerRecordsAINNForwardedSignal(t *testing.T) {
 		Exit: tmuxServerExitView{
 			PID:       response.ServerPID,
 			Reason:    tmuxServerExitReasonClean,
-			Initiator: tmuxServerInitiatorAINN,
+			Initiator: tmuxServerInitiatorExternal,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -419,5 +419,146 @@ func TestSuperviseTmuxServerRecordsInitialSessionFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("initial-session failure lifecycle mismatch:\n got %#v\nwant %#v\nlog %s", got, want, data)
+	}
+}
+
+func TestSuperviseTmuxServerRecordsStartupResponseFailure(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	tmuxTmpDir, err := os.MkdirTemp("/tmp", "ainn-tmux-response-fail-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmuxTmpDir) })
+	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	socketName := "ainn-response-fail-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	hostSession := "ainn-response-fail-host"
+	request := tmuxServerStartRequest{
+		ConfigDir:   t.TempDir(),
+		LogDir:      logDir,
+		SocketName:  socketName,
+		HostSession: hostSession,
+		InitialCommand: []string{
+			"tmux", "-L", socketName, "new-session", "-d", "-s", hostSession, "sleep 60",
+		},
+	}
+	responseReader, responseWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := responseReader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer responseWriter.Close()
+	if err := superviseTmuxServer(request, responseWriter); err == nil {
+		t.Fatal("expected startup response error")
+	}
+
+	logPath := filepath.Join(logDir, "tmux-"+socketName+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signalPattern := regexp.MustCompile(`tmux\.server\.signal pid=(\d+) signal=terminated initiator=ainn`)
+	match := signalPattern.FindStringSubmatch(string(data))
+	if match == nil {
+		t.Fatalf("tmux.server.signal missing from %s:\n%s", logPath, data)
+	}
+	signalPID, err := strconv.Atoi(match[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := readTmuxServerExitView(t, logPath)
+	got := struct {
+		SignalPID int
+		Exit      tmuxServerExitView
+	}{SignalPID: signalPID, Exit: exit}
+	want := struct {
+		SignalPID int
+		Exit      tmuxServerExitView
+	}{
+		SignalPID: exit.PID,
+		Exit: tmuxServerExitView{
+			PID:       exit.PID,
+			Reason:    tmuxServerExitReasonClean,
+			Initiator: tmuxServerInitiatorAINN,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("startup response failure lifecycle mismatch:\n got %#v\nwant %#v\nlog %s", got, want, data)
+	}
+}
+
+func TestSuperviseTmuxServerTimesOutInitialSessionCommand(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	tmuxTmpDir, err := os.MkdirTemp("/tmp", "ainn-tmux-command-timeout-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmuxTmpDir) })
+	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	socketName := "ainn-command-timeout-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	hostSession := "ainn-command-timeout-host"
+	request := tmuxServerStartRequest{
+		ConfigDir:      t.TempDir(),
+		LogDir:         logDir,
+		SocketName:     socketName,
+		HostSession:    hostSession,
+		InitialCommand: []string{"sh", "-c", "sleep 60"},
+	}
+	previousTimeout := tmuxServerCommandTimeout
+	tmuxServerCommandTimeout = 100 * time.Millisecond
+	defer func() { tmuxServerCommandTimeout = previousTimeout }()
+	responseReader, responseWriter := io.Pipe()
+	supervisorResult := make(chan error, 1)
+	go func() {
+		supervisorResult <- superviseTmuxServer(request, responseWriter)
+		_ = responseWriter.Close()
+	}()
+
+	var response tmuxServerStartResponse
+	if err := json.NewDecoder(responseReader).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error == "" {
+		t.Fatal("expected initial session timeout")
+	}
+	if err := <-supervisorResult; err == nil {
+		t.Fatal("expected supervisor timeout error")
+	}
+	logPath := filepath.Join(logDir, "tmux-"+socketName+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := struct {
+		TimedOut     bool
+		SignalLogged bool
+		Exit         tmuxServerExitView
+	}{
+		TimedOut:     strings.Contains(response.Error, "context deadline exceeded"),
+		SignalLogged: regexp.MustCompile(`tmux\.server\.signal pid=\d+ signal=terminated initiator=ainn`).Match(data),
+		Exit:         readTmuxServerExitView(t, logPath),
+	}
+	want := struct {
+		TimedOut     bool
+		SignalLogged bool
+		Exit         tmuxServerExitView
+	}{
+		TimedOut:     true,
+		SignalLogged: true,
+		Exit: tmuxServerExitView{
+			PID:       response.ServerPID,
+			Reason:    tmuxServerExitReasonClean,
+			Initiator: tmuxServerInitiatorAINN,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("initial-session timeout lifecycle mismatch:\n got %#v\nwant %#v\nlog %s", got, want, data)
 	}
 }

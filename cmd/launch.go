@@ -59,8 +59,9 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 		attachSession := tmuxSubcommand(args) == "attach-session"
 		var stdoutBuf bytes.Buffer
 		var stderrBuf bytes.Buffer
+		var attachOutputTail tmuxServerOutputTail
 		if attachSession {
-			cmd.Stdout = stdout
+			cmd.Stdout = io.MultiWriter(stdout, &attachOutputTail)
 			cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 		} else {
 			cmd.Stdout = &stdoutBuf
@@ -68,11 +69,11 @@ var launchRunnerFactory = func(stdout io.Writer, stderr io.Writer) launchRunner 
 		}
 		cmd.Stdin = os.Stdin
 		err := cmd.Run()
+		if attachSession {
+			return attachOutputTail.RedactedString() + stderrBuf.String(), err
+		}
 		if err != nil && strings.TrimSpace(stderrBuf.String()) != "" {
 			return stdoutBuf.String(), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderrBuf.String()))
-		}
-		if attachSession {
-			return stderrBuf.String(), err
 		}
 		return stdoutBuf.String(), err
 	})

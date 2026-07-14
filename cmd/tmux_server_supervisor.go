@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -28,6 +30,8 @@ const (
 	tmuxServerOutputTailBytes     = 32 * 1024
 	tmuxServerResponseFD          = 3
 )
+
+var tmuxServerCommandTimeout = 5 * time.Second
 
 type tmuxServerExitReason string
 type tmuxServerInitiator string
@@ -175,7 +179,8 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 	socketPath := filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()), request.SocketName)
 	deadline := time.Now().Add(tmuxServerStartupTimeout)
 	for {
-		if _, statErr := os.Stat(socketPath); statErr == nil {
+		if connection, dialErr := net.DialTimeout("unix", socketPath, tmuxServerStartupPollInterval); dialErr == nil {
+			_ = connection.Close()
 			break
 		}
 		if time.Now().After(deadline) {
@@ -188,19 +193,29 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 	var initialStdout bytes.Buffer
 	var initialStderr bytes.Buffer
 	if err == nil {
-		initialCmd := exec.Command(request.InitialCommand[0], request.InitialCommand[1:]...)
+		commandContext, cancelCommand := context.WithTimeout(context.Background(), tmuxServerCommandTimeout)
+		initialCmd := exec.CommandContext(commandContext, request.InitialCommand[0], request.InitialCommand[1:]...)
 		initialCmd.Stdout = &initialStdout
 		initialCmd.Stderr = &initialStderr
 		err = initialCmd.Run()
+		if commandContext.Err() != nil {
+			err = fmt.Errorf("run initial tmux command: %w", commandContext.Err())
+		}
+		cancelCommand()
 		if err != nil && strings.TrimSpace(initialStderr.String()) != "" {
 			err = fmt.Errorf("%w: %s", err, strings.TrimSpace(initialStderr.String()))
 		}
 	}
 	if err == nil {
+		commandContext, cancelCommand := context.WithTimeout(context.Background(), tmuxServerCommandTimeout)
 		var exitEmptyStderr bytes.Buffer
-		exitEmptyCmd := exec.Command("tmux", "-L", request.SocketName, "set-option", "-g", "exit-empty", "on")
+		exitEmptyCmd := exec.CommandContext(commandContext, "tmux", "-L", request.SocketName, "set-option", "-g", "exit-empty", "on")
 		exitEmptyCmd.Stderr = &exitEmptyStderr
 		err = exitEmptyCmd.Run()
+		if commandContext.Err() != nil {
+			err = fmt.Errorf("set tmux exit-empty: %w", commandContext.Err())
+		}
+		cancelCommand()
 		if err != nil && strings.TrimSpace(exitEmptyStderr.String()) != "" {
 			err = fmt.Errorf("%w: %s", err, strings.TrimSpace(exitEmptyStderr.String()))
 		}
@@ -257,11 +272,45 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 		ServerPID:     tmuxCmd.Process.Pid,
 	}
 	if err := json.NewEncoder(responseWriter).Encode(response); err != nil {
+		responseErr := fmt.Errorf("write tmux server startup response: %w", err)
+		logger.Warn(logging.EventTmuxServerSignal,
+			"pid", tmuxCmd.Process.Pid,
+			"signal", syscall.SIGTERM.String(),
+			"initiator", string(tmuxServerInitiatorAINN),
+		)
 		_ = tmuxCmd.Process.Signal(syscall.SIGTERM)
-		_ = tmuxCmd.Wait()
+		waitErr := tmuxCmd.Wait()
 		_ = ptyFile.Close()
 		<-outputDone
-		return fmt.Errorf("write tmux server startup response: %w", err)
+		completedAt := time.Now()
+		exitCode := 0
+		reason := tmuxServerExitReasonClean
+		signalName := ""
+		if waitErr != nil {
+			exitCode = -1
+			reason = tmuxServerExitReasonWaitError
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) && exitErr.ProcessState != nil {
+				exitCode = exitErr.ProcessState.ExitCode()
+				if status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+					reason = tmuxServerExitReasonSignal
+					signalName = status.Signal().String()
+				} else {
+					reason = tmuxServerExitReasonExitCode
+				}
+			}
+		}
+		logger.Info(logging.EventTmuxServerExit,
+			"pid", tmuxCmd.Process.Pid,
+			"exit_code", exitCode,
+			"reason", string(reason),
+			"signal", signalName,
+			"initiator", string(tmuxServerInitiatorAINN),
+			"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
+			"completed_at", completedAt.UTC().Format(time.RFC3339Nano),
+			"error", responseErr.Error(),
+		)
+		return errors.Join(responseErr, waitErr)
 	}
 
 	waitResult := make(chan error, 1)
@@ -278,7 +327,6 @@ waitForServer:
 			break waitForServer
 		case receivedSignal := <-stopSignals:
 			signalValue := receivedSignal.(syscall.Signal)
-			initiator = tmuxServerInitiatorAINN
 			logger.Warn(logging.EventTmuxServerSignal,
 				"pid", tmuxCmd.Process.Pid,
 				"signal", signalValue.String(),
