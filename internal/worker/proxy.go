@@ -388,7 +388,10 @@ func (w *Worker) proxyRequest(rw http.ResponseWriter, r *http.Request, snapshot 
 	}
 
 	result := observedBody.usageResult()
-	if upstreamHTTPResp.StatusCode >= http.StatusInternalServerError {
+	if upstreamHTTPResp.StatusCode == http.StatusUnauthorized ||
+		upstreamHTTPResp.StatusCode == http.StatusForbidden ||
+		upstreamHTTPResp.StatusCode == http.StatusTooManyRequests ||
+		upstreamHTTPResp.StatusCode >= http.StatusInternalServerError {
 		result.Failure = &UpstreamFailure{
 			Kind:            UpstreamFailureStatus,
 			BeforeFirstByte: true,

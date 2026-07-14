@@ -1862,8 +1862,31 @@ func TestWorkerMetricsClassifyQualifiedUpstreamFailures(t *testing.T) {
 			},
 		},
 		{
-			name:   "authentication is not failover",
+			name:   "unauthorized upstream",
 			status: http.StatusUnauthorized,
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureStatus,
+				BeforeFirstByte: true,
+				StatusCode:      http.StatusUnauthorized,
+			},
+		},
+		{
+			name:   "forbidden upstream",
+			status: http.StatusForbidden,
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureStatus,
+				BeforeFirstByte: true,
+				StatusCode:      http.StatusForbidden,
+			},
+		},
+		{
+			name:   "rate limited upstream",
+			status: http.StatusTooManyRequests,
+			wantFailure: &UpstreamFailure{
+				Kind:            UpstreamFailureStatus,
+				BeforeFirstByte: true,
+				StatusCode:      http.StatusTooManyRequests,
+			},
 		},
 	}
 
