@@ -29,6 +29,7 @@ const (
 	tmuxServerStartupPollInterval = 20 * time.Millisecond
 	tmuxServerOutputTailBytes     = 32 * 1024
 	tmuxServerResponseFD          = 3
+	tmuxServerDefaultTmpDir       = "/tmp"
 )
 
 var tmuxServerCommandTimeout = 5 * time.Second
@@ -174,7 +175,7 @@ func superviseTmuxServerWithSignals(request tmuxServerStartRequest, responseWrit
 
 	tmuxTmpDir := os.Getenv("TMUX_TMPDIR")
 	if tmuxTmpDir == "" {
-		tmuxTmpDir = os.TempDir()
+		tmuxTmpDir = tmuxServerDefaultTmpDir
 	}
 	socketPath := filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()), request.SocketName)
 	deadline := time.Now().Add(tmuxServerStartupTimeout)
