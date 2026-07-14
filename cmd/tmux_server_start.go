@@ -141,13 +141,13 @@ func classifyTmuxClientExit(output string, err error) tmuxClientExit {
 	}
 
 	switch {
-	case strings.Contains(output, "server exited unexpectedly"):
+	case strings.Contains(output, "[server exited unexpectedly]"):
 		exit.Reason = tmuxClientExitReasonServerUnexpected
-	case strings.Contains(output, "server exited"):
+	case strings.Contains(output, "[server exited]"):
 		exit.Reason = tmuxClientExitReasonServerTerminated
-	case strings.Contains(output, "detached"):
+	case strings.Contains(output, "[detached"):
 		exit.Reason = tmuxClientExitReasonDetached
-	case strings.Contains(output, "exited"):
+	case strings.Contains(output, "[exited]"):
 		exit.Reason = tmuxClientExitReasonEmpty
 	case err == nil:
 		exit.Reason = tmuxClientExitReasonDetached
