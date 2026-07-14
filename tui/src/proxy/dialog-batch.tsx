@@ -124,10 +124,6 @@ export function DialogBatch(props: DialogBatchProps = {}) {
       }
       toast.show({ message: t("proxy.batch.variantCount", { min: minBatchVariantCount, max: maxBatchVariantCount }), variant: "error" })
     }
-    const model = await DialogPrompt.show(dialog, t("proxy.module.model"), {
-      placeholder: t("proxy.module.model"),
-    })
-    if (model === null) return
 
     try {
       const batch = await sdk.client.createBatch({
@@ -135,7 +131,6 @@ export function DialogBatch(props: DialogBatchProps = {}) {
         worker_name: worker.id,
         ...(count !== undefined ? { count } : {}),
         source_directory: sourceDirectory,
-        ...(model ? { model } : {}),
       })
       for (const variant of batch.variants) {
         await launchVariant(batch, variant, "setup-only")

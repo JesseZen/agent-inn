@@ -89,7 +89,6 @@ test("proxy batch create flow sets up variants before opening one hosted termina
     await submitPrompt(app)
     await submitPrompt(app, "fix scroll")
     await submitPrompt(app, "3")
-    await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4)
 
@@ -188,7 +187,6 @@ test("proxy batch create flow submits worker id when display name differs", asyn
     await submitPrompt(app)
     await submitPrompt(app, "fix scroll")
     await submitPrompt(app, "1")
-    await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 2)
 
@@ -242,7 +240,6 @@ test("proxy batch create flow does not inspect tmux windows", async () => {
     await submitPrompt(app)
     await submitPrompt(app, "no window")
     await submitPrompt(app, "1")
-    await submitPrompt(app)
 
     await wait(async () => {
       await app.render()
@@ -288,7 +285,6 @@ test("proxy batch create flow omits blank count so the backend default applies",
 
     await submitPrompt(app)
     await submitPrompt(app, "default count")
-    await submitPrompt(app)
     await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 4)
@@ -336,7 +332,6 @@ test("proxy batch create flow re-prompts invalid variant count before creating",
     expect(app.calls.createBatch).toEqual([])
 
     await submitPrompt(app, "2")
-    await submitPrompt(app)
 
     await wait(() => app.calls.createBatch.length === 1 && launchCalls.length === 3)
     expect(app.calls.createBatch).toEqual([
