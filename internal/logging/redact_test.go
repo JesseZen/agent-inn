@@ -66,3 +66,17 @@ func TestRedactPreservesQuotedBearerBoundaryAcrossRepeatedPasses(t *testing.T) {
 		t.Fatalf("repeated redaction mismatch:\n got %#v\nwant %#v", got, want)
 	}
 }
+
+func TestRedactQuotedAuthorizationValues(t *testing.T) {
+	got := []string{
+		Redact(`Authorization: Bearer "sk-secret"`),
+		Redact(`Authorization: Basic 'basic-secret'`),
+	}
+	want := []string{
+		`Authorization: Bearer "***REDACTED***"`,
+		`Authorization: Basic '***REDACTED***'`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("quoted authorization redaction mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
