@@ -993,7 +993,7 @@ test("dashboard drags an unbound upstream onto a worker", async () => {
   }
 })
 
-test("dashboard rebinds stale sessions and rejects running session drags", async () => {
+test("dashboard rebinds stale sessions and explains why running session drags do not apply", async () => {
   const app = await mountProxyApp({
     hostedSessions: [staleSession, activeSession],
   })
@@ -1015,14 +1015,20 @@ test("dashboard rebinds stale sessions and rejects running session drags", async
     expect(app.calls.patchHostedSession).toEqual([{ session_id: "hs_stale", worker_id: "cli-openrouter" }])
 
     const running = framePoint(app.frame(), "Active build")
-    await app.setup.mockMouse.drag(running.x, running.y, cli.x, cli.y)
+    await app.setup.mockMouse.pressDown(running.x, running.y)
+    await app.setup.mockMouse.moveTo(cli.x, cli.y)
+    await app.render()
+    expect(app.frame()).toContain("Move From Active build To cli-openrouter")
+    await app.setup.mockMouse.release(cli.x, cli.y)
     await app.render()
     expect({
       patches: app.calls.patchHostedSession,
       workerDialog: app.frame().includes("Worker actions"),
+      warning: app.frame().includes("Running sessions can be rebound"),
     }).toEqual({
       patches: [{ session_id: "hs_stale", worker_id: "cli-openrouter" }],
       workerDialog: false,
+      warning: true,
     })
   } finally {
     await app.cleanup()

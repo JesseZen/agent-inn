@@ -112,7 +112,7 @@ export function DashboardRows(props: {
               pressedID = row.id
               props.onSelect(row.id)
               const value = node()
-              if (value && value.kind !== "pool" && !(value.kind === "session" && value.data.turn.state === "running")) props.onDragStart(value)
+              if (value && value.kind !== "pool") props.onDragStart(value)
             }}
             onMouseUp={() => {
               const value = node()

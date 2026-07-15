@@ -224,6 +224,13 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
     const source = dragSource()
     if (!source || !isValidDashboardDrop(source, target)) return
     if (source.kind === "session" && target.kind === "worker") {
+      if (source.data.turn.state === "running") {
+        toast.show({
+          message: "Running sessions can be rebound after the current turn finishes",
+          variant: "warning",
+        })
+        return
+      }
       try {
         const { launched, session } = await rebindHostedSession({
           client: sdk.client,

@@ -648,7 +648,7 @@ test("dashboard drag semantics preserve worker, upstream, and session constraint
     workerToUpstream: true,
     upstreamToWorker: true,
     readySessionToWorker: true,
-    runningSessionToWorker: false,
+    runningSessionToWorker: true,
     pair: { worker: workerNode, upstream: upstreamNode },
     targetLabel: "App Main → OpenAI Main",
     pendingLabel: "App Main → ?",
