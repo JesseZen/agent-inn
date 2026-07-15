@@ -507,6 +507,7 @@ upstreams:
 		"HOME=" + filepath.Join(stateDir, "grok-home"),
 		"GROK_MODELS_BASE_URL=http://127.0.0.1:11199/v1",
 		"XAI_API_KEY=ainn",
+		"GROK_WEB_SEARCH_MODEL=" + manager.DefaultGrokModel,
 		fakeGrok,
 		"--model",
 		manager.DefaultGrokModel,

@@ -41,7 +41,8 @@ type grokConfig struct {
 }
 
 type grokModelsSettings struct {
-	Default string `toml:"default,omitempty"`
+	Default   string `toml:"default,omitempty"`
+	WebSearch string `toml:"web_search,omitempty"`
 }
 
 type piModelsConfig struct {
@@ -148,7 +149,17 @@ func syncGrokConfig(cfg config.Config) error {
 		return writeTextFile(path, "", 0o600)
 	}
 
-	data, err := toml.Marshal(grokConfig{Models: grokModelsSettings{Default: defaultModel}})
+	// Point web_search at the chat model so BYOK/proxy tokens that lack
+	// grok-4.20-multi-agent still run the client web_search tool. Do NOT set
+	// supports_backend_search on the chat model: that makes Grok drop the
+	// client web_search tool as a "backend-hosted" collision, and ChatCompletions
+	// proxies do not re-expose a callable search tool.
+	data, err := toml.Marshal(grokConfig{
+		Models: grokModelsSettings{
+			Default:   defaultModel,
+			WebSearch: defaultModel,
+		},
+	})
 	if err != nil {
 		return err
 	}

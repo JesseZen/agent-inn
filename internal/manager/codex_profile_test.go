@@ -140,9 +140,12 @@ func TestSyncGrokConfigWritesSharedDefaultWithoutWorkerModels(t *testing.T) {
 	if err := toml.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := grokConfig{Models: grokModelsSettings{Default: "grok-4.5"}}
+	want := grokConfig{Models: grokModelsSettings{Default: "grok-4.5", WebSearch: "grok-4.5"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	if strings.Contains(text, "supports_backend_search") || strings.Contains(text, "[model.") {
+		t.Fatalf("must not enable backend search or per-model blocks (drops client web_search):\n%s", text)
 	}
 }
 

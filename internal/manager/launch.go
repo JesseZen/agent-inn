@@ -150,6 +150,11 @@ func BuildLaunchCommand(opts LaunchOptions) ([]string, error) {
 			"GROK_MODELS_BASE_URL=http://"+constants.LocalhostAddr+":"+strconv.Itoa(opts.WorkerPort)+"/v1",
 			"XAI_API_KEY=ainn",
 		)
+		// Point web_search at the same chat model so BYOK/proxy tokens that
+		// lack grok-4.20-multi-agent still get server-side search.
+		if opts.Model != "" {
+			cmd = append(cmd, "GROK_WEB_SEARCH_MODEL="+opts.Model)
+		}
 		executable := opts.GrokExecutable
 		if executable == "" {
 			executable = "grok"
