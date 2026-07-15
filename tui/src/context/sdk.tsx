@@ -176,7 +176,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         async listUpstreamPools() {
           return request<{ pools: UpstreamPool[] }>("/api/upstream-pools").then((result) => result.pools ?? [])
         },
-        async createUpstream(input: { name: string }) {
+        async createUpstream(input: { name: string; source?: string }) {
           return request<RedactedUpstream>("/api/upstreams", {
             method: "POST",
             headers: { "content-type": "application/json" },

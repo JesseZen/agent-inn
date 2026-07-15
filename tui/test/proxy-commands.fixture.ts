@@ -241,7 +241,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     getWorkerRoute: [] as string[],
     patchModuleRoute: [] as string[],
     patchWorkerBodies: [] as Array<Record<string, unknown>>,
-    createUpstream: [] as Array<{ name: string }>,
+    createUpstream: [] as Array<{ name: string; source?: string }>,
     patchUpstream: [] as Array<{ id: string; body: { name?: string; base_url?: string; api_key?: string; api_format?: string; protocol_probe?: { model: string } } }>,
     createUpstreamPool: [] as Array<{ name: string; upstreams: string[]; circuit_breaker?: CircuitBreaker }>,
     patchUpstreamPool: [] as Array<{
@@ -386,15 +386,17 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
     const method = (init?.method ?? request?.method ?? "GET").toUpperCase()
 
     if (url.pathname === "/api/upstreams" && method === "POST") {
-      const body = JSON.parse(String(init?.body ?? "null")) as { name: string }
+      const body = JSON.parse(String(init?.body ?? "null")) as { name: string; source?: string }
       calls.createUpstream.push(body)
       const id = `up_${providers.size + 1}`
+      const source = body.source ? providers.get(body.source) : undefined
       const upstream: RedactedUpstream = {
         id,
         name: body.name,
-        base_url: "",
-        has_api_key: false,
-        api_format: "chat_completions",
+        base_url: source?.base_url ?? "",
+        has_api_key: source?.has_api_key ?? false,
+        api_format: source?.api_format ?? "chat_completions",
+        protocol_probe: source?.protocol_probe,
       }
       providers.set(id, upstream)
       return json(upstream, { status: 201 })
@@ -964,6 +966,7 @@ export async function openUpstreamManager(app: ProxyApp) {
 
 export async function openUpstreamEditor(app: ProxyApp, name: string) {
   await openUpstreamManager(app)
+  await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")
   await runCommand(app, "dialog.select.next")

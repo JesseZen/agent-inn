@@ -93,6 +93,12 @@ const expectedProxyEn = {
   "proxy.upstream.available": "Available",
   "proxy.upstream.fields": "Fields",
   "proxy.upstream.delete": "Delete Upstream",
+  "proxy.upstream.duplicate": "Duplicate Upstream",
+  "proxy.upstream.duplicateDescription": "Copy an existing upstream configuration",
+  "proxy.upstream.duplicateSelect": "Select upstream to duplicate",
+  "proxy.upstream.duplicateName": "Name for duplicated upstream",
+  "proxy.upstream.duplicateNamePlaceholder": "New upstream name",
+  "proxy.upstream.duplicated": "Duplicated upstream {{name}}",
   "proxy.upstream.deleteConfirmTitle": "Delete upstream",
   "proxy.upstream.deleteConfirm": "Delete {{name}}? This will remove the provider config.",
   "proxy.upstream.saveApiKey": "Save API Key",
@@ -305,7 +311,7 @@ function placeholderMap(values: Record<string, string>) {
 }
 
 test("Proxy dictionaries match the frozen static inventory", () => {
-  expect(Object.keys(proxyEn)).toHaveLength(291)
+  expect(Object.keys(proxyEn)).toHaveLength(297)
   expect(Object.keys(proxyEn).sort()).toEqual(Object.keys(expectedProxyEn).sort())
   expect(proxyEn).toEqual(expectedProxyEn)
   expect(Object.keys(proxyZhCN).sort()).toEqual(Object.keys(expectedProxyEn).sort())

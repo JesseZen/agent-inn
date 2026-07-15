@@ -195,6 +195,7 @@ test("upstream manager renders protocol, reachability, unknown, and mixed pool r
     try {
       await openUpstreamManager(app)
       await runCommand(app, "dialog.select.next")
+      await runCommand(app, "dialog.select.next")
       await runCommand(app, "dialog.select.submit")
       await runCommand(app, "dialog.select.end")
       await wait(async () => {
@@ -216,6 +217,7 @@ test("upstream manager preserves map-key IDs for mouse selection", async () => {
   })
   try {
     await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")

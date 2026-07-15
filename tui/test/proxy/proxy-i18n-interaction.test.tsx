@@ -328,6 +328,7 @@ test("Chinese Proxy errors preserve the upstream error body", async () => {
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await wait(() => app.frame().includes("编辑上游：openai"))
     expect(app.frame()).toContain("编辑上游")

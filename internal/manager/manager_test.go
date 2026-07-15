@@ -4496,6 +4496,34 @@ func TestManagerCreateUpstreamAllocatesPersistentID(t *testing.T) {
 	}
 }
 
+func TestManagerCreateUpstreamCopiesSourceProfile(t *testing.T) {
+	m := New(Config{Config: config.Config{
+		Upstreams: map[string]config.UpstreamProfile{
+			"openai": {
+				Name:          "OpenAI",
+				BaseURL:       "https://api.openai.com/v1",
+				APIKey:        "sk-secret",
+				APIFormat:     "responses",
+				ProtocolProbe: config.ProtocolProbeConfig{Model: "gpt-5"},
+			},
+		},
+	}})
+	res := httptest.NewRecorder()
+	m.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "http://manager.local/api/upstreams", strings.NewReader(`{"name":"OpenAI Copy","source":"openai"}`)))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("unexpected status %d: %s", res.Code, res.Body.String())
+	}
+	if got := m.upstreamProfileSnapshot()["up_1"]; !reflect.DeepEqual(got, config.UpstreamProfile{
+		Name:          "OpenAI Copy",
+		BaseURL:       "https://api.openai.com/v1",
+		APIKey:        "sk-secret",
+		APIFormat:     "responses",
+		ProtocolProbe: config.ProtocolProbeConfig{Model: "gpt-5"},
+	}) {
+		t.Fatalf("unexpected copied profile: %#v", got)
+	}
+}
+
 func TestManagerPatchMissingUpstreamReturnsNotFound(t *testing.T) {
 	m := New(Config{Config: config.Config{}})
 	res := httptest.NewRecorder()

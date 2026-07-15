@@ -12,7 +12,7 @@ import { DialogPool } from "./dialog-pool"
 import { useLanguage } from "../context/language"
 import type { TranslationKey, Translate } from "../i18n/en"
 
-type UpstreamOption = { type: "create" } | { type: "edit"; id: string } | { type: "test-all" } | { type: "pools" }
+type UpstreamOption = { type: "create" } | { type: "duplicate" } | { type: "edit"; id: string } | { type: "test-all" } | { type: "pools" }
 type FieldKey = "name" | "base_url" | "api_key" | "api_format" | "protocol_probe_model"
 
 export type Draft = {
@@ -56,6 +56,12 @@ export function DialogUpstream() {
 
   const options = createMemo<DialogSelectOption<UpstreamOption>[]>(() => [
     { title: t("proxy.upstream.create"), value: { type: "create" }, description: t("proxy.upstream.createDescription"), category: t("common.actions") },
+    {
+      title: t("proxy.upstream.duplicate"),
+      value: { type: "duplicate" },
+      description: t("proxy.upstream.duplicateDescription"),
+      category: t("common.actions"),
+    },
     { title: t("proxy.upstream.testAll"), value: { type: "test-all" as const }, description: t("proxy.upstream.testAllDescription"), category: t("common.actions") },
     { title: t("proxy.upstream.managePools"), value: { type: "pools" as const }, description: t("proxy.upstream.managePoolsDescription"), category: t("common.actions") },
     ...sync.data.upstreams.map((upstream) => {
@@ -106,6 +112,37 @@ export function DialogUpstream() {
           } catch (err) {
             toast.error(err)
           }
+          return
+        }
+
+        if (value.type === "duplicate") {
+          dialog.push(() => (
+            <DialogSelect
+              title={t("proxy.upstream.duplicateSelect")}
+              options={sync.data.upstreams.map((source) => ({
+                title: source.name,
+                value: source.id,
+                description: source.base_url ?? "",
+                category: t("proxy.upstream.configured"),
+              }))}
+              placeholder={t("proxy.upstream.search")}
+              onSelect={async (sourceOption) => {
+                dialog.pop()
+                const name = await DialogPrompt.show(dialog, t("proxy.upstream.duplicateName"), {
+                  value: `${sourceOption.title} copy`,
+                  placeholder: t("proxy.upstream.duplicateNamePlaceholder"),
+                })
+                if (name === null || !name.trim()) return
+                try {
+                  await sdk.client.createUpstream({ name: name.trim(), source: sourceOption.value })
+                  await sync.bootstrap({ fatal: false })
+                  toast.show({ message: t("proxy.upstream.duplicated", { name: name.trim() }), variant: "success" })
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            />
+          ))
           return
         }
 

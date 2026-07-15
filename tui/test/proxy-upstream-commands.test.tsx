@@ -137,6 +137,35 @@ test("proxy upstream registers an upstream command", async () => {
   }
 })
 
+test("proxy upstream duplicates an existing upstream from the main actions", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    await openUpstreamManager(app)
+    expect(app.frame()).toContain("Duplicate Upstream")
+
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Select upstream to duplicate")
+    })
+
+    await runCommand(app, "dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Name for duplicated upstream")
+    })
+    app.api.keymap.dispatchCommand("dialog.prompt.submit")
+    await wait(() => app.calls.createUpstream.length === 1)
+
+    expect(app.calls.createUpstream).toEqual([{ name: "openai copy", source: "openai" }])
+    expect(app.calls.patchUpstream).toEqual([])
+  } finally {
+    await app.cleanup()
+  }
+})
+
 test("proxy upstream selection opens field list and saves provider", async () => {
   const app = await mountProxyApp()
 
@@ -344,6 +373,7 @@ test("proxy upstream editor deletes upstream after confirmation", async () => {
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await runCommand(app, "dialog.select.end")
     app.api.keymap.dispatchCommand("dialog.select.submit")
@@ -381,6 +411,7 @@ test("proxy upstream editor returns to manager after deleting the last upstream"
 
   try {
     await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
@@ -529,6 +560,7 @@ test("proxy upstream manager tests all upstreams and shows toast", async () => {
 
   try {
     await openUpstreamManager(app)
+    await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.next")
     await runCommand(app, "dialog.select.submit")
     await wait(() => app.calls.testAllUpstreams === 1)

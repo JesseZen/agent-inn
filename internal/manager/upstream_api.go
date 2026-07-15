@@ -15,7 +15,8 @@ import (
 func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var payload struct {
-			Name string `json:"name"`
+			Name   string `json:"name"`
+			Source string `json:"source,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
@@ -27,6 +28,16 @@ func (m *Manager) handleUpstreams(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		profile := config.UpstreamProfile{Name: name, APIFormat: "chat_completions"}
+		if payload.Source != "" {
+			profiles := m.upstreamProfileSnapshot()
+			source, exists := profiles[payload.Source]
+			if !exists {
+				writeJSON(rw, http.StatusNotFound, map[string]any{"error": "source upstream not found"})
+				return
+			}
+			profile = source
+			profile.Name = name
+		}
 		var id string
 		m.updateConfig(func(cfgRoot *config.Config) {
 			id = fmt.Sprintf("up_%d", cfgRoot.NextUpstreamID)
