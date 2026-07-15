@@ -203,6 +203,7 @@ function createProxyHarness(input: ProxyHarnessInput = {}) {
           socket_name: "ainn",
           host_session: "ainn-host",
           host_start_mode: "new-window",
+          status_bar_height: 2,
           turn_status_hooks: false,
         },
       },

@@ -23,11 +23,11 @@ func tmuxExtendedKeysSocketCommand(socketPath string) []string {
 }
 
 func tmuxResetMainWindowStatusCommand(socketName string, hostSession string) []string {
-	return []string{"tmux", "-L", socketName, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format"}
+	return []string{"tmux", "-L", socketName, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-style", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-style"}
 }
 
 func tmuxResetMainWindowStatusSocketCommand(socketPath string, hostSession string) []string {
-	return []string{"tmux", "-S", socketPath, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format"}
+	return []string{"tmux", "-S", socketPath, "set-window-option", "-t", hostSession + ":0", "-u", "window-status-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-format", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-style", ";", "set-window-option", "-t", hostSession + ":0", "-u", "window-status-current-style"}
 }
 
 func hostedTestTmuxSettings(socketName string, hostSession string) config.Settings {

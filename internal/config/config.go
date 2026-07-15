@@ -17,6 +17,10 @@ const (
 	TmuxHostStartModeNewWindow        = "new-window"
 	TmuxHostStartModeReuseFirstWindow = "reuse-first-window"
 	TmuxHostStartModeMainTUIWindow    = "main-tui-window"
+
+	MinTmuxStatusBarHeight     = 1
+	DefaultTmuxStatusBarHeight = 2
+	MaxTmuxStatusBarHeight     = 5
 )
 
 type Config struct {
@@ -113,6 +117,7 @@ type TmuxSettings struct {
 	HostStartMode   string `yaml:"host_start_mode" json:"host_start_mode"`
 	TurnStatusHooks bool   `yaml:"turn_status_hooks" json:"turn_status_hooks"`
 	HostedPopupKey  string `yaml:"hosted_popup_key" json:"hosted_popup_key"`
+	StatusBarHeight int    `yaml:"status_bar_height" json:"status_bar_height"`
 }
 
 type WorkerConfig struct {
@@ -235,6 +240,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Settings.Terminal.Tmux.HostStartMode == "" {
 		c.Settings.Terminal.Tmux.HostStartMode = TmuxHostStartModeNewWindow
 	}
+	if c.Settings.Terminal.Tmux.StatusBarHeight == 0 {
+		c.Settings.Terminal.Tmux.StatusBarHeight = DefaultTmuxStatusBarHeight
+	}
 	if c.Settings.Metrics.RetentionDays == 0 {
 		c.Settings.Metrics.RetentionDays = 30
 	}
@@ -322,6 +330,10 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
+	statusBarHeight := c.Settings.Terminal.Tmux.StatusBarHeight
+	if statusBarHeight != 0 && (statusBarHeight < MinTmuxStatusBarHeight || statusBarHeight > MaxTmuxStatusBarHeight) {
+		return fmt.Errorf("terminal tmux status_bar_height must be between %d and %d", MinTmuxStatusBarHeight, MaxTmuxStatusBarHeight)
+	}
 	workerNames := make([]string, 0, len(c.Workers))
 	for name := range c.Workers {
 		workerNames = append(workerNames, name)

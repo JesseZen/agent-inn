@@ -128,18 +128,6 @@ func TestInstallTmuxHostedInteractionsRejectsConfigPathPrefixBindings(t *testing
 	}
 }
 
-func TestHostedInteractionRenamePromptDoesNotInterpolateWindowName(t *testing.T) {
-	configDir := "/tmp/config;touch /tmp/pwned"
-	windowName := `$(touch /tmp/pwned);"quoted"`
-	command := hostedSessionRenamePromptCommand(configDir, "/tmp/ainn", "@12", windowName)
-	if !strings.Contains(command, "%%%") {
-		t.Fatalf("prompt must use tmux response substitution: %q", command)
-	}
-	if strings.Contains(command, windowName) {
-		t.Fatalf("window input must not be interpolated into command: %q", command)
-	}
-}
-
 func TestInstallTmuxHostedInteractionsRecognizesNativeTmuxBindings(t *testing.T) {
 	if !isNativeHostedInteractionBinding(`bind-key -T root MouseDown3Status display-menu -T "#[align=centre]#{window_index}:#{window_name}" -t = -x W -y W "#{?#{>:#{session_windows},1},,-}Swap Left" l { swap-window -t :-1 } "#{?#{>:#{session_windows},1},,-}Swap Right" r { swap-window -t :+1 } "#{?pane_marked_set,,-}Swap Marked" s { swap-window } '' Kill X { kill-window } Respawn R { respawn-window -k } "#{?pane_marked,Unmark,Mark}" m { select-pane -m } Rename n { command-prompt -F -I "#W" { rename-window -t "#{window_id}" "%%" } } '' "New After" w { new-window -a } "New At End" W { new-window }`, manager.TmuxHostedInteractionMouseKey) {
 		t.Fatal("expected tmux native status menu binding")
@@ -182,7 +170,7 @@ func TestRunHostedSessionMenuOrdersReadTurnActions(t *testing.T) {
 	defer func() { launchRunnerFactory = previous }()
 
 	var stderr bytes.Buffer
-	code := runHostedSessionMenu([]string{"--config-dir", configDir, "--window-id", "@12", "--window-name", "review", "--client-name", "client-1", "--x", "8", "--y", "2"}, io.Discard, &stderr)
+	code := runHostedSessionMenu([]string{"--config-dir", configDir, "--window-id", "@12", "--window-name", "review", "--client-name", "client-1"}, io.Discard, &stderr)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -200,6 +188,26 @@ func TestRunHostedSessionMenuOrdersReadTurnActions(t *testing.T) {
 			t.Fatalf("menu order got %#v", got)
 		}
 		last = index
+	}
+	if !reflect.DeepEqual(got[:14], []string{
+		"tmux", "-L", "ainn-test", "display-menu", "-M", "-O", "-c", "client-1",
+		"-t", "ainn-host:@12", "-x", "W", "-y", "S",
+	}) {
+		t.Fatalf("menu placement got %#v", got)
+	}
+	renameIndex := -1
+	for i, arg := range got {
+		if arg == "Rename" {
+			renameIndex = i
+			break
+		}
+	}
+	if renameIndex < 0 {
+		t.Fatalf("missing Rename in %#v", got)
+	}
+	renameCommand := got[renameIndex+2]
+	if !strings.Contains(renameCommand, "hosted-session rename-or-native") || strings.Contains(renameCommand, "command-prompt") {
+		t.Fatalf("rename command got %q", renameCommand)
 	}
 }
 

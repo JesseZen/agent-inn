@@ -201,15 +201,6 @@ func hostedInteractionCommandQuote(value string) string {
 	return "\"" + value + "\""
 }
 
-func hostedSessionRenamePromptCommand(configDir string, executable string, windowID string, windowName string) string {
-	shellCommand := hostedInteractionShellQuote(executable) +
-		" hosted-session rename-current --config-dir " + hostedInteractionShellQuote(configDir) +
-		" --window-id " + hostedInteractionShellQuote(windowID) +
-		" --window-name #{q:window_name}"
-	return "command-prompt -p \"Rename hosted session\" -I " + hostedInteractionCommandQuote(windowName) +
-		" \"rename-window \\\"%%%\\\" ; run-shell -b " + hostedInteractionCommandQuote(shellCommand) + "\""
-}
-
 func hostedSessionNativeRenamePromptCommand(windowName string) string {
 	return "command-prompt -p \"Rename window\" -I " + hostedInteractionCommandQuote(windowName) + " \"rename-window \\\"%%%\\\"\""
 }
@@ -370,8 +361,6 @@ func runHostedSessionMenu(args []string, stdout io.Writer, stderr io.Writer) int
 	windowID := flags.String("window-id", "", "tmux window id")
 	_ = flags.String("window-name", "", "tmux window name")
 	clientName := flags.String("client-name", "", "tmux client name")
-	x := flags.String("x", "0", "menu x position")
-	y := flags.String("y", "0", "menu y position")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -399,10 +388,11 @@ func runHostedSessionMenu(args []string, stdout io.Writer, stderr io.Writer) int
 	}
 	executable := hostedSessionExecutable()
 	setMarkerCommand := hostedInteractionShellQuote(executable) + " hosted-session set-marker --config-dir " + hostedInteractionShellQuote(resolvedConfigDir) + " --window-id " + hostedInteractionShellQuote(session.TmuxWindowID) + " --marker " + hostedInteractionShellQuote(markerValue)
+	renameCommand := hostedInteractionShellQuote(executable) + " hosted-session rename-or-native --config-dir " + hostedInteractionShellQuote(resolvedConfigDir) + " --window-id " + hostedInteractionShellQuote(session.TmuxWindowID) + " --window-name #{q:window_name}"
 	entries := []string{
 		"Open", "o", "select-window -t " + target,
 		markerLabel, "m", "run-shell -b " + hostedInteractionCommandQuote(setMarkerCommand),
-		"Rename", "r", hostedSessionRenamePromptCommand(resolvedConfigDir, executable, session.TmuxWindowID, session.SessionLabel),
+		"Rename", "r", "run-shell -b " + hostedInteractionCommandQuote(renameCommand),
 	}
 	state := snapshot.Turn.State
 	terminal := state == manager.HostedTurnStateDone || state == manager.HostedTurnStateFailed || state == manager.HostedTurnStateInterrupted
@@ -417,7 +407,7 @@ func runHostedSessionMenu(args []string, stdout io.Writer, stderr io.Writer) int
 	}
 	entries = append(entries, "Hosted Terminal", "h", hostedInteractionDisplayPopupCommand(resolvedConfigDir, managerURL, executable))
 	runner := launchRunnerFactory(io.Discard, stderr)
-	if _, err := runner.Run(manager.TmuxDisplayMenuCommandForSettings(cfg.Settings, *clientName, *x, *y, entries...)); err != nil {
+	if _, err := runner.Run(manager.TmuxDisplayMenuCommandForSettings(cfg.Settings, *clientName, target, entries...)); err != nil {
 		fmt.Fprintf(stderr, "failed to display hosted session menu: %v\n", err)
 		return 1
 	}

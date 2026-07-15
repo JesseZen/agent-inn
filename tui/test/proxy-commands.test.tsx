@@ -378,7 +378,7 @@ test("proxy settings host start mode accepts main-tui-window", async () => {
   }
 })
 
-test("proxy settings turn status hooks uses a select list", async () => {
+test("proxy settings tmux status bar height uses a select list", async () => {
   const app = await mountProxyApp()
 
   try {
@@ -389,6 +389,39 @@ test("proxy settings turn status hooks uses a select list", async () => {
     })
 
     for (let i = 0; i < 7; i++) {
+      app.api.keymap.dispatchCommand("dialog.select.next")
+      await app.render()
+    }
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await app.render()
+    expect(app.frame()).toContain("Tmux Status Bar Height")
+    await runCommand(app, "dialog.select.next")
+    await runCommand(app, "dialog.select.next")
+    app.api.keymap.dispatchCommand("dialog.select.submit")
+    await wait(async () => {
+      await app.render()
+      return app.calls.patchSettings.some((entry) => entry.terminal?.tmux?.status_bar_height === 3)
+    })
+
+    expect(app.calls.patchSettings).toContainEqual({
+      terminal: { tmux: { status_bar_height: 3 } },
+    })
+  } finally {
+    await app.cleanup()
+  }
+})
+
+test("proxy settings turn status hooks uses a select list", async () => {
+  const app = await mountProxyApp()
+
+  try {
+    app.api.keymap.dispatchCommand("proxy.settings")
+    await wait(async () => {
+      await app.render()
+      return app.frame().includes("Settings") && app.frame().includes("State Dir ~/.ainn")
+    })
+
+    for (let i = 0; i < 8; i++) {
       app.api.keymap.dispatchCommand("dialog.select.next")
       await app.render()
     }

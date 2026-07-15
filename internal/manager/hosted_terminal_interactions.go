@@ -42,8 +42,7 @@ func TmuxHostedInteractionMouseBindingCommandForSettings(settings config.Setting
 		" hosted-session menu --config-dir " + tmuxShellQuote(configDir) +
 		" --window-id #{window_id}" +
 		" --window-name " + tmuxShellEscapedWindowNameFormat +
-		" --client-name #{q:client_name}" +
-		" --x #{mouse_x} --y #{mouse_y}"
+		" --client-name #{q:client_name}"
 	command := "run-shell -b -t = " + tmuxCommandQuote(shellCommand)
 	return append(tmuxPrefixForSettings(settings),
 		"bind-key", "-T", "root", TmuxHostedInteractionMouseKey, command,
@@ -78,7 +77,7 @@ func TmuxNativeRenameWindowPromptCommandForSettings(settings config.Settings, wi
 	)
 }
 
-func TmuxDisplayMenuCommandForSettings(settings config.Settings, clientName string, x string, y string, entries ...string) []string {
-	args := append(tmuxPrefixForSettings(settings), "display-menu", "-c", clientName, "-x", x, "-y", y, "-T", "Hosted Sessions")
+func TmuxDisplayMenuCommandForSettings(settings config.Settings, clientName string, target string, entries ...string) []string {
+	args := append(tmuxPrefixForSettings(settings), "display-menu", "-M", "-O", "-c", clientName, "-t", target, "-x", "W", "-y", "S", "-T", "Hosted Sessions")
 	return append(args, entries...)
 }

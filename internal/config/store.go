@@ -88,15 +88,28 @@ func (s *Store) Config() Config {
 }
 
 func (s *Store) Update(fn func(*Config)) {
+	_ = s.UpdateIf(func(cfg *Config) error {
+		fn(cfg)
+		return nil
+	})
+}
+
+func (s *Store) UpdateIf(fn func(*Config) error) error {
 	s.mu.Lock()
-	fn(&s.config)
-	s.config.ApplyDefaults()
+	candidate := s.config.Clone()
+	if err := fn(&candidate); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	candidate.ApplyDefaults()
+	s.config = candidate
 	s.revision++
 	s.status.Dirty = true
 	requests := s.saveRequests
 	s.mu.Unlock()
 
 	notifySaveRequest(requests)
+	return nil
 }
 
 func (s *Store) SetWriterForTest(writer func(string, []byte, os.FileMode) error) {

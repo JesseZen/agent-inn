@@ -13,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/logging"
+	"github.com/jesse/agent-inn/internal/manager"
 )
 
 const (
@@ -33,6 +35,7 @@ var (
 	rootSupervisor                   = superviseRoot
 	rootSupervisedRunner             = runSupervisedRoot
 	rootSupervisorRefreshEnvironment = refreshRootSupervisorEnvironment
+	rootSupervisorRefreshTmuxTheme   = refreshRootSupervisorTmuxTheme
 )
 
 func superviseRoot(opts RootOptions) error {
@@ -44,7 +47,43 @@ func superviseRoot(opts RootOptions) error {
 		if err := rootSupervisorRefreshEnvironment(); err != nil {
 			return err
 		}
+		if err := rootSupervisorRefreshTmuxTheme(opts); err != nil {
+			return err
+		}
 	}
+}
+
+func refreshRootSupervisorTmuxTheme(opts RootOptions) error {
+	if opts.ConfigPath == "" {
+		return nil
+	}
+	if opts.Config.Settings.Terminal.Tmux.HostStartMode != config.TmuxHostStartModeMainTUIWindow {
+		return nil
+	}
+	cfg, err := config.LoadFile(opts.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("refresh tmux theme: load config: %w", err)
+	}
+	if cfg.Settings.Terminal.Tmux.HostStartMode != config.TmuxHostStartModeMainTUIWindow {
+		return nil
+	}
+	stdout := opts.Stdout
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	command := manager.TmuxThemeCommandForSettings(cfg.Settings)
+	if currentSocketPath, _, _ := strings.Cut(os.Getenv("TMUX"), ","); currentSocketPath != "" {
+		command[1] = "-S"
+		command[2] = currentSocketPath
+	}
+	if _, err := rootTmuxRunnerFactory(stdout, stderr).Run(command); err != nil {
+		return fmt.Errorf("refresh tmux theme: %w", err)
+	}
+	return nil
 }
 
 func refreshRootSupervisorEnvironment() error {

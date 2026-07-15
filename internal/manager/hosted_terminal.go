@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/jesse/agent-inn/internal/config"
@@ -18,11 +19,14 @@ const (
 	tmuxAINNAccentForeground      = "colour231"
 	tmuxAINNAccentBackground      = "colour96"
 	tmuxMainWindowStatusLeft      = "#[range=window|0]#[fg=" + tmuxAINNAccentForeground + ",bg=" + tmuxAINNAccentBackground + ",bold] 0:ainn #[norange]#[default]"
-	tmuxMainWindowStatusFormat    = "#{?#{==:#{window_index},0},,#[fg=colour244]#[bg=colour235] #I:#W #[default]}"
-	tmuxMainWindowCurrentFormat   = "#{?#{==:#{window_index},0},,#[fg=colour0]#[bg=colour45]#[bold] #I:#W #[default]}"
+	tmuxMainWindowStatusFormat    = "#{?#{==:#{window_index},0},, #I:#W }"
+	tmuxMainWindowCurrentFormat   = "#{?#{==:#{window_index},0},, #I:#W }"
 	tmuxHostedSessionsStatusRight = "#[range=user|ainn-sessions]#[fg=" + tmuxAINNAccentForeground + ",bg=" + tmuxAINNAccentBackground + ",bold] Sessions #[default]"
-	tmuxWindowStatusFormat        = "#[fg=colour244,bg=colour235] #I:#W #[default]"
-	tmuxWindowStatusCurrentFormat = "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
+	tmuxWindowStatusFormat        = " #I:#W "
+	tmuxWindowStatusCurrentFormat = " #I:#W "
+	tmuxWindowStatusStyle         = "fg=colour244,bg=colour235"
+	tmuxWindowStatusCurrentStyle  = "fg=colour0,bg=colour45,bold"
+	tmuxStatusSpacerFormat        = "#[align=left range=left]#[range=window|0 fg=" + tmuxAINNAccentForeground + ",bg=" + tmuxAINNAccentBackground + ",bold]#{R: ,#{w:#{E:status-left}}}#[norange default]#[list=on align=#{status-justify}]#{W:#[range=window|#{window_index} #{E:window-status-style}]#{R: ,#{w:#{E:window-status-format}}}#[norange default]#{?loop_last_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{E:window-status-current-style}]#{R: ,#{w:#{E:window-status-current-format}}}#[norange default list=on]#{?loop_last_flag,,#{window-status-separator}}}#[nolist align=right range=right]#[range=user|ainn-sessions fg=" + tmuxAINNAccentForeground + ",bg=" + tmuxAINNAccentBackground + ",bold]#{R: ,#{w:#{E:status-right}}}#[norange default]"
 )
 
 func defaultTmuxSettings() config.Settings {
@@ -134,7 +138,9 @@ func TmuxResetMainWindowStatusCommandForSettings(settings config.Settings) []str
 	target := tmuxMainWindowTargetForSettings(settings)
 	return append(tmuxPrefixForSettings(settings),
 		"set-window-option", "-t", target, "-u", "window-status-format", ";",
-		"set-window-option", "-t", target, "-u", "window-status-current-format",
+		"set-window-option", "-t", target, "-u", "window-status-current-format", ";",
+		"set-window-option", "-t", target, "-u", "window-status-style", ";",
+		"set-window-option", "-t", target, "-u", "window-status-current-style",
 	)
 }
 
@@ -203,6 +209,10 @@ func TmuxEnableExtendedKeysCommandForSettings(settings config.Settings) []string
 // without re-injection. This mirrors the existing mouse setting which also
 // uses -g.
 func TmuxThemeCommandForSettings(settings config.Settings) []string {
+	settingsConfig := config.Config{Settings: settings}
+	settingsConfig.ApplyDefaults()
+	settings = settingsConfig.Settings
+
 	statusLeft := ""
 	windowStatusFormat := tmuxWindowStatusFormat
 	windowStatusCurrentFormat := tmuxWindowStatusCurrentFormat
@@ -211,13 +221,26 @@ func TmuxThemeCommandForSettings(settings config.Settings) []string {
 		windowStatusFormat = tmuxMainWindowStatusFormat
 		windowStatusCurrentFormat = tmuxMainWindowCurrentFormat
 	}
-	return append(tmuxPrefixForSettings(settings),
-		"set-option", "-g", "status", "on", ";",
+	status := "on"
+	if settings.Terminal.Tmux.StatusBarHeight > config.MinTmuxStatusBarHeight {
+		status = strconv.Itoa(settings.Terminal.Tmux.StatusBarHeight)
+	}
+	command := append(tmuxPrefixForSettings(settings),
+		"set-option", "-g", "status", status, ";",
+	)
+	for row := 1; row < settings.Terminal.Tmux.StatusBarHeight; row++ {
+		command = append(command,
+			"set-option", "-g", "status-format["+strconv.Itoa(row)+"]", tmuxStatusSpacerFormat, ";",
+		)
+	}
+	return append(command,
 		"set-option", "-g", "status-left", statusLeft, ";",
 		"set-option", "-g", "status-right", tmuxHostedSessionsStatusRight, ";",
-		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
+		"set-option", "-g", "status-style", tmuxWindowStatusStyle, ";",
 		"set-window-option", "-g", "window-status-format", windowStatusFormat, ";",
 		"set-window-option", "-g", "window-status-current-format", windowStatusCurrentFormat, ";",
+		"set-window-option", "-g", "window-status-style", tmuxWindowStatusStyle, ";",
+		"set-window-option", "-g", "window-status-current-style", tmuxWindowStatusCurrentStyle, ";",
 		"set-window-option", "-g", "automatic-rename", "off",
 	)
 }

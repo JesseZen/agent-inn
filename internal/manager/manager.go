@@ -621,7 +621,16 @@ func (m *Manager) workerByRouteKey(key string) (string, config.WorkerConfig, boo
 }
 
 func (m *Manager) updateConfig(fn func(*config.Config)) {
-	m.store.Update(fn)
+	_ = m.updateConfigIf(func(cfg *config.Config) error {
+		fn(cfg)
+		return nil
+	})
+}
+
+func (m *Manager) updateConfigIf(fn func(*config.Config) error) error {
+	if err := m.store.UpdateIf(fn); err != nil {
+		return err
+	}
 	_, status := m.syncConfigFromStore()
 	if err := syncCodexProfileFiles(m.config); err != nil {
 		m.mu.Lock()
@@ -639,6 +648,7 @@ func (m *Manager) updateConfig(fn func(*config.Config)) {
 		m.mu.Unlock()
 	}
 	m.publishEvent(EventConfigStatusChanged, map[string]any{"dirty": status.Dirty, "generation": status.Generation})
+	return nil
 }
 
 func (m *Manager) syncConfigFromStore() (config.Config, config.Status) {

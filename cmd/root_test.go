@@ -1599,6 +1599,135 @@ func TestRunRootMainTUIWindowResetsInheritedTurnStatus(t *testing.T) {
 	}
 }
 
+func TestRunRootMainTUIWindowRestoresHostedInteractionBindings(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeMainTUIWindow)
+	cfg, err := config.LoadFile(filepath.Join(dir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	if _, err := registry.Create(manager.HostedSessionRecord{
+		SessionLabel: "existing hosted session",
+		WorkerName:   "worker",
+		WorkerPort:   11199,
+		TmuxWindowID: "@12",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedDir, err := canonicalHostedInteractionConfigDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [][]string
+	previousTmux := rootTmuxRunnerFactory
+	rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+		return rootTmuxRunnerFunc(func(args []string) (string, error) {
+			got = append(got, append([]string{}, args...))
+			switch {
+			case tmuxSubcommand(args) == "list-panes":
+				return "0\tenv " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
+			case reflect.DeepEqual(args, manager.TmuxShowMouseCommandForSettings(cfg.Settings)):
+				return "off\n", nil
+			case reflect.DeepEqual(args, manager.TmuxListHostedInteractionBindingCommandForSettings(cfg.Settings, "root", manager.TmuxHostedInteractionMouseKey)):
+				return tmuxNativeMouseDown3StatusBinding + "\n", nil
+			case reflect.DeepEqual(args, manager.TmuxListHostedInteractionBindingCommandForSettings(cfg.Settings, "prefix", manager.TmuxHostedInteractionRenameKey)):
+				return tmuxNativeRenameWindowBinding + "\n", nil
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { rootTmuxRunnerFactory = previousTmux }()
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	if code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr); code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+
+	want := [][]string{
+		{"tmux", "-V"},
+		{"tmux", "-L", "ainn-test", "has-session", "-t", "ainn-test-host"},
+		{"tmux", "-L", "ainn-test", "list-panes", "-t", "ainn-test-host:0", "-F", "#{window_index}\t#{pane_start_command}"},
+		tmuxResetMainWindowStatusCommand("ainn-test", "ainn-test-host"),
+		tmuxMainWindowThemeCommand("ainn-test", "ainn-test-host"),
+		tmuxExtendedKeysCommand("ainn-test"),
+		manager.TmuxShowMouseCommandForSettings(cfg.Settings),
+		manager.TmuxEnableMouseCommandForSettings(cfg.Settings),
+		manager.TmuxHostedInteractionOwnerCommandForSettings(cfg.Settings),
+		manager.TmuxListHostedInteractionBindingCommandForSettings(cfg.Settings, "root", manager.TmuxHostedInteractionMouseKey),
+		manager.TmuxListHostedInteractionBindingCommandForSettings(cfg.Settings, "prefix", manager.TmuxHostedInteractionRenameKey),
+		manager.TmuxSetHostedInteractionOwnerCommandForSettings(cfg.Settings, resolvedDir),
+		manager.TmuxHostedInteractionMouseBindingCommandForSettings(cfg.Settings, resolvedDir, exe),
+		manager.TmuxHostedInteractionRenameBindingCommandForSettings(cfg.Settings, resolvedDir, exe),
+		{"tmux", "-L", "ainn-test", "select-window", "-t", "ainn-test-host:0"},
+		{"tmux", "-L", "ainn-test", "attach-session", "-t", "ainn-test-host"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestRunRootMainTUIWindowReportsMouseTraceWriteErrorDirectly(t *testing.T) {
+	dir := t.TempDir()
+	writeRootConfig(t, dir, "ainn-test", "ainn-test-host", config.TmuxHostStartModeMainTUIWindow)
+	cfg, err := config.LoadFile(filepath.Join(dir, config.ConfigFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := manager.NewHostedSessionRegistry(manager.HostedSessionRegistryPath(cfg.Settings.StateDir))
+	if _, err := registry.Create(manager.HostedSessionRecord{SessionLabel: "existing hosted session", WorkerName: "worker", WorkerPort: 11199, TmuxWindowID: "@12"}); err != nil {
+		t.Fatal(err)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceErr := errors.New(tmuxTraceWriteError + " /tmp/ainn-trace.jsonl")
+	previousTmux := rootTmuxRunnerFactory
+	rootTmuxRunnerFactory = func(stdout io.Writer, stderr io.Writer) rootTmuxRunner {
+		return rootTmuxRunnerFunc(func(args []string) (string, error) {
+			switch {
+			case tmuxSubcommand(args) == "list-panes":
+				return "0\tenv " + tmuxRootChildEnvVar + "=1 " + exe + " --config-dir " + dir + " --manager-port 19090\n", nil
+			case reflect.DeepEqual(args, manager.TmuxShowMouseCommandForSettings(cfg.Settings)):
+				return "", traceErr
+			default:
+				return "", nil
+			}
+		})
+	}
+	defer func() { rootTmuxRunnerFactory = previousTmux }()
+	restoreRoot := SetRootRunnerForTest(func(opts RootOptions) error {
+		t.Fatalf("root runner should not run when tmux host exists: %#v", opts)
+		return nil
+	})
+	defer restoreRoot()
+	restoreLocker := setRootLockerFactoryForTest(noopLocker{})
+	defer restoreLocker()
+
+	var stderr bytes.Buffer
+	if code := Run([]string{"--config-dir", dir, "--manager-port", "19090"}, &bytes.Buffer{}, &stderr); code == 0 {
+		t.Fatalf("expected non-zero exit, got 0")
+	}
+	if got, want := stderr.String(), traceErr.Error()+"\n"; got != want {
+		t.Fatalf("got stderr %q, want %q", got, want)
+	}
+}
+
 func TestRunRootMainTUIWindowChildCommandUsesNormalizedConfigDir(t *testing.T) {
 	workDir := t.TempDir()
 	dir := filepath.Join(workDir, "config")
@@ -2864,7 +2993,7 @@ func TestRunRootMainTUIWindowAbortsWhenSelectWindowTraceWriteFails(t *testing.T)
 		t.Fatal(err)
 	}
 	theme := strings.Join(tmuxMainWindowThemeCommand("ainn-test", "ainn-test-host")[1:], " ")
-	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{window_index}\t#{pane_start_command}\n-L ainn-test set-window-option -t ainn-test-host:0 -u window-status-format ; set-window-option -t ainn-test-host:0 -u window-status-current-format\n" + theme + "\n-L ainn-test set-option -s extended-keys always ; set-option -s extended-keys-format csi-u ; set-option -s terminal-features[3] xterm*:extkeys\n-L ainn-test select-window -t ainn-test-host:0\n"
+	want := "-V\n-L ainn-test has-session -t ainn-test-host\n-L ainn-test list-panes -t ainn-test-host:0 -F #{window_index}\t#{pane_start_command}\n-L ainn-test set-window-option -t ainn-test-host:0 -u window-status-format ; set-window-option -t ainn-test-host:0 -u window-status-current-format ; set-window-option -t ainn-test-host:0 -u window-status-style ; set-window-option -t ainn-test-host:0 -u window-status-current-style\n" + theme + "\n-L ainn-test set-option -s extended-keys always ; set-option -s extended-keys-format csi-u ; set-option -s terminal-features[3] xterm*:extkeys\n-L ainn-test select-window -t ainn-test-host:0\n"
 	if string(got) != want {
 		t.Fatalf("expected bootstrap to stop after select-window, got %q want %q", string(got), want)
 	}

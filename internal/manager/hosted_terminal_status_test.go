@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"fmt"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 )
+
+const wantTmuxStatusSpacerFormat = "#[align=left range=left]#[range=window|0 fg=colour231,bg=colour96,bold]#{R: ,#{w:#{E:status-left}}}#[norange default]#[list=on align=#{status-justify}]#{W:#[range=window|#{window_index} #{E:window-status-style}]#{R: ,#{w:#{E:window-status-format}}}#[norange default]#{?loop_last_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{E:window-status-current-style}]#{R: ,#{w:#{E:window-status-current-format}}}#[norange default list=on]#{?loop_last_flag,,#{window-status-separator}}}#[nolist align=right range=right]#[range=user|ainn-sessions fg=colour231,bg=colour96,bold]#{R: ,#{w:#{E:status-right}}}#[norange default]"
 
 func TestTmuxListWindowsCommand(t *testing.T) {
 	got := TmuxListWindowsCommand()
@@ -137,10 +140,16 @@ func TestTmuxHostedTurnStatusCommandForSnapshot(t *testing.T) {
 	want := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-format", "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+		"window-status-format", " #I:! #W ",
 		";",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-current-format", "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]",
+		"window-status-current-format", " #I:! #W ",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-style", "fg=colour196,bg=colour235,bold",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-style", "fg=colour231,bg=colour196,bold",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -154,27 +163,31 @@ func TestTmuxHostedTurnStatusCommandForSnapshotRendersPriorityMatrix(t *testing.
 		Status: HostedSessionStatusActive, Turn: HostedSessionTurnSnapshot{State: HostedTurnStateIdle},
 	}
 	cases := []struct {
-		name     string
-		marker   string
-		snapshot HostedSessionSnapshot
-		inactive string
-		current  string
+		name          string
+		marker        string
+		snapshot      HostedSessionSnapshot
+		inactiveLabel string
+		currentLabel  string
+		inactiveStyle string
+		currentStyle  string
 	}{
-		{"waiting todo", "?", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning, NeedsInput: true}, HostedUserMarkerTodo), "#[fg=colour208,bg=colour235,bold] #I:? #W #[default]", "#[fg=colour0,bg=colour208,bold] #I:? #W #[default]"},
-		{"running todo", "*", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning}, HostedUserMarkerTodo), "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"},
-		{"done unread todo", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone, Unread: true}, HostedUserMarkerTodo), "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]", "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"},
-		{"failed unread todo", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateFailed, Unread: true}, HostedUserMarkerTodo), "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]", "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"},
-		{"acknowledged todo", "~", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, HostedUserMarkerTodo), "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]", "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"},
-		{"done read", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, ""), "#[fg=colour244,bg=colour235] #I:+ #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"},
-		{"interrupted read", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateInterrupted}, ""), "#[fg=colour244,bg=colour235] #I:! #W #[default]", "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"},
-		{"idle", ":", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateIdle}, ""), "#[fg=colour244,bg=colour235] #I:#W #[default]", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"},
+		{"waiting todo", "?", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning, NeedsInput: true}, HostedUserMarkerTodo), " #I:? #W ", " #I:? #W ", "fg=colour208,bg=colour235,bold", "fg=colour0,bg=colour208,bold"},
+		{"running todo", "*", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateRunning}, HostedUserMarkerTodo), " #I:* #W ", " #I:* #W ", "fg=colour45,bg=colour235,bold", "fg=colour0,bg=colour45,bold"},
+		{"done unread todo", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone, Unread: true}, HostedUserMarkerTodo), " #I:+ #W ", " #I:+ #W ", "fg=colour46,bg=colour235,bold", "fg=colour0,bg=colour46,bold"},
+		{"failed unread todo", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateFailed, Unread: true}, HostedUserMarkerTodo), " #I:! #W ", " #I:! #W ", "fg=colour196,bg=colour235,bold", "fg=colour231,bg=colour196,bold"},
+		{"acknowledged todo", "~", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, HostedUserMarkerTodo), " #I:~ #W ", " #I:~ #W ", "fg=colour226,bg=colour235,bold", "fg=colour0,bg=colour226,bold"},
+		{"done read", "+", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateDone}, ""), " #I:+ #W ", " #I:+ #W ", "fg=colour244,bg=colour235", "fg=colour0,bg=colour45,bold"},
+		{"interrupted read", "!", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateInterrupted}, ""), " #I:! #W ", " #I:! #W ", "fg=colour244,bg=colour235", "fg=colour0,bg=colour45,bold"},
+		{"idle", ":", snapshotWithTurn(base, HostedSessionTurnSnapshot{State: HostedTurnStateIdle}, ""), " #I:#W ", " #I:#W ", "fg=colour244,bg=colour235", "fg=colour0,bg=colour45,bold"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := TmuxHostedTurnStatusCommandForSnapshot(settings, "@12", tc.snapshot)
 			want := []string{
-				"tmux", "-L", "ainn-test", "set-window-option", "-t", "ainn-test-host:@12", "window-status-format", tc.inactive, ";",
-				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-format", tc.current,
+				"tmux", "-L", "ainn-test", "set-window-option", "-t", "ainn-test-host:@12", "window-status-format", tc.inactiveLabel, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-format", tc.currentLabel, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-style", tc.inactiveStyle, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-style", tc.currentStyle,
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("got %#v, want %#v", got, want)
@@ -205,12 +218,15 @@ func TestTmuxThemeCommandForSettingsPinsMainWindowAndIncludesHostedSessions(t *t
 	got := TmuxThemeCommandForSettings(settings)
 	want := []string{
 		"tmux", "-L", "ainn-test",
-		"set-option", "-g", "status", "on", ";",
+		"set-option", "-g", "status", "2", ";",
+		"set-option", "-g", "status-format[1]", wantTmuxStatusSpacerFormat, ";",
 		"set-option", "-g", "status-left", "#[range=window|0]#[fg=colour231,bg=colour96,bold] 0:ainn #[norange]#[default]", ";",
 		"set-option", "-g", "status-right", "#[range=user|ainn-sessions]#[fg=colour231,bg=colour96,bold] Sessions #[default]", ";",
 		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
-		"set-window-option", "-g", "window-status-format", "#{?#{==:#{window_index},0},,#[fg=colour244]#[bg=colour235] #I:#W #[default]}", ";",
-		"set-window-option", "-g", "window-status-current-format", "#{?#{==:#{window_index},0},,#[fg=colour0]#[bg=colour45]#[bold] #I:#W #[default]}", ";",
+		"set-window-option", "-g", "window-status-format", "#{?#{==:#{window_index},0},, #I:#W }", ";",
+		"set-window-option", "-g", "window-status-current-format", "#{?#{==:#{window_index},0},, #I:#W }", ";",
+		"set-window-option", "-g", "window-status-style", "fg=colour244,bg=colour235", ";",
+		"set-window-option", "-g", "window-status-current-style", "fg=colour0,bg=colour45,bold", ";",
 		"set-window-option", "-g", "automatic-rename", "off",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -223,15 +239,61 @@ func TestTmuxThemeCommandForSettingsPinsMainWindowAndIncludesHostedSessions(t *t
 	}
 }
 
+func TestTmuxThemeCommandForSettingsUsesConfiguredStatusBarHeight(t *testing.T) {
+	cases := []struct {
+		name   string
+		height int
+		status string
+	}{
+		{name: "one row", height: 1, status: "on"},
+		{name: "two rows", height: 2, status: "2"},
+		{name: "five rows", height: 5, status: "5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{
+				SocketName:      "ainn-test",
+				HostSession:     "ainn-test-host",
+				HostStartMode:   config.TmuxHostStartModeNewWindow,
+				StatusBarHeight: tc.height,
+			}}}
+			got := TmuxThemeCommandForSettings(settings)
+			want := []string{
+				"tmux", "-L", "ainn-test",
+				"set-option", "-g", "status", tc.status, ";",
+			}
+			for row := 1; row < tc.height; row++ {
+				want = append(want, "set-option", "-g", fmt.Sprintf("status-format[%d]", row), wantTmuxStatusSpacerFormat, ";")
+			}
+			want = append(want,
+				"set-option", "-g", "status-left", "", ";",
+				"set-option", "-g", "status-right", "#[range=user|ainn-sessions]#[fg=colour231,bg=colour96,bold] Sessions #[default]", ";",
+				"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
+				"set-window-option", "-g", "window-status-format", " #I:#W ", ";",
+				"set-window-option", "-g", "window-status-current-format", " #I:#W ", ";",
+				"set-window-option", "-g", "window-status-style", "fg=colour244,bg=colour235", ";",
+				"set-window-option", "-g", "window-status-current-style", "fg=colour0,bg=colour45,bold", ";",
+				"set-window-option", "-g", "automatic-rename", "off",
+			)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestTmuxThemeCommandForSettingsKeepsFirstHostedWindowInNonMainModes(t *testing.T) {
 	want := []string{
 		"tmux", "-L", "ainn-test",
-		"set-option", "-g", "status", "on", ";",
+		"set-option", "-g", "status", "2", ";",
+		"set-option", "-g", "status-format[1]", wantTmuxStatusSpacerFormat, ";",
 		"set-option", "-g", "status-left", "", ";",
 		"set-option", "-g", "status-right", "#[range=user|ainn-sessions]#[fg=colour231,bg=colour96,bold] Sessions #[default]", ";",
 		"set-option", "-g", "status-style", "fg=colour244,bg=colour235", ";",
-		"set-window-option", "-g", "window-status-format", "#[fg=colour244,bg=colour235] #I:#W #[default]", ";",
-		"set-window-option", "-g", "window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:#W #[default]", ";",
+		"set-window-option", "-g", "window-status-format", " #I:#W ", ";",
+		"set-window-option", "-g", "window-status-current-format", " #I:#W ", ";",
+		"set-window-option", "-g", "window-status-style", "fg=colour244,bg=colour235", ";",
+		"set-window-option", "-g", "window-status-current-style", "fg=colour0,bg=colour45,bold", ";",
 		"set-window-option", "-g", "automatic-rename", "off",
 	}
 	for _, mode := range []string{config.TmuxHostStartModeNewWindow, config.TmuxHostStartModeReuseFirstWindow} {
@@ -274,10 +336,16 @@ func TestTmuxHostedTurnStatusCommandForSnapshotDistinguishesUnreadAndReadDone(t 
 	wantUnread := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-format", "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]",
+		"window-status-format", " #I:+ #W ",
 		";",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-current-format", "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]",
+		"window-status-current-format", " #I:+ #W ",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-style", "fg=colour46,bg=colour235,bold",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-style", "fg=colour0,bg=colour46,bold",
 	}
 	if strings.Join(gotUnread, "\n") != strings.Join(wantUnread, "\n") {
 		t.Fatalf("unread got %#v, want %#v", gotUnread, wantUnread)
@@ -287,10 +355,16 @@ func TestTmuxHostedTurnStatusCommandForSnapshotDistinguishesUnreadAndReadDone(t 
 	wantRead := []string{
 		"tmux", "-L", "ainn-test",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-format", "#[fg=colour244,bg=colour235] #I:+ #W #[default]",
+		"window-status-format", " #I:+ #W ",
 		";",
 		"set-window-option", "-t", "ainn-test-host:@12",
-		"window-status-current-format", "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]",
+		"window-status-current-format", " #I:+ #W ",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-style", "fg=colour244,bg=colour235",
+		";",
+		"set-window-option", "-t", "ainn-test-host:@12",
+		"window-status-current-style", "fg=colour0,bg=colour45,bold",
 	}
 	if strings.Join(gotRead, "\n") != strings.Join(wantRead, "\n") {
 		t.Fatalf("read got %#v, want %#v", gotRead, wantRead)
@@ -300,47 +374,67 @@ func TestTmuxHostedTurnStatusCommandForSnapshotDistinguishesUnreadAndReadDone(t 
 func TestTmuxHostedTurnStatusCommandForSnapshotRendersTodoBelowUnreadStates(t *testing.T) {
 	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn-test", HostSession: "ainn-test-host"}}}
 	cases := []struct {
-		name    string
-		session HostedSessionRecord
-		want    string
+		name          string
+		session       HostedSessionRecord
+		label         string
+		inactiveStyle string
+		currentStyle  string
 	}{
 		{
-			name:    "idle todo",
-			session: HostedSessionRecord{TmuxWindowID: "@12", UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]",
+			name:          "idle todo",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", UserMarker: HostedUserMarkerTodo},
+			label:         " #I:~ #W ",
+			inactiveStyle: "fg=colour226,bg=colour235,bold",
+			currentStyle:  "fg=colour0,bg=colour226,bold",
 		},
 		{
-			name:    "read done todo",
-			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, TurnAcknowledgedGeneration: 2, UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]",
+			name:          "read done todo",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, TurnAcknowledgedGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			label:         " #I:~ #W ",
+			inactiveStyle: "fg=colour226,bg=colour235,bold",
+			currentStyle:  "fg=colour0,bg=colour226,bold",
 		},
 		{
-			name:    "unread done wins",
-			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]",
+			name:          "unread done wins",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateDone, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			label:         " #I:+ #W ",
+			inactiveStyle: "fg=colour46,bg=colour235,bold",
+			currentStyle:  "fg=colour0,bg=colour46,bold",
 		},
 		{
-			name:    "running wins",
-			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateRunning, UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]",
+			name:          "running wins",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateRunning, UserMarker: HostedUserMarkerTodo},
+			label:         " #I:* #W ",
+			inactiveStyle: "fg=colour45,bg=colour235,bold",
+			currentStyle:  "fg=colour0,bg=colour45,bold",
 		},
 		{
-			name:    "failed unread wins",
-			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateFailed, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+			name:          "failed unread wins",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateFailed, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			label:         " #I:! #W ",
+			inactiveStyle: "fg=colour196,bg=colour235,bold",
+			currentStyle:  "fg=colour231,bg=colour196,bold",
 		},
 		{
-			name:    "interrupted unread wins",
-			session: HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateInterrupted, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
-			want:    "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]",
+			name:          "interrupted unread wins",
+			session:       HostedSessionRecord{TmuxWindowID: "@12", TurnState: HostedTurnStateInterrupted, TurnGeneration: 2, UserMarker: HostedUserMarkerTodo},
+			label:         " #I:! #W ",
+			inactiveStyle: "fg=colour196,bg=colour235,bold",
+			currentStyle:  "fg=colour231,bg=colour196,bold",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := hostedTestStatusCommand(settings, tc.session)
-			if got[7] != tc.want {
-				t.Fatalf("got %#v, want format %q", got, tc.want)
+			want := []string{
+				"tmux", "-L", "ainn-test", "set-window-option", "-t", "ainn-test-host:@12", "window-status-format", tc.label, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-format", tc.label, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-style", tc.inactiveStyle, ";",
+				"set-window-option", "-t", "ainn-test-host:@12", "window-status-current-style", tc.currentStyle,
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v, want %#v", got, want)
 			}
 		})
 	}

@@ -4958,7 +4958,7 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 		httptest.NewRequest(
 			http.MethodPatch,
 			"http://manager.local/api/settings",
-			strings.NewReader(`{"state_dir":"`+filepath.Join(dir, "next-state")+`","log_dir":"`+filepath.Join(dir, "next-logs")+`","terminal":{"tmux":{"host_start_mode":"reuse-first-window"}}}`),
+			strings.NewReader(`{"state_dir":"`+filepath.Join(dir, "next-state")+`","log_dir":"`+filepath.Join(dir, "next-logs")+`","terminal":{"tmux":{"host_start_mode":"reuse-first-window","status_bar_height":4}}}`),
 		),
 	)
 	if res.Code != http.StatusOK {
@@ -4975,14 +4975,145 @@ func TestManagerSettingsAPIUpdatesAndPersistsConfig(t *testing.T) {
 	if loaded.Settings.StateDir != filepath.Join(dir, "next-state") || loaded.Settings.LogDir != filepath.Join(dir, "next-logs") {
 		t.Fatalf("settings were not persisted: %#v", loaded.Settings)
 	}
-	if loaded.Settings.Terminal.Tmux.SocketName != "custom-socket" || loaded.Settings.Terminal.Tmux.HostSession != "custom-host" {
-		t.Fatalf("settings patch should preserve omitted terminal settings: %#v", loaded.Settings.Terminal.Tmux)
+	wantTmux := config.TmuxSettings{
+		SocketName:      "custom-socket",
+		HostSession:     "custom-host",
+		HostStartMode:   "reuse-first-window",
+		TurnStatusHooks: false,
+		HostedPopupKey:  "",
+		StatusBarHeight: 4,
 	}
-	if loaded.Settings.Terminal.Tmux.HostStartMode != "reuse-first-window" {
-		t.Fatalf("settings patch should persist host start mode: %#v", loaded.Settings.Terminal.Tmux)
+	if !reflect.DeepEqual(loaded.Settings.Terminal.Tmux, wantTmux) {
+		t.Fatalf("unexpected persisted tmux settings:\n got %#v\nwant %#v", loaded.Settings.Terminal.Tmux, wantTmux)
 	}
 	if loaded.Settings.Terminal.Opener != "default" {
 		t.Fatalf("settings patch should preserve omitted terminal opener: %#v", loaded.Settings.Terminal)
+	}
+}
+
+func TestManagerSettingsAPIValidatesTmuxStatusBarHeight(t *testing.T) {
+	tests := []struct {
+		name       string
+		height     int
+		wantStatus int
+		wantHeight int
+	}{
+		{name: "below minimum", height: -1, wantStatus: http.StatusBadRequest, wantHeight: 4},
+		{name: "above maximum", height: 6, wantStatus: http.StatusBadRequest, wantHeight: 4},
+		{name: "zero uses default", height: 0, wantStatus: http.StatusOK, wantHeight: config.DefaultTmuxStatusBarHeight},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.yaml")
+			initialTmux := config.TmuxSettings{
+				SocketName:      "custom-socket",
+				HostSession:     "custom-host",
+				HostStartMode:   config.TmuxHostStartModeReuseFirstWindow,
+				TurnStatusHooks: true,
+				HostedPopupKey:  "H",
+				StatusBarHeight: 4,
+			}
+			m := New(Config{
+				ConfigPath: configPath,
+				Config: config.Config{Settings: config.Settings{
+					StateDir: filepath.Join(dir, "state"),
+					LogDir:   filepath.Join(dir, "logs"),
+					Terminal: config.TerminalSettings{Tmux: initialTmux},
+				}},
+			})
+			defer m.Close()
+			if err := m.store.Save(); err != nil {
+				t.Fatal(err)
+			}
+
+			res := httptest.NewRecorder()
+			body := fmt.Sprintf(`{"terminal":{"tmux":{"status_bar_height":%d}}}`, test.height)
+			m.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/settings", strings.NewReader(body)))
+			if res.Code != test.wantStatus {
+				t.Fatalf("unexpected settings patch status %d: %s", res.Code, res.Body.String())
+			}
+
+			wantTmux := initialTmux
+			wantTmux.StatusBarHeight = test.wantHeight
+			if test.wantStatus == http.StatusBadRequest {
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				wantError := "terminal tmux status_bar_height must be between 1 and 5"
+				if response.Error != wantError {
+					t.Fatalf("unexpected settings patch error: got %q want %q", response.Error, wantError)
+				}
+			} else {
+				var response struct {
+					Settings config.Settings `json:"settings"`
+				}
+				if err := json.Unmarshal(res.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(response.Settings.Terminal.Tmux, wantTmux) {
+					t.Fatalf("unexpected response tmux settings:\n got %#v\nwant %#v", response.Settings.Terminal.Tmux, wantTmux)
+				}
+			}
+
+			storedTmux := m.store.Config().Settings.Terminal.Tmux
+			if !reflect.DeepEqual(storedTmux, wantTmux) {
+				t.Fatalf("unexpected in-memory tmux settings:\n got %#v\nwant %#v", storedTmux, wantTmux)
+			}
+			loaded, err := config.LoadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(loaded.Settings.Terminal.Tmux, wantTmux) {
+				t.Fatalf("unexpected persisted tmux settings:\n got %#v\nwant %#v", loaded.Settings.Terminal.Tmux, wantTmux)
+			}
+		})
+	}
+}
+
+func TestManagerSettingsAPIPreservesConcurrentPatches(t *testing.T) {
+	dir := t.TempDir()
+	m := New(Config{
+		ConfigPath: filepath.Join(dir, "config.yaml"),
+		Config: config.Config{Settings: config.Settings{
+			StateDir: filepath.Join(dir, "initial-state"),
+			LogDir:   filepath.Join(dir, "initial-logs"),
+			Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{SocketName: "ainn", HostSession: "ainn-host"}},
+		}},
+	})
+	defer m.Close()
+
+	wantStateDir := filepath.Join(dir, "updated-state")
+	wantLogDir := filepath.Join(dir, "updated-logs")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		for _, body := range []string{
+			`{"state_dir":"` + wantStateDir + `"}`,
+			`{"log_dir":"` + wantLogDir + `"}`,
+		} {
+			body := body
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				response := httptest.NewRecorder()
+				m.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "http://manager.local/api/settings", strings.NewReader(body)))
+				if response.Code != http.StatusOK {
+					t.Errorf("unexpected concurrent settings patch status %d: %s", response.Code, response.Body.String())
+				}
+			}()
+		}
+	}
+	close(start)
+	wg.Wait()
+
+	got := m.store.Config().Settings
+	if got.StateDir != wantStateDir || got.LogDir != wantLogDir {
+		t.Fatalf("concurrent settings patches lost an update: got state_dir=%q log_dir=%q", got.StateDir, got.LogDir)
 	}
 }
 

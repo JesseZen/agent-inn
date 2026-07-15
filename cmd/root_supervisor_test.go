@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/jesse/agent-inn/internal/config"
 	"github.com/jesse/agent-inn/internal/logging"
+	"github.com/jesse/agent-inn/internal/manager"
 )
 
 const rootSupervisorHelperEnv = "AINN_TEST_ROOT_SUPERVISOR_HELPER"
@@ -50,6 +52,117 @@ func TestSuperviseRootRestartsAfterRestartExit(t *testing.T) {
 	}
 	if runs != 2 || refreshes != 1 {
 		t.Fatalf("runs=%d refreshes=%d, want runs=2 refreshes=1", runs, refreshes)
+	}
+}
+
+func TestSuperviseRootRefreshesTmuxThemeBeforeRestart(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, config.ConfigFileName)
+	socketPath := filepath.Join(dir, "tmux", "ainn-test")
+	t.Setenv("TMUX", socketPath+",123,0")
+	settings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{
+		SocketName:      "ainn-test",
+		HostSession:     "ainn-test-host",
+		HostStartMode:   config.TmuxHostStartModeMainTUIWindow,
+		StatusBarHeight: 4,
+	}}}
+	if err := config.NewStore(configPath, config.Config{Settings: settings}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	previousRun := rootSupervisedRunner
+	previousRefresh := rootSupervisorRefreshEnvironment
+	previousTmux := rootTmuxRunnerFactory
+	defer func() {
+		rootSupervisedRunner = previousRun
+		rootSupervisorRefreshEnvironment = previousRefresh
+		rootTmuxRunnerFactory = previousTmux
+	}()
+
+	runs := 0
+	sequence := []string{}
+	rootSupervisedRunner = func(RootOptions) (logging.RootRunExit, error) {
+		runs++
+		sequence = append(sequence, fmt.Sprintf("child %d", runs))
+		if runs == 1 {
+			return logging.RootRunExit{ExitCode: rootRestartExitCode}, nil
+		}
+		return logging.RootRunExit{ExitCode: 0}, nil
+	}
+	rootSupervisorRefreshEnvironment = func() error {
+		sequence = append(sequence, "environment")
+		return nil
+	}
+	var got [][]string
+	rootTmuxRunnerFactory = func(io.Writer, io.Writer) rootTmuxRunner {
+		return rootTmuxRunnerFunc(func(args []string) (string, error) {
+			sequence = append(sequence, "theme")
+			got = append(got, append([]string{}, args...))
+			return "", nil
+		})
+	}
+
+	if err := superviseRoot(RootOptions{ConfigPath: configPath, Config: config.Config{Settings: settings}}); err != nil {
+		t.Fatal(err)
+	}
+	wantTheme := manager.TmuxThemeCommandForSettings(settings)
+	wantTheme[1] = "-S"
+	wantTheme[2] = socketPath
+	if !reflect.DeepEqual(got, [][]string{wantTheme}) {
+		t.Fatalf("got theme refresh commands %#v, want %#v", got, [][]string{wantTheme})
+	}
+	wantSequence := []string{"child 1", "environment", "theme", "child 2"}
+	if !reflect.DeepEqual(sequence, wantSequence) {
+		t.Fatalf("got restart sequence %#v, want %#v", sequence, wantSequence)
+	}
+}
+
+func TestSuperviseRootDoesNotRefreshTmuxThemeWhenCurrentLifecycleIsNotMainTUIWindow(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, config.ConfigFileName)
+	latestSettings := config.Settings{Terminal: config.TerminalSettings{Tmux: config.TmuxSettings{
+		SocketName:      "ainn-test",
+		HostSession:     "ainn-test-host",
+		HostStartMode:   config.TmuxHostStartModeMainTUIWindow,
+		StatusBarHeight: 4,
+	}}}
+	if err := config.NewStore(configPath, config.Config{Settings: latestSettings}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	previousRun := rootSupervisedRunner
+	previousRefresh := rootSupervisorRefreshEnvironment
+	previousTmux := rootTmuxRunnerFactory
+	defer func() {
+		rootSupervisedRunner = previousRun
+		rootSupervisorRefreshEnvironment = previousRefresh
+		rootTmuxRunnerFactory = previousTmux
+	}()
+
+	runs := 0
+	rootSupervisedRunner = func(RootOptions) (logging.RootRunExit, error) {
+		runs++
+		if runs == 1 {
+			return logging.RootRunExit{ExitCode: rootRestartExitCode}, nil
+		}
+		return logging.RootRunExit{ExitCode: 0}, nil
+	}
+	rootSupervisorRefreshEnvironment = func() error { return nil }
+	refreshes := 0
+	rootTmuxRunnerFactory = func(io.Writer, io.Writer) rootTmuxRunner {
+		return rootTmuxRunnerFunc(func([]string) (string, error) {
+			refreshes++
+			return "", nil
+		})
+	}
+
+	currentSettings := latestSettings
+	currentSettings.Terminal.Tmux.HostStartMode = config.TmuxHostStartModeNewWindow
+	if err := superviseRoot(RootOptions{ConfigPath: configPath, Config: config.Config{Settings: currentSettings}}); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 0 {
+		t.Fatalf("got %d tmux refreshes outside the current main-tui-window lifecycle, want 0", refreshes)
 	}
 }
 

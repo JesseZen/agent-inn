@@ -33,6 +33,7 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		HostSession     *string `json:"host_session"`
 		HostStartMode   *string `json:"host_start_mode"`
 		TurnStatusHooks *bool   `json:"turn_status_hooks"`
+		StatusBarHeight *int    `json:"status_bar_height"`
 	}
 	type terminalPatch struct {
 		Host   *string    `json:"host"`
@@ -57,44 +58,53 @@ func (m *Manager) handleSettings(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": "config path is required"})
 		return
 	}
-	m.updateConfig(func(cfgRoot *config.Config) {
+	validationErr := m.updateConfigIf(func(candidate *config.Config) error {
 		if patch.StateDir != nil {
-			cfgRoot.Settings.StateDir = *patch.StateDir
+			candidate.Settings.StateDir = *patch.StateDir
 		}
 		if patch.LogDir != nil {
-			cfgRoot.Settings.LogDir = *patch.LogDir
+			candidate.Settings.LogDir = *patch.LogDir
 		}
 		if patch.Launch != nil && patch.Launch.DefaultMode != nil {
-			cfgRoot.Settings.Launch.DefaultMode = *patch.Launch.DefaultMode
+			candidate.Settings.Launch.DefaultMode = *patch.Launch.DefaultMode
 		}
 		if patch.Terminal != nil {
 			if patch.Terminal.Host != nil {
-				cfgRoot.Settings.Terminal.Host = *patch.Terminal.Host
+				candidate.Settings.Terminal.Host = *patch.Terminal.Host
 			}
 			if patch.Terminal.Opener != nil {
-				cfgRoot.Settings.Terminal.Opener = *patch.Terminal.Opener
+				candidate.Settings.Terminal.Opener = *patch.Terminal.Opener
 			}
 			if patch.Terminal.Tmux != nil {
 				if patch.Terminal.Tmux.SocketName != nil {
-					cfgRoot.Settings.Terminal.Tmux.SocketName = *patch.Terminal.Tmux.SocketName
+					candidate.Settings.Terminal.Tmux.SocketName = *patch.Terminal.Tmux.SocketName
 				}
 				if patch.Terminal.Tmux.HostSession != nil {
-					cfgRoot.Settings.Terminal.Tmux.HostSession = *patch.Terminal.Tmux.HostSession
+					candidate.Settings.Terminal.Tmux.HostSession = *patch.Terminal.Tmux.HostSession
 				}
 				if patch.Terminal.Tmux.HostStartMode != nil {
-					cfgRoot.Settings.Terminal.Tmux.HostStartMode = *patch.Terminal.Tmux.HostStartMode
+					candidate.Settings.Terminal.Tmux.HostStartMode = *patch.Terminal.Tmux.HostStartMode
 				}
 				if patch.Terminal.Tmux.TurnStatusHooks != nil {
-					cfgRoot.Settings.Terminal.Tmux.TurnStatusHooks = *patch.Terminal.Tmux.TurnStatusHooks
+					candidate.Settings.Terminal.Tmux.TurnStatusHooks = *patch.Terminal.Tmux.TurnStatusHooks
+				}
+				if patch.Terminal.Tmux.StatusBarHeight != nil {
+					candidate.Settings.Terminal.Tmux.StatusBarHeight = *patch.Terminal.Tmux.StatusBarHeight
 				}
 			}
 		}
 		if patch.Metrics != nil {
 			if patch.Metrics.RetentionDays != nil {
-				cfgRoot.Settings.Metrics.RetentionDays = *patch.Metrics.RetentionDays
+				candidate.Settings.Metrics.RetentionDays = *patch.Metrics.RetentionDays
 			}
 		}
+		candidate.ApplyDefaults()
+		return candidate.Validate()
 	})
+	if validationErr != nil {
+		writeJSON(rw, http.StatusBadRequest, map[string]any{"error": redactedErrorMessage(validationErr)})
+		return
+	}
 	if err := m.store.Save(); err != nil {
 		status := m.syncConfigStatusFromStore()
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"error": redactedErrorMessage(err), "status": status})

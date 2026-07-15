@@ -23,6 +23,8 @@ type SettingsField = {
   choices?: SettingsChoice[]
 }
 
+const tmuxStatusBarHeights = ["1", "2", "3", "4", "5"]
+
 export function DialogSettings() {
   const sync = useSync()
   const sdk = useSDK()
@@ -47,6 +49,7 @@ export function DialogSettings() {
       { title: t("proxy.settings.reuseFirstWindow"), value: "reuse-first-window", description: t("proxy.settings.reuseFirstWindowDescription") },
       { title: t("proxy.settings.mainTuiWindow"), value: "main-tui-window", description: t("proxy.settings.mainTuiWindowDescription") },
     ] },
+    { key: "terminal.tmux.status_bar_height", title: "Tmux Status Bar Height", category: t("category.terminal"), value: (settings) => String(settings.terminal.tmux.status_bar_height), patch: (value) => ({ terminal: { tmux: { status_bar_height: Number(value) } } } as Partial<ProxySettings>), choices: tmuxStatusBarHeights.map((value) => ({ title: value, value })) },
     { key: "terminal.tmux.turn_status_hooks", title: t("proxy.settings.tmuxTurnHooks"), category: t("category.terminal"), value: (settings) => settings.terminal.tmux.turn_status_hooks ? "enabled" : "disabled", patch: (value) => ({ terminal: { tmux: { turn_status_hooks: value === "enabled" } } } as Partial<ProxySettings>), choices: [
       { title: t("common.enabled"), value: "enabled", description: t("proxy.settings.enableHooksDescription") },
       { title: t("common.disabled"), value: "disabled", description: t("proxy.settings.disableHooksDescription") },

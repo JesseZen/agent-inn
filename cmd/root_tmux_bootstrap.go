@@ -295,6 +295,42 @@ func runRootTmuxBootstrap(cfg config.Config, configDir string, managerPort int, 
 		fmt.Fprintf(stderr, "failed to enable tmux extended keys: %v\n", err)
 		return 1
 	}
+	hostedSessionsPath := manager.HostedSessionRegistryPath(cfg.Settings.StateDir)
+	if _, err := os.Stat(hostedSessionsPath); err == nil {
+		hostedSessions, err := manager.NewHostedSessionRegistry(hostedSessionsPath).List()
+		if err != nil {
+			fmt.Fprintf(stderr, "failed to load hosted sessions: %v\n", err)
+			return 1
+		}
+		if len(hostedSessions) > 0 {
+			mouse, err := runner.Run(tmuxHostCommand(manager.TmuxShowMouseCommandForSettings(cfg.Settings)))
+			if err != nil {
+				if printTmuxTraceWriteError(stderr, err) {
+					return 1
+				}
+				fmt.Fprintf(stderr, "failed to inspect tmux mouse setting: %v\n", err)
+				return 1
+			}
+			if strings.TrimSpace(mouse) != "on" {
+				if _, err := runner.Run(tmuxHostCommand(manager.TmuxEnableMouseCommandForSettings(cfg.Settings))); err != nil {
+					if printTmuxTraceWriteError(stderr, err) {
+						return 1
+					}
+					fmt.Fprintf(stderr, "failed to enable tmux mouse support: %v\n", err)
+					return 1
+				}
+			}
+			if err := installTmuxHostedInteractions(launchRunnerFunc(func(args []string) (string, error) {
+				return runner.Run(tmuxHostCommand(args))
+			}), cfg.Settings, configDir, exe); err != nil {
+				fmt.Fprintf(stderr, "failed to install tmux hosted interactions: %v\n", err)
+				return 1
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "failed to inspect hosted sessions: %v\n", err)
+		return 1
+	}
 	if insideTmux {
 		clientRows, err := runner.Run(manager.TmuxListClientPanesCommand(currentSocketPath))
 		if err != nil {

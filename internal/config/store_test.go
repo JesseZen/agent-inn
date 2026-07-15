@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,6 +31,7 @@ settings:
       host_start_mode: reuse-first-window
       turn_status_hooks: true
       hosted_popup_key: H
+      status_bar_height: 4
 plugins:
   tool_filter:
     kind: request_middleware
@@ -76,6 +78,9 @@ upstreams:
 	}
 	if cfg.Settings.Terminal.Tmux.HostedPopupKey != "H" {
 		t.Fatalf("expected hosted popup key to load, got %#v", cfg.Settings.Terminal.Tmux)
+	}
+	if cfg.Settings.Terminal.Tmux.StatusBarHeight != 4 {
+		t.Fatalf("expected status bar height to load, got %#v", cfg.Settings.Terminal.Tmux)
 	}
 	if cfg.Upstreams["openai"].APIKey != "plain-key" {
 		t.Fatalf("expected plain api key to load, got %#v", cfg.Upstreams["openai"])
@@ -289,10 +294,11 @@ upstreams:
 			Host:   "tmux",
 			Opener: "default",
 			Tmux: TmuxSettings{
-				SocketName:     "ainn",
-				HostSession:    "ainn-host",
-				HostStartMode:  "new-window",
-				HostedPopupKey: "",
+				SocketName:      "ainn",
+				HostSession:     "ainn-host",
+				HostStartMode:   "new-window",
+				StatusBarHeight: 2,
+				HostedPopupKey:  "",
 			},
 		},
 		Metrics: MetricsSettings{
@@ -661,6 +667,32 @@ func TestPoolMemberRequiresProtocolProbeModel(t *testing.T) {
 	want := []string{`upstream pool "coding-ha" member "backup" requires protocol_probe.model`}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected validation errors:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestTmuxStatusBarHeightValidation(t *testing.T) {
+	tests := []struct {
+		height int
+		want   string
+	}{
+		{-1, "terminal tmux status_bar_height must be between 1 and 5"},
+		{1, ""},
+		{5, ""},
+		{6, "terminal tmux status_bar_height must be between 1 and 5"},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("height_%d", test.height), func(t *testing.T) {
+			cfg := Config{Settings: Settings{Terminal: TerminalSettings{Tmux: TmuxSettings{StatusBarHeight: test.height}}}}
+			cfg.ApplyDefaults()
+			err := cfg.Validate()
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != test.want {
+				t.Fatalf("unexpected validation error: got %q want %q", got, test.want)
+			}
+		})
 	}
 }
 

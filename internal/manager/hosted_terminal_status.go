@@ -93,34 +93,45 @@ func TmuxRenameWindowCommandForSettings(settings config.Settings, windowID strin
 
 func TmuxHostedTurnStatusCommandForSnapshot(settings config.Settings, windowID string, snapshot HostedSessionSnapshot) []string {
 	target := tmuxHostSessionForSettings(settings) + ":" + windowID
-	format := "#[fg=colour244,bg=colour235] #I:#W #[default]"
-	currentFormat := "#[fg=colour0,bg=colour45,bold] #I:#W #[default]"
+	marker := ""
+	inactiveStyle := tmuxWindowStatusStyle
+	currentStyle := tmuxWindowStatusCurrentStyle
 	switch {
 	case snapshot.Turn.State == HostedTurnStateRunning && snapshot.Turn.NeedsInput:
-		format = "#[fg=colour208,bg=colour235,bold] #I:? #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour208,bold] #I:? #W #[default]"
+		marker = "?"
+		inactiveStyle = "fg=colour208,bg=colour235,bold"
+		currentStyle = "fg=colour0,bg=colour208,bold"
 	case snapshot.Turn.State == HostedTurnStateRunning:
-		format = "#[fg=colour45,bg=colour235,bold] #I:* #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:* #W #[default]"
+		marker = "*"
+		inactiveStyle = "fg=colour45,bg=colour235,bold"
 	case snapshot.Turn.Unread && snapshot.Turn.State == HostedTurnStateDone:
-		format = "#[fg=colour46,bg=colour235,bold] #I:+ #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour46,bold] #I:+ #W #[default]"
+		marker = "+"
+		inactiveStyle = "fg=colour46,bg=colour235,bold"
+		currentStyle = "fg=colour0,bg=colour46,bold"
 	case snapshot.Turn.Unread && (snapshot.Turn.State == HostedTurnStateFailed || snapshot.Turn.State == HostedTurnStateInterrupted):
-		format = "#[fg=colour196,bg=colour235,bold] #I:! #W #[default]"
-		currentFormat = "#[fg=colour231,bg=colour196,bold] #I:! #W #[default]"
+		marker = "!"
+		inactiveStyle = "fg=colour196,bg=colour235,bold"
+		currentStyle = "fg=colour231,bg=colour196,bold"
 	case snapshot.UserMarker == HostedUserMarkerTodo:
-		format = "#[fg=colour226,bg=colour235,bold] #I:~ #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour226,bold] #I:~ #W #[default]"
+		marker = "~"
+		inactiveStyle = "fg=colour226,bg=colour235,bold"
+		currentStyle = "fg=colour0,bg=colour226,bold"
 	case snapshot.Turn.State == HostedTurnStateDone:
-		format = "#[fg=colour244,bg=colour235] #I:+ #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:+ #W #[default]"
+		marker = "+"
 	case snapshot.Turn.State == HostedTurnStateFailed || snapshot.Turn.State == HostedTurnStateInterrupted:
-		format = "#[fg=colour244,bg=colour235] #I:! #W #[default]"
-		currentFormat = "#[fg=colour0,bg=colour45,bold] #I:! #W #[default]"
+		marker = "!"
+	}
+	inactiveLabel := tmuxWindowStatusFormat
+	currentLabel := tmuxWindowStatusCurrentFormat
+	if marker != "" {
+		inactiveLabel = " #I:" + marker + " #W "
+		currentLabel = inactiveLabel
 	}
 	return append(tmuxPrefixForSettings(settings),
-		"set-window-option", "-t", target, "window-status-format", format, ";",
-		"set-window-option", "-t", target, "window-status-current-format", currentFormat,
+		"set-window-option", "-t", target, "window-status-format", inactiveLabel, ";",
+		"set-window-option", "-t", target, "window-status-current-format", currentLabel, ";",
+		"set-window-option", "-t", target, "window-status-style", inactiveStyle, ";",
+		"set-window-option", "-t", target, "window-status-current-style", currentStyle,
 	)
 }
 

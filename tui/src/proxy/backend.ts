@@ -213,6 +213,7 @@ export type ProxySettings = {
       socket_name: string
       host_session: string
       host_start_mode: string
+      status_bar_height: number
       turn_status_hooks: boolean
     }
   }
