@@ -121,9 +121,11 @@ export function DialogDashboard(props: { snapshot: DashboardSnapshot }) {
       })
       if (restoreScroll) {
         restoreScroll = false
-        setTimeout(() => {
-          if (scroll && !scroll.isDestroyed) scroll.scrollTop = props.snapshot.scrollTop
-        }, 0)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (scroll && !scroll.isDestroyed) scroll.scrollTop = props.snapshot.scrollTop
+          })
+        })
       }
     }),
   )
